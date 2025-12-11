@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, scaffold ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.1.1
+          opam-depext: true
+
+      - name: Install dependencies
+        run: opam install -y core async
+
+      - name: Build
+        run: dune build

@@ -1,4 +1,0 @@
-(library
- (name fluxum)
- (public_name fluxum)
- (libraries core async))
