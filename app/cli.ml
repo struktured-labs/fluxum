@@ -109,17 +109,45 @@ let get_kraken_balances cfg =
 let api_command =
   Command.group ~summary:"Generic exchange API commands"
     [ ("order", Command.async
-        ~summary:"Place and manage orders across exchanges"
-        Command.Param.(
-          return (fun exchange () ->
-            printf "Generic API order command - exchange: %s\n"
-              (Option.value exchange ~default:"(not specified)");
-            Deferred.unit)
-          <*> flag "--exchange" (optional string)
-              ~doc:"STRING exchange name (gemini, kraken, coinbase, mexc)"))
+        ~summary:"Get open orders from an exchange"
+        (Command.Param.(
+          let exchange = flag "--exchange" (optional string)
+              ~doc:"STRING exchange name (gemini, kraken, coinbase, mexc)"
+          in
+          let cfg = flag "-cfg" (optional string)
+              ~doc:"STRING environment (production)"
+          in
+          return (fun exchange cfg () ->
+            let cfg_env = match cfg with Some c -> c | None -> "production" in
+            (match Option.value exchange ~default:"kraken" with
+            | "kraken" ->
+              let cfg = Kraken.Cfg.of_string cfg_env in
+              let module Cfg = (val cfg : Kraken.Cfg.S) in
+              Kraken.V1.open_orders (module Cfg) () >>= (function
+                | `Ok json ->
+                  printf "Open Orders:\n%s\n" (Yojson.Safe.pretty_to_string json);
+                  Deferred.unit
+                | `Error err ->
+                  eprintf "Error: %s\n" err;
+                  Deferred.unit)
+            | "gemini" ->
+              eprintf "Order queries not yet implemented for Gemini\n";
+              Deferred.unit
+            | exch ->
+              eprintf "Exchange %s not yet implemented\n" exch;
+              Deferred.unit))
+          <*> exchange
+          <*> cfg
+        )))
     ; ("balance", Command.async
         ~summary:"Get balances across exchanges"
-        Command.Param.(
+        (Command.Param.(
+          let exchange = flag "--exchange" (optional string)
+              ~doc:"STRING exchange name (gemini, kraken, coinbase, mexc)"
+          in
+          let cfg = flag "-cfg" (optional string)
+              ~doc:"STRING environment (production)"
+          in
           return (fun exchange cfg () ->
             let cfg_env = match cfg with Some c -> c | None -> "production" in
             match Option.value exchange ~default:"gemini" with
@@ -148,11 +176,9 @@ let api_command =
             | exch ->
               eprintf "Exchange %s not yet implemented\n" exch;
               Deferred.unit)
-          <*> flag "--exchange" (optional string)
-              ~doc:"STRING exchange name (gemini, kraken, coinbase, mexc)"
-          <*> flag "-cfg" (optional string)
-              ~doc:"STRING environment (production)")
-        )
+          <*> exchange
+          <*> cfg
+        )))
     ]
 
 (* Main command structure *)
