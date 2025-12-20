@@ -1,0 +1,5 @@
+(library
+ (name coinbase)
+ (libraries core async fluxum)
+ (flags :standard -open Core -open Async)
+)

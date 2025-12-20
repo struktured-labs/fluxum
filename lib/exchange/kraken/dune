@@ -1,0 +1,5 @@
+(library
+ (name kraken)
+ (libraries core async fluxum yojson)
+ (flags :standard -open Core -open Async)
+)

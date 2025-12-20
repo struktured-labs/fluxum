@@ -1,0 +1,12 @@
+(executable
+  (name cli)
+  (public_name fluxum)
+  (libraries gemini kraken)
+  (modules cli)
+  (package fluxum)
+  (flags
+    :standard
+    -open Core
+    -open Async
+  )
+)
