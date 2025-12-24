@@ -1,6 +1,6 @@
 (library
  (name kraken)
- (modules cfg signature common rest v1 order kraken ws ws_cmd market_data)
+ (modules cfg signature common rest v1 order kraken ws ws_cmd market_data order_book)
  (libraries core async fluxum gemini yojson digestif base64 hex cohttp_async_websocket uri cohttp-async)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async)

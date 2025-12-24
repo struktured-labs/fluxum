@@ -6,6 +6,11 @@ module Exchange_intf = Exchange_intf
 module Json = Json
 module Cli_args = Cli_args
 
+(* Unified interfaces *)
+module Order_book_intf = Order_book_intf
+module Ledger_intf = Ledger_intf
+module Session_intf = Session_intf
+
 module type BUILDER = sig
   module E : Exchange_intf.S
 
