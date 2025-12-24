@@ -8,6 +8,9 @@ module Order = Order
 module Ws = Ws
 module Ws_cmd = Ws_cmd
 module Market_data = Market_data
+module Order_book = Order_book
+module Ledger = Ledger
+module Session = Session
 module Unified_cmd = Unified_cmd
 
 let command : Command.t =

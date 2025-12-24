@@ -113,7 +113,7 @@ module Book = struct
 
   (** Get best bid *)
   let best_bid t =
-    Map.max_elt t.bids
+    Map.min_elt t.bids
     |> Option.value_map ~default:Price_level.empty ~f:snd
 
   (** Get best ask *)

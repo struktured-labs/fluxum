@@ -1,7 +1,5 @@
-(library
- (name kraken_test)
- (modules ledger_test order_book_test session_test)
- (libraries core async kraken fluxum)
- (inline_tests)
- (preprocess (pps ppx_jane ppx_inline_test))
- (flags :standard -open Core -open Async))
+(test
+ (name run_tests)
+ (libraries core kraken fluxum)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
