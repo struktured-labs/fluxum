@@ -3,7 +3,7 @@
     Status:
     - ✅ Order Book: Complete with WebSocket v2 integration
     - ✅ Ledger: Complete with P&L tracking and cost basis accounting
-    - ⏳ Session: TODO - Implement auto-restart streams
+    - ✅ Session: Complete with auto-restart streams
 
     The order book follows the unified Order_book_intf.S interface and provides:
     - Sorted bid/ask maps (bid descending, ask ascending)
@@ -19,6 +19,13 @@
     - Average price calculations (buy, sell, overall)
     - Cost basis accounting
     - Multi-symbol tracking via Symbol.Map
+
+    The session follows the unified Session_intf.S interface and provides:
+    - Auto-restart pipes for reliable WebSocket connections
+    - State tracking (Disconnected, Connecting, Connected, Ready, Reconnecting, Failed)
+    - Multi-stream Events container (balance, trades, market_data, order_books, ledger, order_events)
+    - State change notifications
+    - Automatic reconnection on WebSocket EOF/errors
 *)
 
 (** Kraken's Order Book implementation - COMPLETE *)
@@ -27,5 +34,5 @@ module Order_book = Order_book
 (** Kraken's Ledger implementation - COMPLETE *)
 module Ledger = Ledger
 
-(** Kraken's Session implementation - TODO *)
-(* module Session = Session *)
+(** Kraken's Session implementation - COMPLETE *)
+module Session = Session
