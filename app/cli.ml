@@ -4,6 +4,7 @@ open Async
 (* Exchange-specific command groups *)
 let gemini_command = Gemini.command
 let kraken_command = Kraken.command
+let binance_command = Binance.command
 
 (* Gemini adapter helpers *)
 let get_gemini_balances cfg =
@@ -113,7 +114,7 @@ let api_command =
         ~summary:"Get open orders from an exchange"
         (Command.Param.(
           let exchange = flag "--exchange" (optional string)
-              ~doc:"STRING exchange name (gemini, kraken, coinbase, mexc)"
+              ~doc:"STRING exchange name (gemini, kraken, binance, coinbase, mexc)"
           in
           let cfg = flag "-cfg" (optional string)
               ~doc:"STRING environment (production)"
@@ -144,7 +145,7 @@ let api_command =
         ~summary:"Get balances across exchanges"
         (Command.Param.(
           let exchange = flag "--exchange" (optional string)
-              ~doc:"STRING exchange name (gemini, kraken, coinbase, mexc)"
+              ~doc:"STRING exchange name (gemini, kraken, binance, coinbase, mexc)"
           in
           let cfg = flag "-cfg" (optional string)
               ~doc:"STRING environment (production)"
@@ -187,6 +188,7 @@ let command =
   Command.group ~summary:"Fluxum - Multi-exchange trading API"
     [ ("gemini", gemini_command)
     ; ("kraken", kraken_command)
+    ; ("binance", binance_command)
     ; ("api", api_command)
     ]
 

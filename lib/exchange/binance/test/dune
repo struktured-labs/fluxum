@@ -1,0 +1,5 @@
+(test
+ (name run_tests)
+ (libraries core binance fluxum)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
