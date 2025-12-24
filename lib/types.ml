@@ -11,6 +11,13 @@ end
 
 module Symbol = struct
   type t = string [@@deriving sexp, compare, equal]
+
+  include Comparable.Make(struct
+    type t = string [@@deriving sexp, compare]
+  end)
+
+  let of_string s = s
+  let to_string s = s
 end
 
 module Currency = struct
@@ -19,6 +26,13 @@ end
 
 module Price = struct
   type t = float [@@deriving sexp, compare, equal]
+
+  module Option = struct
+    type t = float option [@@deriving sexp, compare, equal]
+  end
+
+  let of_string = Float.of_string
+  let to_string = Float.to_string
 end
 
 module Qty = struct
@@ -27,6 +41,24 @@ end
 
 module Side = struct
   type t = Buy | Sell [@@deriving sexp, compare, equal]
+
+  let opposite = function
+    | Buy -> Sell
+    | Sell -> Buy
+
+  let to_string = function
+    | Buy -> "buy"
+    | Sell -> "sell"
+
+  let of_string_opt = function
+    | "buy" | "Buy" | "BUY" -> Some Buy
+    | "sell" | "Sell" | "SELL" -> Some Sell
+    | _ -> None
+
+  module Option = struct
+    type side = t [@@deriving sexp, compare, equal]
+    type t = side option [@@deriving sexp, compare, equal]
+  end
 end
 
 module Order_kind = struct
