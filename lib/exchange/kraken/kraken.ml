@@ -8,6 +8,7 @@ module Order = Order
 module Ws = Ws
 module Ws_cmd = Ws_cmd
 module Market_data = Market_data
+module Unified_cmd = Unified_cmd
 
 let command : Command.t =
   Command.group ~summary:"Kraken Exchange Commands"
@@ -19,4 +20,5 @@ let command : Command.t =
     ; V1.Closed_orders.command
     ; Order.command
     ; Ws_cmd.command
+    ; Unified_cmd.command
     ]
