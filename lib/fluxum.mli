@@ -3,6 +3,7 @@ open Async
 
 module Types = Types
 module Exchange_intf = Exchange_intf
+module Json = Json
 
 module type BUILDER = sig
   module E : Exchange_intf.S

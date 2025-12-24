@@ -50,22 +50,119 @@ end
 
 (** Private channel for order and execution updates *)
 module Private = struct
-  type message = 
-    | Own_orders of Yojson.Safe.t
-    | Own_trades of Yojson.Safe.t
+  (** Order description *)
+  module Order_descr = struct
+    type t =
+      { pair : string
+      ; type_ : Common.Side.t [@key "type"]
+      ; ordertype : Common.Order_type.t
+      ; price : string
+      ; price2 : string [@default "0"]
+      ; leverage : string [@default "none"]
+      ; order : string
+      ; close : string [@default ""]
+      }
+    [@@deriving sexp, yojson]
+  end
+
+  (** Single order update *)
+  module Order_update = struct
+    type t =
+      { status : Common.Order_status.t
+      ; vol : string  (* Volume *)
+      ; vol_exec : string  (* Volume executed *)
+      ; cost : string  (* Total cost *)
+      ; fee : string  (* Total fee *)
+      ; avg_price : string  (* Average price *)
+      ; stop_price : string [@default "0"]
+      ; limit_price : string [@default "0"]
+      ; misc : string [@default ""]
+      ; oflags : string [@default ""]
+      ; descr : Order_descr.t
+      ; lastupdated : float option [@default None]
+      ; userref : int option [@default None]
+      }
+    [@@deriving sexp, yojson]
+  end
+
+  (** Own orders update *)
+  module Own_orders_data = struct
+    type t = (string * Order_update.t) list  (* Map of order ID -> order update *)
+    [@@deriving sexp]
+  end
+
+  (** Single trade execution *)
+  module Trade_update = struct
+    type t =
+      { ordertxid : string  (* Order transaction ID *)
+      ; pair : string
+      ; time : float
+      ; type_ : Common.Side.t [@key "type"]
+      ; ordertype : Common.Order_type.t
+      ; price : string
+      ; cost : string
+      ; fee : string
+      ; vol : string
+      ; margin : string [@default "0"]
+      ; misc : string [@default ""]
+      ; trade_id : int option [@default None]
+      ; maker : bool option [@default None]  (* true if maker, false if taker *)
+      }
+    [@@deriving sexp, yojson]
+  end
+
+  (** Own trades update *)
+  module Own_trades_data = struct
+    type t = (string * Trade_update.t) list  (* Map of trade ID -> trade *)
+    [@@deriving sexp]
+  end
+
+  type message =
+    | Own_orders of Own_orders_data.t
+    | Own_trades of Own_trades_data.t
     | Pong
     [@@deriving sexp]
 
   (** Parse a JSON object into a private message *)
   let parse_message (json : Yojson.Safe.t) : (message, Error.t) Result.t =
     match json with
+    | `List items ->
+      (* Private messages: [data, "channelName", {sequence}] *)
+      (match items with
+      | [data; `String channel; _sequence] ->
+        (match channel with
+        | "openOrders" | "ownOrders" ->
+          (* Parse orders map *)
+          (match data with
+          | `Assoc order_list ->
+            let parse_order (id, order_json) =
+              match Order_update.of_yojson order_json with
+              | Ok update -> Some (id, update)
+              | Error _ -> None
+            in
+            let orders = List.filter_map order_list ~f:parse_order in
+            Ok (Own_orders orders)
+          | _ -> Error (`Json_parse_error "Expected object for orders"))
+        | "ownTrades" ->
+          (* Parse trades map *)
+          (match data with
+          | `Assoc trade_list ->
+            let parse_trade (id, trade_json) =
+              match Trade_update.of_yojson trade_json with
+              | Ok update -> Some (id, update)
+              | Error _ -> None
+            in
+            let trades = List.filter_map trade_list ~f:parse_trade in
+            Ok (Own_trades trades)
+          | _ -> Error (`Json_parse_error "Expected object for trades"))
+        | _ -> Error (`Channel_parse_error ("Unknown private channel: " ^ channel)))
+      | _ -> Error (`Json_parse_error "Expected [data, channelName, sequence]"))
     | `Assoc fields ->
+      (* Handle pong messages *)
       (match List.Assoc.find fields ~equal:String.equal "event" with
-      | Some (`String "ownOrder") -> Ok (Own_orders json)
-      | Some (`String "ownTrades") -> Ok (Own_trades json)
       | Some (`String "pong") -> Ok Pong
       | _ -> Error (`Channel_parse_error "Unknown private event"))
-    | _ -> Error (`Json_parse_error "Expected object")
+    | _ -> Error (`Json_parse_error "Expected array or object")
 
   (** Generate authentication message for own-orders subscription *)
   let auth_message ~signature : string =
@@ -92,12 +189,99 @@ end
 
 (** Public channels for market data *)
 module Public = struct
+  (** Ticker data *)
+  module Ticker_data = struct
+    type t =
+      { ask : string  (* Best ask price *)
+      ; ask_volume : string  (* Ask volume *)
+      ; bid : string  (* Best bid price *)
+      ; bid_volume : string  (* Bid volume *)
+      ; close : string  (* Last trade closed price *)
+      ; close_volume : string  (* Last trade closed volume *)
+      ; vwap : string  (* Volume weighted average price today *)
+      ; volume : string  (* Volume today *)
+      ; low : string  (* Low price today *)
+      ; high : string  (* High price today *)
+      ; open_ : string [@key "open"]  (* Open price today *)
+      ; trades : int  (* Number of trades today *)
+      }
+    [@@deriving sexp, yojson]
+  end
+
+  (** Single trade *)
+  module Trade_item = struct
+    type t =
+      { price : string
+      ; volume : string
+      ; time : float
+      ; side : Common.Side.t
+      ; order_type : Common.Order_type.t
+      ; misc : string
+      }
+    [@@deriving sexp, yojson]
+  end
+
+  (** Spread update *)
+  module Spread_data = struct
+    type t =
+      { bid : string
+      ; ask : string
+      ; timestamp : float
+      ; bid_volume : string
+      ; ask_volume : string
+      }
+    [@@deriving sexp, yojson]
+  end
+
+  (** OHLC candlestick *)
+  module Ohlc_data = struct
+    type t =
+      { time : float
+      ; etime : float  (* End time *)
+      ; open_ : string [@key "open"]
+      ; high : string
+      ; low : string
+      ; close : string
+      ; vwap : string
+      ; volume : string
+      ; count : int  (* Number of trades *)
+      }
+    [@@deriving sexp, yojson]
+  end
+
+  (** Order book price level *)
+  module Price_level = struct
+    type t =
+      { price : string
+      ; volume : string
+      ; timestamp : float
+      }
+    [@@deriving sexp, yojson]
+  end
+
+  (** Order book update *)
+  module Book_data = struct
+    type update =
+      { bids : Price_level.t list [@default []]
+      ; asks : Price_level.t list [@default []]
+      ; checksum : int option [@default None]
+      }
+    [@@deriving sexp, yojson]
+
+    type t =
+      { update : update
+      ; channel : string
+      ; pair : string
+      }
+    [@@deriving sexp, yojson]
+  end
+
   type message =
-    | Ticker of Yojson.Safe.t
-    | Spread of Yojson.Safe.t
-    | Trade of Yojson.Safe.t
-    | Ohlc of Yojson.Safe.t
-    | Book of Yojson.Safe.t
+    | Ticker of { data : Ticker_data.t; channel : string; pair : string }
+    | Spread of { data : Spread_data.t; channel : string; pair : string }
+    | Trade of { trades : Trade_item.t list; channel : string; pair : string }
+    | Ohlc of { data : Ohlc_data.t; channel : string; pair : string }
+    | Book of Book_data.t
     [@@deriving sexp]
 
   (** Generate subscription message for ticker feed *)
@@ -171,18 +355,44 @@ module Public = struct
   (** Parse a JSON array into a public message *)
   let parse_message (json : Yojson.Safe.t) : (message, Error.t) Result.t =
     match json with
-    | `List items when List.length items >= 3 ->
-      (match List.nth items 1 with
-      | Some (`Assoc fields) ->
+    | `List (_channel_id :: data_json :: channel_name :: pair_items) ->
+      let channel = match channel_name with `String s -> s | _ -> "unknown" in
+      let pair = match pair_items with [`String p] -> p | _ -> "unknown" in
+
+      (* Determine message type from data structure *)
+      (match data_json with
+      | `Assoc fields ->
+        (* Check for ticker fields *)
         (match List.Assoc.find fields ~equal:String.equal "c" with
-        | Some _ -> Ok (Ticker json)
-        | None -> 
-          match List.Assoc.find fields ~equal:String.equal "s" with
-          | Some _ -> Ok (Spread json)
-          | None -> Ok (Book json))
-      | Some _ -> Ok (Trade json)
-      | None -> Error (`Channel_parse_error "Unexpected message structure"))
-    | _ -> Error (`Json_parse_error "Expected array message")
+        | Some _ ->
+          (match Ticker_data.of_yojson data_json with
+          | Ok data -> Ok (Ticker { data; channel; pair })
+          | Error e -> Error (`Json_parse_error ("Ticker parse error: " ^ e)))
+        | None ->
+          (* Check for spread *)
+          match List.Assoc.find fields ~equal:String.equal "b" with
+          | Some _ when List.Assoc.mem fields ~equal:String.equal "a" ->
+            (match Spread_data.of_yojson data_json with
+            | Ok data -> Ok (Spread { data; channel; pair })
+            | Error e -> Error (`Json_parse_error ("Spread parse error: " ^ e)))
+          | _ ->
+            (* Assume OHLC *)
+            match Ohlc_data.of_yojson data_json with
+            | Ok data -> Ok (Ohlc { data; channel; pair })
+            | Error e -> Error (`Json_parse_error ("OHLC parse error: " ^ e)))
+      | `List trade_items ->
+        (* Parse as trades *)
+        let parse_trade_item item =
+          match Trade_item.of_yojson item with
+          | Ok trade -> Some trade
+          | Error _ -> None
+        in
+        let trades = List.filter_map trade_items ~f:parse_trade_item in
+        Ok (Trade { trades; channel; pair })
+      | _ ->
+        (* Try to parse as book update - structure varies *)
+        Error (`Channel_parse_error "Unable to determine message type"))
+    | _ -> Error (`Json_parse_error "Expected array message with [channelID, data, channelName, pair]")
 end
 
 (** Unified message type *)
@@ -190,7 +400,7 @@ type message =
   | System of System.message
   | Public of Public.message
   | Private of Private.message
-  | Raw of Yojson.Safe.t
+  | Raw of (Yojson.Safe.t [@sexp.opaque])
   [@@deriving sexp]
 
 (** Parse incoming raw message string *)

@@ -25,8 +25,29 @@ module New = struct
           | `Ok json ->
             printf "Order placed:\n%s\n" (Yojson.Safe.pretty_to_string json);
             Deferred.unit
-          | `Error err ->
-            eprintf "Error: %s\n" err;
+          | `Api_error { errors } ->
+            eprintf "API Error: %s\n" (String.concat ~sep:", " errors);
+            Deferred.unit
+          | `Json_parse_error { message; body } ->
+            eprintf "JSON Parse Error: %s\nBody: %s\n" message body;
+            Deferred.unit
+          | `Bad_request err ->
+            eprintf "Bad Request: %s\n" err;
+            Deferred.unit
+          | `Not_found ->
+            eprintf "Not found\n";
+            Deferred.unit
+          | `Service_unavailable err ->
+            eprintf "Service Unavailable: %s\n" err;
+            Deferred.unit
+          | `Not_acceptable err ->
+            eprintf "Not Acceptable: %s\n" err;
+            Deferred.unit
+          | `Unauthorized err ->
+            eprintf "Unauthorized: %s\n" err;
+            Deferred.unit
+          | `Too_many_requests err ->
+            eprintf "Too Many Requests: %s\n" err;
             Deferred.unit)
         <*> pair
         <*> side
@@ -55,8 +76,8 @@ module Cancel = struct
           | `Ok json ->
             printf "Order canceled:\n%s\n" (Yojson.Safe.pretty_to_string json);
             Deferred.unit
-          | `Error err ->
-            eprintf "Error: %s\n" err;
+          | #Rest.Error.post as err ->
+            eprintf "Error: %s\n" (Rest.Error.sexp_of_post err |> Sexp.to_string_hum);
             Deferred.unit)
         <*> txid
         <*> cfg
@@ -81,8 +102,8 @@ module Status = struct
           | `Ok json ->
             printf "Open Orders:\n%s\n" (Yojson.Safe.pretty_to_string json);
             Deferred.unit
-          | `Error err ->
-            eprintf "Error: %s\n" err;
+          | #Rest.Error.post as err ->
+            eprintf "Error: %s\n" (Rest.Error.sexp_of_post err |> Sexp.to_string_hum);
             Deferred.unit)
         <*> trades
         <*> cfg

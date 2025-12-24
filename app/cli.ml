@@ -99,11 +99,11 @@ let get_kraken_balances cfg =
         ; code = "json_error"
         ; message = Exn.to_string e
         })))
-  | `Error err ->
-    return (Error (Fluxum.Types.Error.Exchange_specific 
+  | #Kraken.Rest.Error.post as err ->
+    return (Error (Fluxum.Types.Error.Exchange_specific
       { venue = Fluxum.Types.Venue.Kraken
-      ; code = "api_error"
-      ; message = err
+      ; code = "rest_error"
+      ; message = Sexp.to_string_hum (Kraken.Rest.Error.sexp_of_post err)
       }))
 
 (* Generic API command that accepts --exchange flag *)
@@ -128,8 +128,8 @@ let api_command =
                 | `Ok json ->
                   printf "Open Orders:\n%s\n" (Yojson.Safe.pretty_to_string json);
                   Deferred.unit
-                | `Error err ->
-                  eprintf "Error: %s\n" err;
+                | #Kraken.Rest.Error.post as err ->
+                  eprintf "Error: %s\n" (Sexp.to_string_hum (Kraken.Rest.Error.sexp_of_post err));
                   Deferred.unit)
             | "gemini" ->
               eprintf "Order queries not yet implemented for Gemini\n";

@@ -1,6 +1,6 @@
 (library
  (name fluxum)
  (public_name fluxum)
- (libraries core async)
- (preprocess (pps ppx_jane))
+ (libraries core async csvfields yojson)
+ (preprocess (pps ppx_jane ppx_deriving_yojson ppx_csv_conv))
  (flags :standard -open Core -open Async))

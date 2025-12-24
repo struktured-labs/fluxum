@@ -1,7 +1,7 @@
 (** Shared modules across various Gemini api endpoints *)
 
 module Auth = Auth
-module Result = Json.Result
+module Result = Fluxum.Json.Result
 
 module Int_number = struct
   module T = struct
@@ -119,7 +119,7 @@ module Side = struct
   module TT = struct
     include T
 
-    include (Json.Make (T) : Json.S with type t := t)
+    include (Fluxum.Json.Make (T) : Fluxum.Json.S with type t := t)
   end
 
   include TT
@@ -415,7 +415,7 @@ end
     end
 
     include T
-    include (Json.Make (T) : Json.S with type t := t)
+    include (Fluxum.Json.Make (T) : Fluxum.Json.S with type t := t)
   end
 
   module Order_execution_option_list = Csv_support.List.Make_default(Order_execution_option)
