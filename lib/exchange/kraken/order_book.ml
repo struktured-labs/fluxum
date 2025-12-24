@@ -206,6 +206,75 @@ module Book = struct
   let epoch t = t.epoch
   let update_time t = t.update_time
 
+  (** Apply Kraken WebSocket book update to order book *)
+  let apply_book_update t (update : Ws.Public.Book_data.update) : t =
+    let timestamp = Some (Time_float_unix.now ()) in
+    (* Process bid updates *)
+    let t_with_bids =
+      List.fold update.bids ~init:t ~f:(fun acc level ->
+        let price = Float.of_string level.Ws.Public.Price_level.price in
+        let volume = Float.of_string level.Ws.Public.Price_level.volume in
+        set ?timestamp acc ~side:`Bid ~price ~size:volume
+      )
+    in
+    (* Process ask updates *)
+    let t_with_asks =
+      List.fold update.asks ~init:t_with_bids ~f:(fun acc level ->
+        let price = Float.of_string level.Ws.Public.Price_level.price in
+        let volume = Float.of_string level.Ws.Public.Price_level.volume in
+        set ?timestamp acc ~side:`Ask ~price ~size:volume
+      )
+    in
+    t_with_asks
+
+  (** Create a live order book pipe from Kraken WebSocket *)
+  let pipe ~symbol ?(depth = 10) () : (t, string) Result.t Pipe.Reader.t Deferred.t =
+    let open Deferred.Let_syntax in
+    let%bind market_data_result =
+      Market_data.connect
+        ~subscriptions:[{
+          channel = "book";
+          pairs = [symbol];
+          interval = None;
+          depth = Some depth;
+        }]
+        ()
+    in
+    match market_data_result with
+    | Error _err ->
+      let reader, _writer = Pipe.create () in
+      Pipe.close_read reader;
+      return reader
+    | Ok md ->
+      let messages = Market_data.messages md in
+      let book_reader, book_writer = Pipe.create () in
+
+      (* Start with empty book *)
+      let book_ref = ref (empty symbol) in
+
+      (* Process incoming messages *)
+      don't_wait_for (
+        Pipe.iter messages ~f:(fun msg_str ->
+          try
+            match Ws.parse_message msg_str with
+            | Ok (Ws.Public (Ws.Public.Book book_data)) when String.equal book_data.pair symbol ->
+              book_ref := apply_book_update !book_ref book_data.update;
+              Pipe.write book_writer (Ok !book_ref)
+            | Ok _ ->
+              (* Other message types, ignore *)
+              Deferred.unit
+            | Error err ->
+              Pipe.write book_writer (Error (Sexp.to_string (Ws.Error.sexp_of_t err)))
+          with
+          | exn ->
+            Pipe.write book_writer (Error (Exn.to_string exn))
+        )
+        >>| fun () ->
+        Pipe.close book_writer
+      );
+
+      return book_reader
+
   (** TUI pretty print (from Gemini's implementation) *)
   let pretty_print ?(max_depth = 10) ?refresh_ms ?tick_size:_ t () =
     (* Use ANSI escape codes for colors *)
