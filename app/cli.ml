@@ -3,6 +3,7 @@ open Async
 
 (* Exchange-specific command groups *)
 let gemini_command = Gemini.command
+let kraken_command = Kraken.command
 
 (* Gemini adapter helpers *)
 let get_gemini_balances cfg =
@@ -185,6 +186,7 @@ let api_command =
 let command =
   Command.group ~summary:"Fluxum - Multi-exchange trading API"
     [ ("gemini", gemini_command)
+    ; ("kraken", kraken_command)
     ; ("api", api_command)
     ]
 

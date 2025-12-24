@@ -1,14 +1,6 @@
 (library
  (name kraken)
- (modules cfg signature v1)
- (libraries core async fluxum yojson digestif base64 hex)
+ (modules cfg signature v1 order kraken ws ws_cmd market_data)
+ (libraries core async fluxum yojson digestif base64 hex cohttp_async_websocket uri)
  (flags :standard -open Core -open Async)
-)
-
-(executable
- (name signature_test)
- (public_name kraken_signature_test)
- (modules signature_test)
- (libraries core kraken)
- (flags :standard -open Core)
 )

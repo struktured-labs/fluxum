@@ -1,0 +1,6 @@
+(executable
+ (name kraken_market_data)
+ (modules kraken_market_data)
+ (libraries core yojson)
+ (flags :standard -open Core)
+)
