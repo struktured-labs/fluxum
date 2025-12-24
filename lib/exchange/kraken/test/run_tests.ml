@@ -1,73 +1,449 @@
-(** Simple test runner for Kraken modules *)
+(** Comprehensive test suite for Kraken unified adapter *)
 
 open Core
 
 module Ledger = Kraken.Ledger
 module Order_book = Kraken.Order_book
 
+(** Test result tracking *)
+let tests_run = ref 0
+let tests_passed = ref 0
+let tests_failed = ref 0
+
 let assert_float_equal ?(tolerance = 0.0001) expected actual msg =
+  incr tests_run;
   if Float.(abs (expected - actual) > tolerance) then begin
-    printf "FAIL: %s: expected %.8f, got %.8f\n" msg expected actual;
-    failwith msg
-  end else
-    printf "PASS: %s\n" msg
+    incr tests_failed;
+    printf "  ✗ FAIL: %s\n     Expected: %.8f, Got: %.8f\n" msg expected actual;
+    false
+  end else begin
+    incr tests_passed;
+    printf "  ✓ %s\n" msg;
+    true
+  end
 
-let test_ledger_basic () =
-  printf "\n=== Ledger Basic Tests ===\n";
+let assert_equal ~equal ~sexp_of_t expected actual msg =
+  incr tests_run;
+  if not (equal expected actual) then begin
+    incr tests_failed;
+    printf "  ✗ FAIL: %s\n     Expected: %s\n     Got: %s\n"
+      msg
+      (Sexp.to_string (sexp_of_t expected))
+      (Sexp.to_string (sexp_of_t actual));
+    false
+  end else begin
+    incr tests_passed;
+    printf "  ✓ %s\n" msg;
+    true
+  end
 
-  (* Test 1: Create empty entry *)
+(** ========== LEDGER TESTS ========== *)
+
+let test_ledger_entry_creation () =
+  printf "\n=== Ledger: Entry Creation ===\n";
+
   let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
-  assert_float_equal 0.0 entry.pnl "Empty entry should have 0 pnl";
-  assert_float_equal 0.0 entry.position "Empty entry should have 0 position";
+  let _ = assert_float_equal 0.0 entry.pnl "Empty entry has 0 pnl" in
+  let _ = assert_float_equal 0.0 entry.position "Empty entry has 0 position" in
+  let _ = assert_float_equal 0.0 entry.spot "Empty entry has 0 spot" in
+  let _ = assert_float_equal 0.0 entry.notional "Empty entry has 0 notional" in
+  let _ = assert_float_equal 0.0 entry.cost_basis "Empty entry has 0 cost_basis" in
+  let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
+    "BTC/USD" entry.symbol "Symbol is set correctly" in
+  ()
 
-  (* Test 2: Simple buy trade *)
+let test_ledger_simple_trades () =
+  printf "\n=== Ledger: Simple Trades ===\n";
+
+  (* Buy 1 BTC at $50,000 *)
+  let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
   let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:1.0 in
-  assert_float_equal 1.0 entry.position "Position should be 1.0 after buy";
-  assert_float_equal (-50000.0) entry.notional "Notional should be -$50,000";
-  assert_float_equal 0.0 entry.pnl "PnL should be 0 at entry price";
+  let _ = assert_float_equal 1.0 entry.position "Buy 1 BTC: position = 1.0" in
+  let _ = assert_float_equal (-50000.0) entry.notional "Buy 1 BTC: notional = -$50k" in
+  let _ = assert_float_equal 50000.0 entry.cost_basis "Buy 1 BTC: cost_basis = $50k" in
+  let _ = assert_float_equal 0.0 entry.pnl "Buy at entry: pnl = 0" in
 
-  (* Test 3: Spot price update *)
+  (* Sell 1 BTC at $55,000 - $5k profit *)
+  let entry = Ledger.Entry.on_trade entry ~price:55000.0 ~side:Sell ~qty:1.0 in
+  let _ = assert_float_equal 0.0 entry.position "After sell: position = 0" in
+  let _ = assert_float_equal 5000.0 entry.notional "After sell: notional = $5k profit" in
+  let _ = assert_float_equal 5000.0 entry.pnl "Profit: pnl = $5k" in
+  let _ = assert_float_equal 0.0 entry.cost_basis "Flat position: cost_basis = 0" in
+  ()
+
+let test_ledger_fees () =
+  printf "\n=== Ledger: Fee Handling ===\n";
+
+  let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
+  (* Buy 1 BTC at $50k with $25 fee *)
+  let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:1.0 ~fee_usd:25.0 in
+  let _ = assert_float_equal (-50025.0) entry.notional "Fee reduces cash: notional = -$50,025" in
+  let _ = assert_float_equal 50025.0 entry.cost_basis "Fee in cost basis: $50,025" in
+
+  (* Sell at breakeven price should show loss due to fee *)
+  let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Sell ~qty:1.0 in
+  let _ = assert_float_equal (-25.0) entry.pnl "Fee creates loss: pnl = -$25" in
+  ()
+
+let test_ledger_partial_fills () =
+  printf "\n=== Ledger: Partial Position Close ===\n";
+
+  let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
+  (* Buy 4 BTC at $50k each *)
+  let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:4.0 in
+  let _ = assert_float_equal 4.0 entry.position "Buy 4 BTC: position = 4.0" in
+  let _ = assert_float_equal 200000.0 entry.cost_basis "Buy 4 BTC: cost_basis = $200k" in
+
+  (* Sell 1 BTC - reduces cost basis proportionally *)
+  let entry = Ledger.Entry.on_trade entry ~price:55000.0 ~side:Sell ~qty:1.0 in
+  let _ = assert_float_equal 3.0 entry.position "Sell 1/4: position = 3.0" in
+  let _ = assert_float_equal 150000.0 entry.cost_basis "Sell 1/4: cost_basis = $150k" in
+  let _ = assert_float_equal 50000.0 entry.running_price "Running price = $50k" in
+
+  (* Sell another 1 BTC *)
+  let entry = Ledger.Entry.on_trade entry ~price:52000.0 ~side:Sell ~qty:1.0 in
+  let _ = assert_float_equal 2.0 entry.position "Sell another: position = 2.0" in
+  let _ = assert_float_equal 100000.0 entry.cost_basis "Sell 1/3 remaining: cost_basis = $100k" in
+  ()
+
+let test_ledger_average_prices () =
+  printf "\n=== Ledger: Average Price Calculations ===\n";
+
+  let entry = Ledger.Entry.create ~symbol:"ETH/USD" () in
+  (* Buy at different prices *)
+  let entry = Ledger.Entry.on_trade entry ~price:3000.0 ~side:Buy ~qty:10.0 in
+  let entry = Ledger.Entry.on_trade entry ~price:3200.0 ~side:Buy ~qty:5.0 in
+  let entry = Ledger.Entry.on_trade entry ~price:2800.0 ~side:Buy ~qty:5.0 in
+
+  (* Average = (10*3000 + 5*3200 + 5*2800) / 20 = 3000 *)
+  let _ = assert_float_equal 3000.0 entry.avg_buy_price "Weighted avg buy = $3,000" in
+  let _ = assert_float_equal 20.0 entry.total_buy_qty "Total buy qty = 20" in
+
+  (* Sell some *)
+  let entry = Ledger.Entry.on_trade entry ~price:3500.0 ~side:Sell ~qty:5.0 in
+  let _ = assert_float_equal 3500.0 entry.avg_sell_price "Avg sell = $3,500" in
+
+  (* Overall avg = (3000*20 + 3500*5) / 25 = 3100 *)
+  let _ = assert_float_equal 3100.0 entry.avg_price "Overall avg = $3,100" in
+  ()
+
+let test_ledger_spot_updates () =
+  printf "\n=== Ledger: Spot Price Updates (Unrealized P&L) ===\n";
+
+  let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
+  let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:1.0 in
+
+  (* Spot moves to $55k - unrealized profit *)
   let entry = Ledger.Entry.update_spot entry 55000.0 in
-  assert_float_equal 55000.0 entry.spot "Spot should be $55,000";
-  assert_float_equal 5000.0 entry.pnl "PnL should be $5,000";
+  let _ = assert_float_equal 55000.0 entry.spot "Spot updated to $55k" in
+  let _ = assert_float_equal 55000.0 entry.pnl_spot "pnl_spot = $55k" in
+  let _ = assert_float_equal 5000.0 entry.pnl "Unrealized profit = $5k" in
 
-  printf "Ledger basic tests passed!\n"
+  (* Spot moves to $45k - unrealized loss *)
+  let entry = Ledger.Entry.update_spot entry 45000.0 in
+  let _ = assert_float_equal 45000.0 entry.spot "Spot updated to $45k" in
+  let _ = assert_float_equal (-5000.0) entry.pnl "Unrealized loss = -$5k" in
+  ()
 
-let test_order_book_basic () =
-  printf "\n=== Order Book Basic Tests ===\n";
+let test_ledger_cost_basis_accounting () =
+  printf "\n=== Ledger: Cost Basis Accounting ===\n";
 
-  (* Test 1: Create empty book *)
+  let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
+  (* Buy 3 BTC at $50k = $150k cost basis *)
+  let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:3.0 in
+  let _ = assert_float_equal 150000.0 entry.cost_basis "Initial cost_basis = $150k" in
+  let _ = assert_float_equal 3.0 entry.running_qty "Running qty = 3.0" in
+  let _ = assert_float_equal 50000.0 entry.running_price "Running price = $50k" in
+
+  (* Sell 1 BTC - reduces cost basis by 1/3 *)
+  let entry = Ledger.Entry.on_trade entry ~price:55000.0 ~side:Sell ~qty:1.0 in
+  let _ = assert_float_equal 100000.0 entry.cost_basis "After sell 1/3: cost_basis = $100k" in
+  let _ = assert_float_equal 2.0 entry.running_qty "Running qty = 2.0" in
+
+  (* Sell 1 more - reduces by 1/2 of remaining *)
+  let entry = Ledger.Entry.on_trade entry ~price:52000.0 ~side:Sell ~qty:1.0 in
+  let _ = assert_float_equal 50000.0 entry.cost_basis "After sell 1/2: cost_basis = $50k" in
+  ()
+
+let test_ledger_multi_symbol () =
+  printf "\n=== Ledger: Multi-Symbol Tracking ===\n";
+
+  let ledger = Fluxum.Types.Symbol.Map.empty in
+
+  (* Trade BTC *)
+  let ledger = Ledger.on_trade ledger ~symbol:"BTC/USD" ~price:50000.0 ~side:Buy ~qty:1.0 in
+  (* Trade ETH *)
+  let ledger = Ledger.on_trade ledger ~symbol:"ETH/USD" ~price:3000.0 ~side:Buy ~qty:10.0 in
+
+  (* Check BTC *)
+  let btc = Map.find_exn ledger "BTC/USD" in
+  let _ = assert_float_equal 1.0 btc.position "BTC position = 1.0" in
+  let _ = assert_float_equal 50000.0 btc.cost_basis "BTC cost_basis = $50k" in
+
+  (* Check ETH *)
+  let eth = Map.find_exn ledger "ETH/USD" in
+  let _ = assert_float_equal 10.0 eth.position "ETH position = 10.0" in
+  let _ = assert_float_equal 30000.0 eth.cost_basis "ETH cost_basis = $30k" in
+
+  (* Update spots *)
+  let spots = Fluxum.Types.Symbol.Map.empty
+    |> Map.set ~key:"BTC/USD" ~data:55000.0
+    |> Map.set ~key:"ETH/USD" ~data:3500.0
+  in
+  let ledger = Ledger.update_spots ledger spots in
+
+  let btc = Map.find_exn ledger "BTC/USD" in
+  let _ = assert_float_equal 5000.0 btc.pnl "BTC unrealized profit = $5k" in
+
+  let eth = Map.find_exn ledger "ETH/USD" in
+  let _ = assert_float_equal 5000.0 eth.pnl "ETH unrealized profit = $5k" in
+  ()
+
+(** ========== ORDER BOOK TESTS ========== *)
+
+let test_order_book_creation () =
+  printf "\n=== Order Book: Creation ===\n";
+
   let book = Order_book.Book.empty "BTC/USD" in
-  if not (String.equal "BTC/USD" (Order_book.Book.symbol book)) then
-    failwith "Symbol mismatch";
+  let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
+    "BTC/USD" (Order_book.Book.symbol book) "Symbol is set" in
+  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
+    0 (Order_book.Book.epoch book) "Initial epoch = 0" in
 
-  (* Test 2: Add bid *)
-  let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.5 in
   let best_bid = Order_book.Book.best_bid book in
-  assert_float_equal 50000.0 best_bid.price "Best bid should be $50,000";
-  assert_float_equal 1.5 best_bid.volume "Best bid volume should be 1.5";
+  let _ = assert_float_equal 0.0 best_bid.price "Empty book: best_bid = 0" in
 
-  (* Test 3: Add ask *)
-  let book = Order_book.Book.set book ~side:`Ask ~price:51000.0 ~size:2.0 in
   let best_ask = Order_book.Book.best_ask book in
-  assert_float_equal 51000.0 best_ask.price "Best ask should be $51,000";
-  assert_float_equal 2.0 best_ask.volume "Best ask volume should be 2.0";
+  let _ = assert_float_equal 0.0 best_ask.price "Empty book: best_ask = 0" in
+  ()
 
-  (* Test 4: Bid sorting (descending) *)
-  let book = Order_book.Book.set book ~side:`Bid ~price:49000.0 ~size:1.0 in
+let test_order_book_bid_sorting () =
+  printf "\n=== Order Book: Bid Sorting (Descending) ===\n";
+
+  let book = Order_book.Book.empty "BTC/USD" in
+  let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
   let book = Order_book.Book.set book ~side:`Bid ~price:51000.0 ~size:1.5 in
-  let best_bid = Order_book.Book.best_bid book in
-  assert_float_equal 51000.0 best_bid.price "Best bid should be highest ($51,000)";
+  let book = Order_book.Book.set book ~side:`Bid ~price:49000.0 ~size:2.0 in
 
-  printf "Order book basic tests passed!\n"
+  let best = Order_book.Book.best_bid book in
+  let _ = assert_float_equal 51000.0 best.price "Best bid = highest ($51k)" in
+
+  let top_3 = Order_book.Book.best_n_bids book ~n:3 () in
+  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
+    3 (List.length top_3) "Got 3 bids" in
+  let _ = assert_float_equal 51000.0 (List.nth_exn top_3 0).price "1st bid = $51k" in
+  let _ = assert_float_equal 50000.0 (List.nth_exn top_3 1).price "2nd bid = $50k" in
+  let _ = assert_float_equal 49000.0 (List.nth_exn top_3 2).price "3rd bid = $49k" in
+  ()
+
+let test_order_book_ask_sorting () =
+  printf "\n=== Order Book: Ask Sorting (Ascending) ===\n";
+
+  let book = Order_book.Book.empty "BTC/USD" in
+  let book = Order_book.Book.set book ~side:`Ask ~price:52000.0 ~size:1.0 in
+  let book = Order_book.Book.set book ~side:`Ask ~price:51000.0 ~size:1.5 in
+  let book = Order_book.Book.set book ~side:`Ask ~price:53000.0 ~size:2.0 in
+
+  let best = Order_book.Book.best_ask book in
+  let _ = assert_float_equal 51000.0 best.price "Best ask = lowest ($51k)" in
+
+  let top_3 = Order_book.Book.best_n_asks book ~n:3 () in
+  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
+    3 (List.length top_3) "Got 3 asks" in
+  let _ = assert_float_equal 51000.0 (List.nth_exn top_3 0).price "1st ask = $51k" in
+  let _ = assert_float_equal 52000.0 (List.nth_exn top_3 1).price "2nd ask = $52k" in
+  let _ = assert_float_equal 53000.0 (List.nth_exn top_3 2).price "3rd ask = $53k" in
+  ()
+
+let test_order_book_operations () =
+  printf "\n=== Order Book: Set/Update/Remove Operations ===\n";
+
+  let book = Order_book.Book.empty "BTC/USD" in
+
+  (* Set creates new level *)
+  let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.5 in
+  let level = Order_book.Book.total_bid_volume_at_price_level book ~price:50000.0 in
+  let _ = assert_float_equal 1.5 level.volume "Set creates level with size 1.5" in
+
+  (* Set with size=0 removes level *)
+  let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:0.0 in
+  let best = Order_book.Book.best_bid book in
+  let _ = assert_float_equal 0.0 best.price "Size=0 removes level" in
+
+  (* Update adds to existing *)
+  let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
+  let book = Order_book.Book.update book ~side:`Bid ~price:50000.0 ~size:0.5 in
+  let level = Order_book.Book.total_bid_volume_at_price_level book ~price:50000.0 in
+  let _ = assert_float_equal 1.5 level.volume "Update adds: 1.0 + 0.5 = 1.5" in
+
+  (* Remove (update with negative) *)
+  let book = Order_book.Book.remove book ~side:`Bid ~price:50000.0 ~size:0.5 in
+  let level = Order_book.Book.total_bid_volume_at_price_level book ~price:50000.0 in
+  let _ = assert_float_equal 1.0 level.volume "Remove subtracts: 1.5 - 0.5 = 1.0" in
+  ()
+
+let test_order_book_market_price () =
+  printf "\n=== Order Book: Market Price Calculations ===\n";
+
+  let book = Order_book.Book.empty "BTC/USD" in
+  let book = Order_book.Book.set book ~side:`Ask ~price:51000.0 ~size:1.0 in
+  let book = Order_book.Book.set book ~side:`Ask ~price:52000.0 ~size:2.0 in
+  let book = Order_book.Book.set book ~side:`Ask ~price:53000.0 ~size:3.0 in
+
+  (* Buy 0.5 BTC - takes from $51k level *)
+  let result = Order_book.Book.ask_market_price book ~volume:0.5 in
+  let _ = assert_float_equal 51000.0 result.price "Buy 0.5 BTC @ $51k" in
+  let _ = assert_float_equal 0.5 result.volume "Filled 0.5 BTC" in
+
+  (* Buy 2.5 BTC - takes 1.0@$51k + 1.5@$52k *)
+  (* Cost = 1.0*51000 + 1.5*52000 = 51000 + 78000 = 129000 *)
+  (* Avg = 129000/2.5 = 51600 *)
+  let result = Order_book.Book.ask_market_price book ~volume:2.5 in
+  let _ = assert_float_equal 51600.0 result.price "Buy 2.5 BTC avg = $51,600" in
+  let _ = assert_float_equal 2.5 result.volume "Filled 2.5 BTC" in
+
+  (* Buy more than available - partial fill *)
+  let result = Order_book.Book.ask_market_price book ~volume:10.0 in
+  let _ = assert_float_equal 6.0 result.volume "Only 6.0 BTC available" in
+  ()
+
+let test_order_book_bid_market_price () =
+  printf "\n=== Order Book: Bid Market Price (Selling) ===\n";
+
+  let book = Order_book.Book.empty "BTC/USD" in
+  let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
+  let book = Order_book.Book.set book ~side:`Bid ~price:49000.0 ~size:2.0 in
+  let book = Order_book.Book.set book ~side:`Bid ~price:48000.0 ~size:3.0 in
+
+  (* Sell 0.5 BTC - takes best bid $50k *)
+  let result = Order_book.Book.bid_market_price book ~volume:0.5 in
+  let _ = assert_float_equal 50000.0 result.price "Sell 0.5 BTC @ $50k" in
+
+  (* Sell 2.5 BTC - takes 1.0@$50k + 1.5@$49k *)
+  (* Cost = 1.0*50000 + 1.5*49000 = 50000 + 73500 = 123500 *)
+  (* Avg = 123500/2.5 = 49400 *)
+  let result = Order_book.Book.bid_market_price book ~volume:2.5 in
+  let _ = assert_float_equal 49400.0 result.price "Sell 2.5 BTC avg = $49,400" in
+  ()
+
+let test_order_book_mid_price () =
+  printf "\n=== Order Book: Mid-Market Price ===\n";
+
+  let book = Order_book.Book.empty "BTC/USD" in
+  let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
+  let book = Order_book.Book.set book ~side:`Ask ~price:51000.0 ~size:1.0 in
+
+  let result = Order_book.Book.mid_market_price book ~volume:0.5 in
+  (* Mid = (50000 + 51000) / 2 = 50500 *)
+  let _ = assert_float_equal 50500.0 result.price "Mid price = $50,500" in
+  ()
+
+let test_order_book_quantity_conversions () =
+  printf "\n=== Order Book: Notional ↔ Quantity Conversions ===\n";
+
+  let book = Order_book.Book.empty "BTC/USD" in
+  let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:5.0 in
+  let book = Order_book.Book.set book ~side:`Ask ~price:51000.0 ~size:5.0 in
+
+  (* $100k / $50k = 2.0 BTC *)
+  let qty = Order_book.Book.quantity_from_notional_bid book ~notional:100000.0 in
+  let _ = assert_float_equal 2.0 qty "Bid: $100k = 2.0 BTC @ $50k" in
+
+  (* $102k / $51k = 2.0 BTC *)
+  let qty = Order_book.Book.quantity_from_notional_ask book ~notional:102000.0 in
+  let _ = assert_float_equal 2.0 qty "Ask: $102k = 2.0 BTC @ $51k" in
+  ()
+
+let test_order_book_epoch () =
+  printf "\n=== Order Book: Epoch Tracking ===\n";
+
+  let book = Order_book.Book.empty "BTC/USD" in
+  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
+    0 (Order_book.Book.epoch book) "Initial epoch = 0" in
+
+  let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
+  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
+    1 (Order_book.Book.epoch book) "After set: epoch = 1" in
+
+  let book = Order_book.Book.update book ~side:`Bid ~price:50000.0 ~size:0.5 in
+  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
+    2 (Order_book.Book.epoch book) "After update: epoch = 2" in
+  ()
+
+let test_order_book_multi_symbol () =
+  printf "\n=== Order Book: Multi-Symbol Books ===\n";
+
+  let books = Order_book.Books.empty in
+
+  (* Add BTC and ETH books *)
+  let books = Order_book.Books.set books ~symbol:"BTC/USD" ~side:`Bid ~price:50000.0 ~size:1.0 in
+  let books = Order_book.Books.set books ~symbol:"ETH/USD" ~side:`Bid ~price:3000.0 ~size:10.0 in
+
+  let symbols = Order_book.Books.symbols books in
+  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
+    2 (List.length symbols) "Books has 2 symbols" in
+
+  (* Check BTC book *)
+  let btc_book = Order_book.Books.book_exn books "BTC/USD" in
+  let best = Order_book.Book.best_bid btc_book in
+  let _ = assert_float_equal 50000.0 best.price "BTC best bid = $50k" in
+
+  (* Check ETH book *)
+  let eth_book = Order_book.Books.book_exn books "ETH/USD" in
+  let best = Order_book.Book.best_bid eth_book in
+  let _ = assert_float_equal 3000.0 best.price "ETH best bid = $3k" in
+
+  (* Update BTC book *)
+  let books = Order_book.Books.update books ~symbol:"BTC/USD" ~side:`Bid ~price:50000.0 ~size:0.5 in
+  let btc_book = Order_book.Books.book_exn books "BTC/USD" in
+  let best = Order_book.Book.best_bid btc_book in
+  let _ = assert_float_equal 1.5 best.volume "BTC bid volume = 1.5 after update" in
+  ()
+
+(** ========== TEST RUNNER ========== *)
 
 let () =
-  printf "Running Kraken unified adapter tests...\n";
+  printf "\n";
+  printf "╔════════════════════════════════════════════════════════╗\n";
+  printf "║  Kraken Unified Adapter - Comprehensive Test Suite    ║\n";
+  printf "╚════════════════════════════════════════════════════════╝\n";
 
-  try
-    test_ledger_basic ();
-    test_order_book_basic ();
-    printf "\n✓ All tests passed!\n"
-  with e ->
-    printf "\n✗ Tests failed: %s\n" (Exn.to_string e);
+  (* Run all tests *)
+  test_ledger_entry_creation ();
+  test_ledger_simple_trades ();
+  test_ledger_fees ();
+  test_ledger_partial_fills ();
+  test_ledger_average_prices ();
+  test_ledger_spot_updates ();
+  test_ledger_cost_basis_accounting ();
+  test_ledger_multi_symbol ();
+
+  test_order_book_creation ();
+  test_order_book_bid_sorting ();
+  test_order_book_ask_sorting ();
+  test_order_book_operations ();
+  test_order_book_market_price ();
+  test_order_book_bid_market_price ();
+  test_order_book_mid_price ();
+  test_order_book_quantity_conversions ();
+  test_order_book_epoch ();
+  test_order_book_multi_symbol ();
+
+  (* Print summary *)
+  printf "\n";
+  printf "╔════════════════════════════════════════════════════════╗\n";
+  printf "║  Test Results Summary                                  ║\n";
+  printf "╠════════════════════════════════════════════════════════╣\n";
+  printf "║  Total:  %3d tests                                     ║\n" !tests_run;
+  printf "║  Passed: %3d tests  ✓                                  ║\n" !tests_passed;
+  printf "║  Failed: %3d tests  ✗                                  ║\n" !tests_failed;
+  printf "╚════════════════════════════════════════════════════════╝\n";
+  printf "\n";
+
+  if !tests_failed > 0 then begin
+    printf "❌ TEST SUITE FAILED\n\n";
     exit 1
+  end else begin
+    printf "✅ ALL TESTS PASSED!\n\n";
+    exit 0
+  end
