@@ -4,6 +4,10 @@
 module Endpoint = struct
   let private_url = "wss://ws-auth.kraken.com/"
   let public_url = "wss://ws.kraken.com/"
+
+  (* v2 uses the same endpoints - version is determined by message format, not URL *)
+  let private_url_v2 = private_url
+  let public_url_v2 = public_url
 end
 
 (** Error types for WebSocket operations *)
@@ -343,7 +347,7 @@ module Public = struct
 
   (** Generate unsubscribe message *)
   let unsubscribe channel pairs : string =
-    Yojson.Safe.to_string 
+    Yojson.Safe.to_string
       (`Assoc [
         "event", `String "unsubscribe";
         "pair", `List (List.map pairs ~f:(fun p -> `String p));
@@ -351,6 +355,91 @@ module Public = struct
           "name", `String channel;
         ];
       ])
+
+  (** WebSocket API v2 subscription messages *)
+  module V2 = struct
+    (** Normalize symbol for v2 API - converts XETHZUSD to ETH/USD format *)
+    let normalize_symbol s =
+      if String.mem s '/' then s
+      else
+        (* Remove leading X and convert to base/quote format *)
+        let s = if String.is_prefix s ~prefix:"X" && String.length s > 4
+                then String.drop_prefix s 1
+                else s in
+        let len = String.length s in
+        if len > 3 then
+          let base = String.sub s ~pos:0 ~len:(len - 3) in
+          let quote = String.sub s ~pos:(len - 3) ~len:3 in
+          base ^ "/" ^ quote
+        else s
+
+    (** Generate v2 subscription message for ticker feed *)
+    let subscribe_ticker ?(event_trigger="trades") ?(snapshot=true) pairs : string =
+      let symbols = List.map pairs ~f:normalize_symbol in
+      Yojson.Safe.to_string
+        (`Assoc [
+          "method", `String "subscribe";
+          "params", `Assoc [
+            "channel", `String "ticker";
+            "symbol", `List (List.map symbols ~f:(fun p -> `String p));
+            "event_trigger", `String event_trigger;
+            "snapshot", `Bool snapshot;
+          ];
+        ])
+
+    (** Generate v2 subscription message for trade feed *)
+    let subscribe_trade ?(snapshot=true) pairs : string =
+      let symbols = List.map pairs ~f:normalize_symbol in
+      Yojson.Safe.to_string
+        (`Assoc [
+          "method", `String "subscribe";
+          "params", `Assoc [
+            "channel", `String "trade";
+            "symbol", `List (List.map symbols ~f:(fun p -> `String p));
+            "snapshot", `Bool snapshot;
+          ];
+        ])
+
+    (** Generate v2 subscription message for OHLC candles *)
+    let subscribe_ohlc ?(interval=60) ?(snapshot=true) pairs : string =
+      let symbols = List.map pairs ~f:normalize_symbol in
+      Yojson.Safe.to_string
+        (`Assoc [
+          "method", `String "subscribe";
+          "params", `Assoc [
+            "channel", `String "ohlc";
+            "symbol", `List (List.map symbols ~f:(fun p -> `String p));
+            "interval", `Int interval;
+            "snapshot", `Bool snapshot;
+          ];
+        ])
+
+    (** Generate v2 subscription message for order book *)
+    let subscribe_book ?(depth=10) ?(snapshot=true) pairs : string =
+      let symbols = List.map pairs ~f:normalize_symbol in
+      Yojson.Safe.to_string
+        (`Assoc [
+          "method", `String "subscribe";
+          "params", `Assoc [
+            "channel", `String "book";
+            "symbol", `List (List.map symbols ~f:(fun p -> `String p));
+            "depth", `Int depth;
+            "snapshot", `Bool snapshot;
+          ];
+        ])
+
+    (** Generate v2 unsubscribe message *)
+    let unsubscribe channel pairs : string =
+      let symbols = List.map pairs ~f:normalize_symbol in
+      Yojson.Safe.to_string
+        (`Assoc [
+          "method", `String "unsubscribe";
+          "params", `Assoc [
+            "channel", `String channel;
+            "symbol", `List (List.map symbols ~f:(fun p -> `String p));
+          ];
+        ])
+  end
 
   (** Parse a JSON array into a public message *)
   let parse_message (json : Yojson.Safe.t) : (message, Error.t) Result.t =
