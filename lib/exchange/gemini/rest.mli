@@ -1,5 +1,6 @@
 (** REST api support for the Gemini trading exchange. These endpoints are used
     to manage orders and check balances. *)
+[@@@warning "-67"]
 
 (** Represents all error conditions possible by the REST services. In general
     the REST services don't throw exceptions- instead they report an error
@@ -141,6 +142,23 @@ module Make_no_arg : functor (Operation : Operation.S_NO_ARG) -> sig
     Nonce.reader ->
     unit ->
     [ Error.post | `Ok of Operation.response ] Deferred.t
+
+  val command : string * Core.Command.t
+end
+
+(** Creates a REST endpoint with natural CLI flags instead of sexp. Also
+    produces a command line interface with both flag-based and sexp-based
+    input support for backwards compatibility. *)
+module Make_with_params : functor
+  (Operation : Operation.S)
+  (Params : sig
+     val params : Operation.request Core.Command.Param.t
+   end) -> sig
+  val post :
+    (module Cfg.S) ->
+    Nonce.reader ->
+    Operation.request ->
+    [ `Ok of Operation.response | Error.post ] Deferred.t
 
   val command : string * Core.Command.t
 end

@@ -111,7 +111,19 @@ module Open_orders = struct
   end
 
   include T
-  include Rest.Make (T)
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let trades = bool_flag ~field_name:"trades" ~default:false
+          ~doc:"Include trade info in output"
+        in
+        { trades }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
 end
 
 (** Add a new order *)
@@ -176,7 +188,38 @@ module Add_order = struct
   end
 
   include T
-  include Rest.Make (T)
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let pair = string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
+        and type_ =
+          enum_flag ~field_name:"type_" ~type_name:"SIDE"
+            ~of_string_opt:Common.Side.of_string_opt
+            ~all:Common.Side.all
+            ~to_string:Common.Side.to_string
+            ~doc:"Order side (buy or sell)"
+        and ordertype =
+          enum_flag ~field_name:"ordertype" ~type_name:"ORDER_TYPE"
+            ~of_string_opt:Common.Order_type.of_string_opt
+            ~all:Common.Order_type.all
+            ~to_string:Common.Order_type.to_string
+            ~doc:"Order type (market, limit, etc.)"
+        and volume = float_flag ~field_name:"volume" ~doc:"Order volume"
+        and price = string_flag_option ~field_name:"price" ~doc:"Limit price (for limit orders)"
+        and price2 = string_flag_option ~field_name:"price2" ~doc:"Secondary price (for stop orders)"
+        and leverage = string_flag_option ~field_name:"leverage" ~doc:"Leverage amount"
+        and oflags = string_flag_option ~field_name:"oflags" ~doc:"Order flags (comma-separated)"
+        and starttm = string_flag_option ~field_name:"starttm" ~doc:"Start time"
+        and expiretm = string_flag_option ~field_name:"expiretm" ~doc:"Expiration time"
+        and timeinforce = string_flag_option ~field_name:"timeinforce" ~doc:"Time in force"
+        in
+        { pair; type_; ordertype; volume; price; price2; leverage; oflags; starttm; expiretm; timeinforce }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
 end
 
 (** Cancel an order *)
@@ -200,7 +243,18 @@ module Cancel_order = struct
   end
 
   include T
-  include Rest.Make (T)
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let txid = string_flag ~field_name:"txid" ~doc:"Transaction ID of order to cancel"
+        in
+        { txid }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
 end
 
 (** Query orders by transaction ID *)
@@ -236,7 +290,21 @@ module Query_orders = struct
   end
 
   include T
-  include Rest.Make (T)
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let txids = string_list_flag ~field_name:"txids"
+          ~doc:"Transaction IDs to query (can specify multiple times)"
+        and trades = bool_flag ~field_name:"trades" ~default:false
+          ~doc:"Include trade info in output"
+        in
+        { txids; trades }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
 end
 
 (** Get closed orders *)
@@ -305,7 +373,29 @@ module Closed_orders = struct
   end
 
   include T
-  include Rest.Make (T)
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let trades = bool_flag ~field_name:"trades" ~default:false
+          ~doc:"Include trade info in output"
+        and userref = int_flag_option ~field_name:"userref"
+          ~doc:"Filter by user reference ID"
+        and start = int_flag_option ~field_name:"start"
+          ~doc:"Starting timestamp or order ID"
+        and end_ = int_flag_option ~field_name:"end_"
+          ~doc:"Ending timestamp or order ID"
+        and ofs = int_flag_option ~field_name:"ofs"
+          ~doc:"Result offset"
+        and closetime = string_flag_option ~field_name:"closetime"
+          ~doc:"Which time to use for filtering (open, close, both)"
+        in
+        { trades; userref; start; end_; ofs; closetime }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
 end
 
 (** Backwards compatibility wrappers (non-typed versions) *)

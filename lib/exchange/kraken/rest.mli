@@ -1,4 +1,5 @@
 (** REST API support for the Kraken exchange. *)
+[@@@warning "-67"]
 
 (** Error types for Kraken API calls *)
 module Error : sig
@@ -98,6 +99,20 @@ module Make_no_arg : functor (Operation : Operation.S_NO_ARG) -> sig
   val post :
     (module Cfg.S) ->
     unit ->
+    [ `Ok of Operation.response | Error.post ] Async.Deferred.t
+
+  val command : string * Core.Command.t
+end
+
+(** Make a REST endpoint with natural CLI flags instead of sexp *)
+module Make_with_params : functor
+  (Operation : Operation.S)
+  (Params : sig
+     val params : Operation.request Core.Command.Param.t
+   end) -> sig
+  val post :
+    (module Cfg.S) ->
+    Operation.request ->
     [ `Ok of Operation.response | Error.post ] Async.Deferred.t
 
   val command : string * Core.Command.t

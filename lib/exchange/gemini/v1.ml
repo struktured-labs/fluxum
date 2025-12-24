@@ -122,7 +122,47 @@ module T = struct
       end
 
       include T
-      include Rest.Make (T)
+
+      module Params = struct
+        let params =
+          let open Command.Let_syntax in
+          let open Fluxum.Cli_args in
+          [%map_open
+            let client_order_id = string_flag ~field_name:"client_order_id"
+              ~doc:"Client-specified order ID"
+            and symbol =
+              enum_flag ~field_name:"symbol" ~type_name:"SYMBOL"
+                ~of_string_opt:Symbol.of_string_opt
+                ~all:Symbol.all
+                ~to_string:Symbol.to_string
+                ~doc:"Trading pair symbol (e.g., btcusd, ethbtc)"
+            and amount = string_flag ~field_name:"amount"
+              ~doc:"Order size (decimal string)"
+            and price = string_flag ~field_name:"price"
+              ~doc:"Order price (decimal string)"
+            and side =
+              enum_flag ~field_name:"side" ~type_name:"SIDE"
+                ~of_string_opt:Side.of_string_opt
+                ~all:Side.all
+                ~to_string:Side.to_string
+                ~doc:"Order side (buy or sell)"
+            and type_ =
+              enum_flag ~field_name:"type_" ~type_name:"ORDER_TYPE"
+                ~of_string_opt:Order_type.of_string_opt
+                ~all:Order_type.all
+                ~to_string:Order_type.to_string
+                ~doc:"Order type (exchange-limit, market-buy, etc.)"
+            and options =
+              enum_list_flag ~field_name:"options" ~type_name:"EXECUTION_OPTION"
+                ~of_string_opt:Order_execution_option.of_string_opt
+                ~all:Order_execution_option.all
+                ~to_string:Order_execution_option.to_string
+                ~doc:"Execution options (can specify multiple)"
+            in
+            { client_order_id; symbol; amount; price; side; type_; options }]
+      end
+
+      include Rest.Make_with_params (T) (Params)
     end
 
     module Cancel = struct
@@ -149,7 +189,19 @@ module T = struct
         end
 
         include T
-        include Rest.Make (T)
+
+        module Params = struct
+          let params =
+            let open Command.Let_syntax in
+            let open Fluxum.Cli_args in
+            [%map_open
+              let order_id = int64_flag ~field_name:"order_id"
+                ~doc:"Order ID to cancel"
+              in
+              { order_id }]
+        end
+
+        include Rest.Make_with_params (T) (Params)
       end
 
       type details =
@@ -281,7 +333,36 @@ module T = struct
     end
 
     include T
-    include Rest.Make (T)
+
+    module Params = struct
+      let params =
+        let open Command.Let_syntax in
+        let open Fluxum.Cli_args in
+        let timestamp_arg_type =
+          Command.Arg_type.create (fun s ->
+            match Float.of_string_opt s with
+            | Some f -> Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec f)
+            | None -> failwith (sprintf "Invalid timestamp: %s" s))
+        in
+        [%map_open
+          let symbol =
+            enum_flag ~field_name:"symbol" ~type_name:"SYMBOL"
+              ~of_string_opt:Symbol.of_string_opt
+              ~all:Symbol.all
+              ~to_string:Symbol.to_string
+              ~doc:"Trading pair symbol (e.g., btcusd, ethbtc)"
+          and limit_trades = int_flag_option ~field_name:"limit_trades"
+            ~doc:"Maximum number of trades to return"
+          and timestamp =
+            let flag_name = field_to_flag_name "timestamp" in
+            Command.Param.flag ("-" ^ flag_name)
+              (Command.Param.optional timestamp_arg_type)
+              ~doc:"Only return trades after this timestamp (unix seconds)"
+          in
+          { symbol; limit_trades; timestamp }]
+    end
+
+    include Rest.Make_with_params (T) (Params)
   end
 
   module Tradevolume = struct

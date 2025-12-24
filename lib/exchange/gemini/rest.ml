@@ -208,6 +208,46 @@ module Make_no_arg (Operation : Operation.S_NO_ARG) = struct
                 post_error Error.sexp_of_post] )
 end
 
+module Make_with_params
+    (Operation : Operation.S)
+    (Params : sig
+       val params : Operation.request Command.Param.t
+     end) =
+struct
+  include Post (Operation)
+
+  let command =
+    let open Command.Let_syntax in
+    ( Operation.name,
+      Command.async
+        ~summary:(Path.to_summary ~has_subnames:false Operation.path)
+        [%map_open
+          let config = Cfg.param
+          and request = Params.params
+          and sexp_request = anon (maybe ("request-sexp" %: sexp)) in
+          fun () ->
+            (* Prefer flags over sexp, but allow sexp as fallback *)
+            let request =
+              match sexp_request with
+              | Some sexp -> Operation.request_of_sexp sexp
+              | None -> request
+            in
+            Log.Global.info "request:\n %s"
+              (Operation.sexp_of_request request |> Sexp.to_string);
+            let config = Cfg.or_default config in
+            Nonce.File.(pipe ~init:default_filename) () >>= fun nonce ->
+            post config nonce request >>= function
+            | `Ok response ->
+              Log.Global.info "response:\n %s"
+                (Sexp.to_string_hum (Operation.sexp_of_response response));
+              Log.Global.flushed ()
+            | #Error.post as post_error ->
+              failwiths ~here:[%here]
+                (sprintf "post for operation %S failed"
+                   (Path.to_string Operation.path) )
+                post_error Error.sexp_of_post] )
+end
+
 module Get = struct
   module type S = sig
     val name : string
