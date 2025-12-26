@@ -1,5 +1,6 @@
 (library
  (name coinbase)
- (libraries core async fluxum)
- (flags :standard -open Core -open Async)
-)
+ (modules cfg rest ws order_book coinbase)
+ (libraries core async fluxum yojson uri cohttp-async cohttp_async_websocket)
+ (preprocess (pps ppx_jane ppx_deriving_yojson))
+ (flags :standard -open Core -open Async))

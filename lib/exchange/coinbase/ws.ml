@@ -1,0 +1,289 @@
+(** Coinbase Advanced Trade WebSocket API *)
+
+open Core
+open Async
+
+(* ============================================================ *)
+(* Endpoints *)
+(* ============================================================ *)
+
+module Endpoint = struct
+  let advanced_trade = "wss://advanced-trade-ws.coinbase.com"
+end
+
+(* ============================================================ *)
+(* Stream Types *)
+(* ============================================================ *)
+
+module Stream = struct
+  type t =
+    | Level2 of string list        (* product_ids *)
+    | MarketTrades of string list  (* product_ids *)
+    | Ticker of string list        (* product_ids *)
+    | TickerBatch of string list   (* product_ids *)
+    | Status                       (* All products *)
+    | Candles of string list       (* product_ids *)
+    | Heartbeats of string list    (* product_ids *)
+  [@@deriving sexp]
+
+  let channel_name = function
+    | Level2 _ -> "level2"
+    | MarketTrades _ -> "market_trades"
+    | Ticker _ -> "ticker"
+    | TickerBatch _ -> "ticker_batch"
+    | Status -> "status"
+    | Candles _ -> "candles"
+    | Heartbeats _ -> "heartbeats"
+
+  let product_ids = function
+    | Level2 ids | MarketTrades ids | Ticker ids
+    | TickerBatch ids | Candles ids | Heartbeats ids -> ids
+    | Status -> []
+
+  let to_subscribe_message streams =
+    let channel_groups = List.map streams ~f:(fun stream ->
+      `Assoc [
+        ("name", `String (channel_name stream));
+        ("product_ids", `List (List.map (product_ids stream) ~f:(fun id -> `String id)));
+      ]
+    ) in
+    `Assoc [
+      ("type", `String "subscribe");
+      ("product_ids", `List []);
+      ("channel", `String "");
+      ("channels", `List channel_groups);
+    ]
+
+  let to_unsubscribe_message streams =
+    let channel_groups = List.map streams ~f:(fun stream ->
+      `Assoc [
+        ("name", `String (channel_name stream));
+        ("product_ids", `List (List.map (product_ids stream) ~f:(fun id -> `String id)));
+      ]
+    ) in
+    `Assoc [
+      ("type", `String "unsubscribe");
+      ("channels", `List channel_groups);
+    ]
+end
+
+(* ============================================================ *)
+(* Message Types *)
+(* ============================================================ *)
+
+module Message = struct
+  (** Level2 price level *)
+  type price_level = {
+    price_level: string;
+    new_quantity: string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Level2 update event *)
+  type level2_update = {
+    product_id: string;
+    updates: price_level list;
+    side: string;  (* "bid" or "offer" *)
+    event_time: string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Level2 snapshot event *)
+  type level2_snapshot = {
+    product_id: string;
+    updates: price_level list;
+    side: string;  (* "bid" or "offer" *)
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Level2 message *)
+  type level2 = {
+    channel: string;
+    client_id: string;
+    timestamp: string;
+    sequence_num: int64;
+    events: level2_update list;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Market trade *)
+  type market_trade = {
+    trade_id: string;
+    product_id: string;
+    price: string;
+    size: string;
+    side: string;
+    time: string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Market trades message *)
+  type market_trades = {
+    channel: string;
+    client_id: string;
+    timestamp: string;
+    sequence_num: int64;
+    events: market_trade list;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Ticker *)
+  type ticker_event = {
+    product_id: string;
+    price: string option; [@default None]
+    volume_24_h: string option; [@default None] [@key "volume_24_h"]
+    low_24_h: string option; [@default None] [@key "low_24_h"]
+    high_24_h: string option; [@default None] [@key "high_24_h"]
+    low_52_w: string option; [@default None] [@key "low_52_w"]
+    high_52_w: string option; [@default None] [@key "high_52_w"]
+    price_percent_chg_24_h: string option; [@default None] [@key "price_percent_chg_24_h"]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Ticker message *)
+  type ticker = {
+    channel: string;
+    client_id: string;
+    timestamp: string;
+    sequence_num: int64;
+    events: ticker_event list;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Heartbeat *)
+  type heartbeat = {
+    channel: string;
+    client_id: string;
+    timestamp: string;
+    sequence_num: int64;
+    events: Yojson.Safe.t list;
+  } [@@deriving yojson { strict = false }]
+
+  let sexp_of_heartbeat { channel; client_id; timestamp; sequence_num; events } =
+    Sexp.List [
+      Sexp.List [Sexp.Atom "channel"; Sexp.Atom channel];
+      Sexp.List [Sexp.Atom "client_id"; Sexp.Atom client_id];
+      Sexp.List [Sexp.Atom "timestamp"; Sexp.Atom timestamp];
+      Sexp.List [Sexp.Atom "sequence_num"; Sexp.Atom (Int64.to_string sequence_num)];
+      Sexp.List [Sexp.Atom "events"; Sexp.Atom (sprintf "%d events" (List.length events))];
+    ]
+
+  (** Subscription response *)
+  type subscriptions = {
+    channel: string;
+    product_ids: string list;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type subscribe_response = {
+    type_: string; [@key "type"]
+    channels: subscriptions list;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Parsed message type *)
+  type t =
+    | Level2 of level2
+    | MarketTrades of market_trades
+    | Ticker of ticker
+    | Heartbeat of heartbeat
+    | Subscriptions of subscribe_response
+    | Error of string
+    | Unknown of string
+
+  let sexp_of_t = function
+    | Level2 msg -> Sexp.List [Sexp.Atom "Level2"; sexp_of_level2 msg]
+    | MarketTrades msg -> Sexp.List [Sexp.Atom "MarketTrades"; sexp_of_market_trades msg]
+    | Ticker msg -> Sexp.List [Sexp.Atom "Ticker"; sexp_of_ticker msg]
+    | Heartbeat msg -> Sexp.List [Sexp.Atom "Heartbeat"; sexp_of_heartbeat msg]
+    | Subscriptions resp -> Sexp.List [Sexp.Atom "Subscriptions"; sexp_of_subscribe_response resp]
+    | Error msg -> Sexp.List [Sexp.Atom "Error"; Sexp.Atom msg]
+    | Unknown msg -> Sexp.List [Sexp.Atom "Unknown"; Sexp.Atom msg]
+end
+
+(* ============================================================ *)
+(* Message Parsing *)
+(* ============================================================ *)
+
+let parse_message (msg : string) : Message.t =
+  try
+    let json = Yojson.Safe.from_string msg in
+    let channel =
+      Yojson.Safe.Util.member "channel" json
+      |> Yojson.Safe.Util.to_string_option
+    in
+    let type_ =
+      Yojson.Safe.Util.member "type" json
+      |> Yojson.Safe.Util.to_string_option
+    in
+    match type_ with
+    | Some "subscriptions" ->
+      (match Message.subscribe_response_of_yojson json with
+       | Ok resp -> Message.Subscriptions resp
+       | Error _ -> Message.Unknown msg)
+    | Some "error" ->
+      let error_msg = Yojson.Safe.Util.member "message" json
+        |> Yojson.Safe.Util.to_string_option
+        |> Option.value ~default:"Unknown error"
+      in
+      Message.Error error_msg
+    | _ ->
+      match channel with
+      | Some "l2_data" ->
+        (match Message.level2_of_yojson json with
+         | Ok level2 -> Message.Level2 level2
+         | Error _ -> Message.Unknown msg)
+      | Some "market_trades" ->
+        (match Message.market_trades_of_yojson json with
+         | Ok trades -> Message.MarketTrades trades
+         | Error _ -> Message.Unknown msg)
+      | Some "ticker" ->
+        (match Message.ticker_of_yojson json with
+         | Ok ticker -> Message.Ticker ticker
+         | Error _ -> Message.Unknown msg)
+      | Some "heartbeats" ->
+        (match Message.heartbeat_of_yojson json with
+         | Ok hb -> Message.Heartbeat hb
+         | Error _ -> Message.Unknown msg)
+      | _ -> Message.Unknown msg
+  with _ -> Message.Unknown msg
+
+(* ============================================================ *)
+(* WebSocket Client *)
+(* ============================================================ *)
+
+type t = {
+  uri : Uri.t;
+  reader : string Pipe.Reader.t;
+  writer : string Pipe.Writer.t;
+}
+
+let connect ?(url = Endpoint.advanced_trade) ?(streams = []) () : t Deferred.Or_error.t =
+  let uri = Uri.of_string url in
+  Deferred.Or_error.try_with (fun () ->
+    let headers = Cohttp.Header.init () in
+    Cohttp_async_websocket.Client.create ~headers uri
+    >>= fun conn_result ->
+    (match conn_result with
+     | Ok (_response, ws) -> return ws
+     | Error err ->
+       eprintf "Coinbase WebSocket connection error: %s\n" (Error.to_string_hum err);
+       Error.raise err)
+    >>= fun ws ->
+    let reader, writer = Websocket.pipes ws in
+
+    (* Subscribe to requested streams *)
+    (if not (List.is_empty streams) then
+      let msg = Stream.to_subscribe_message streams in
+      let msg_str = Yojson.Safe.to_string msg in
+      Pipe.write_if_open writer msg_str
+    else
+      Deferred.unit)
+    >>| fun () ->
+    { uri; reader; writer }
+  )
+
+let messages t = t.reader
+
+let subscribe t streams =
+  let msg = Stream.to_subscribe_message streams in
+  let msg_str = Yojson.Safe.to_string msg in
+  Pipe.write_if_open t.writer msg_str
+
+let unsubscribe t streams =
+  let msg = Stream.to_unsubscribe_message streams in
+  let msg_str = Yojson.Safe.to_string msg in
+  Pipe.write_if_open t.writer msg_str
+
+let close t =
+  Pipe.close t.writer
