@@ -1,0 +1,14 @@
+(test
+ (name run_tests)
+ (modules run_tests)
+ (libraries core mexc fluxum)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
+
+; Integration tests - run manually with: dune exec ./lib/exchange/mexc/test/integration_test.exe
+(executable
+ (name integration_test)
+ (modules integration_test)
+ (libraries core async mexc fluxum)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))

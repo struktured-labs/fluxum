@@ -5,6 +5,7 @@ open Async
 let gemini_command = Gemini.command
 let kraken_command = Kraken.command
 let binance_command = Binance.command
+let mexc_command = Mexc.command
 
 (* Gemini adapter helpers *)
 let get_gemini_balances cfg =
@@ -189,6 +190,7 @@ let command =
     [ ("gemini", gemini_command)
     ; ("kraken", kraken_command)
     ; ("binance", binance_command)
+    ; ("mexc", mexc_command)
     ; ("api", api_command)
     ]
 

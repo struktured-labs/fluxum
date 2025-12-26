@@ -1,0 +1,46 @@
+(** MEXC Signature - HMAC-SHA256 with hex encoding *)
+
+open Core
+
+(** HMAC-SHA256 implementation using digestif *)
+let hmac_sha256 ~secret ~message =
+  let block_size = 64 in (* SHA256 block size is 64 bytes *)
+
+  let secret_key =
+    if String.length secret > block_size then
+      Digestif.SHA256.digest_string secret |> Digestif.SHA256.to_raw_string
+    else
+      secret ^ String.make (block_size - String.length secret) '\x00'
+  in
+
+  let ipad = String.init block_size ~f:(fun i ->
+    Char.of_int_exn (Char.to_int secret_key.[i] lxor 0x36))
+  in
+  let opad = String.init block_size ~f:(fun i ->
+    Char.of_int_exn (Char.to_int secret_key.[i] lxor 0x5c))
+  in
+
+  let inner_msg = ipad ^ message in
+  let inner_hash = Digestif.SHA256.digest_string inner_msg |> Digestif.SHA256.to_raw_string in
+  let outer_msg = opad ^ inner_hash in
+  Digestif.SHA256.digest_string outer_msg
+
+(** Generate timestamp in milliseconds *)
+let generate_timestamp () =
+  Int63.to_string (Int63.of_float (Core_unix.gettimeofday () *. 1000.0))
+
+(** Build query string from key-value pairs *)
+let build_query_string params =
+  String.concat ~sep:"&"
+    (List.map params ~f:(fun (k, v) ->
+      sprintf "%s=%s" (Uri.pct_encode k) (Uri.pct_encode v)))
+
+(** Sign MEXC request parameters
+
+    MEXC signature = HMAC-SHA256(secret, query_string)
+    Returns hex-encoded signature (lowercase)
+*)
+let sign ~api_secret ~params =
+  let query_string = build_query_string params in
+  let hash = hmac_sha256 ~secret:api_secret ~message:query_string in
+  Digestif.SHA256.to_hex hash
