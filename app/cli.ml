@@ -6,6 +6,7 @@ let gemini_command = Gemini.command
 let kraken_command = Kraken.command
 let binance_command = Binance.command
 let mexc_command = Mexc.command
+let hyperliquid_command = Hyperliquid.command
 
 (* Gemini adapter helpers *)
 let get_gemini_balances cfg =
@@ -191,6 +192,7 @@ let command =
     ; ("kraken", kraken_command)
     ; ("binance", binance_command)
     ; ("mexc", mexc_command)
+    ; ("hyperliquid", hyperliquid_command)
     ; ("api", api_command)
     ]
 

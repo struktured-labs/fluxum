@@ -1,7 +1,7 @@
 (executable
   (name cli)
   (public_name fluxum)
-  (libraries gemini kraken binance mexc)
+  (libraries gemini kraken binance mexc hyperliquid)
   (modules cli)
   (package fluxum)
   (flags
