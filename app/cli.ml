@@ -8,6 +8,7 @@ let binance_command = Binance.command
 let mexc_command = Mexc.command
 let hyperliquid_command = Hyperliquid.command
 let coinbase_command = Coinbase.command
+let bitrue_command = Bitrue.command
 
 (* Gemini adapter helpers *)
 let get_gemini_balances cfg =
@@ -195,6 +196,7 @@ let command =
     ; ("mexc", mexc_command)
     ; ("hyperliquid", hyperliquid_command)
     ; ("coinbase", coinbase_command)
+    ; ("bitrue", bitrue_command)
     ; ("api", api_command)
     ]
 
