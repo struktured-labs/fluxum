@@ -1,6 +1,25 @@
 (library
  (name fluxum)
  (public_name fluxum)
+ (modules :standard \ websocket_curl curl_ext)
  (libraries core async csvfields yojson)
  (preprocess (pps ppx_jane ppx_deriving_yojson ppx_csv_conv))
  (flags :standard -open Core -open Async))
+
+(library
+ (name curl_ext)
+ (public_name fluxum.curl_ext)
+ (modules curl_ext)
+ (libraries curl)
+ (foreign_stubs
+  (language c)
+  (names curl_ext_stubs)
+  (flags -I/usr/include))
+ (c_library_flags (-lcurl)))
+
+(library
+ (name websocket_curl)
+ (public_name fluxum.websocket_curl)
+ (modules websocket_curl)
+ (libraries core async curl curl_ext uri base64 digestif)
+ (preprocess (pps ppx_jane)))

@@ -4,3 +4,19 @@
  (libraries core yojson)
  (flags :standard -open Core)
 )
+
+(executable
+ (name kraken_orderbook)
+ (modules kraken_orderbook)
+ (libraries core async kraken)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async)
+)
+
+(executable
+ (name kraken_orderbook_debug)
+ (modules kraken_orderbook_debug)
+ (libraries core async kraken)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async)
+)

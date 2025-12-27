@@ -441,6 +441,21 @@ module Public = struct
         ])
   end
 
+  (** Parse book levels from JSON array *)
+  let parse_price_levels (json_array : Yojson.Safe.t) : Price_level.t list =
+    match json_array with
+    | `List items ->
+      List.filter_map items ~f:(fun item ->
+        match item with
+        | `List [`String price; `String volume; `Float timestamp] ->
+          Some { Price_level.price; volume; timestamp }
+        | `List [`String price; `String volume; `String _timestamp] ->
+          (* Sometimes timestamp is a string *)
+          Some { Price_level.price; volume; timestamp = 0.0 }
+        | _ -> None
+      )
+    | _ -> []
+
   (** Parse a JSON array into a public message *)
   let parse_message (json : Yojson.Safe.t) : (message, Error.t) Result.t =
     match json with
@@ -451,24 +466,41 @@ module Public = struct
       (* Determine message type from data structure *)
       (match data_json with
       | `Assoc fields ->
-        (* Check for ticker fields *)
-        (match List.Assoc.find fields ~equal:String.equal "c" with
-        | Some _ ->
-          (match Ticker_data.of_yojson data_json with
-          | Ok data -> Ok (Ticker { data; channel; pair })
-          | Error e -> Error (`Json_parse_error ("Ticker parse error: " ^ e)))
-        | None ->
-          (* Check for spread *)
-          match List.Assoc.find fields ~equal:String.equal "b" with
-          | Some _ when List.Assoc.mem fields ~equal:String.equal "a" ->
-            (match Spread_data.of_yojson data_json with
-            | Ok data -> Ok (Spread { data; channel; pair })
-            | Error e -> Error (`Json_parse_error ("Spread parse error: " ^ e)))
-          | _ ->
+        (* Check for book update fields *)
+        (match (List.Assoc.find fields ~equal:String.equal "a",
+                List.Assoc.find fields ~equal:String.equal "b",
+                List.Assoc.find fields ~equal:String.equal "as",
+                List.Assoc.find fields ~equal:String.equal "bs") with
+        | (Some asks_json, _, _, _) | (_, _, Some asks_json, _) ->
+          (* Book update or snapshot *)
+          let bids_json = List.Assoc.find fields ~equal:String.equal "b"
+                         |> Option.value ~default:(List.Assoc.find fields ~equal:String.equal "bs" |> Option.value ~default:(`List [])) in
+          let checksum = List.Assoc.find fields ~equal:String.equal "c"
+                        |> Option.bind ~f:(function `String s -> Int.of_string_opt s | _ -> None) in
+          let asks = parse_price_levels asks_json in
+          let bids = parse_price_levels bids_json in
+          let update = { Book_data.bids; asks; checksum } in
+          Ok (Book { Book_data.update; channel; pair })
+
+        | (None, Some _, None, None) when List.Assoc.mem fields ~equal:String.equal "a" ->
+          (* Spread message *)
+          (match Spread_data.of_yojson data_json with
+          | Ok data -> Ok (Spread { data; channel; pair })
+          | Error e -> Error (`Json_parse_error ("Spread parse error: " ^ e)))
+
+        | _ ->
+          (* Check for ticker fields *)
+          match List.Assoc.find fields ~equal:String.equal "c" with
+          | Some _ ->
+            (match Ticker_data.of_yojson data_json with
+            | Ok data -> Ok (Ticker { data; channel; pair })
+            | Error e -> Error (`Json_parse_error ("Ticker parse error: " ^ e)))
+          | None ->
             (* Assume OHLC *)
             match Ohlc_data.of_yojson data_json with
             | Ok data -> Ok (Ohlc { data; channel; pair })
             | Error e -> Error (`Json_parse_error ("OHLC parse error: " ^ e)))
+
       | `List trade_items ->
         (* Parse as trades *)
         let parse_trade_item item =
@@ -479,7 +511,6 @@ module Public = struct
         let trades = List.filter_map trade_items ~f:parse_trade_item in
         Ok (Trade { trades; channel; pair })
       | _ ->
-        (* Try to parse as book update - structure varies *)
         Error (`Channel_parse_error "Unable to determine message type"))
     | _ -> Error (`Json_parse_error "Expected array message with [channelID, data, channelName, pair]")
 end
