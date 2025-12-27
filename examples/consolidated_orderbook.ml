@@ -5,16 +5,16 @@ let test () =
   let open Deferred.Let_syntax in
 
   printf "Starting consolidated order book for BTC/USD...\n";
-  printf "Connecting to Kraken and Hyperliquid WebSockets...\n\n%!";
+  printf "Connecting to Gemini, Kraken, and Hyperliquid WebSockets...\n\n%!";
 
   (* Create consolidated book *)
   let consolidated = ref (Consolidated_order_book.Book.empty "BTC/USD") in
   let update_count = ref 0 in
   let last_print_time = ref (Time_float_unix.now ()) in
 
-  (* Subscribe to Gemini order book (commented out - requires API credentials) *)
-  (* let module Gemini_cfg = Gemini.Cfg.Production () in
-  let%bind gemini_pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in *)
+  (* Subscribe to Gemini order book *)
+  let module Gemini_cfg = Gemini.Cfg.Production () in
+  let%bind gemini_pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in
 
   (* Subscribe to Kraken order book *)
   let%bind kraken_pipe = Kraken.Order_book.Book.pipe ~symbol:"XBT/USD" ~depth:10 () in
@@ -24,20 +24,31 @@ let test () =
 
   printf "✓ Connected to all exchanges\n\n%!";
 
-  (* Process Gemini updates in background (commented out - requires API credentials) *)
-  (* don't_wait_for (
+  (* Process Gemini updates in background *)
+  let gemini_first_update = ref true in
+  let gemini_message_count = ref 0 in
+  don't_wait_for (
     Pipe.iter gemini_pipe ~f:(fun book_result ->
+      gemini_message_count := !gemini_message_count + 1;
       match book_result with
       | `Ok gemini_book ->
+        if !gemini_first_update then (
+          printf "[INFO] Gemini data connected! (after %d messages)\n%!" !gemini_message_count;
+          gemini_first_update := false
+        );
         consolidated := Consolidated_order_book.Book.update_gemini !consolidated gemini_book;
         return ()
-      | `Channel_parse_error err | `Json_parse_error err ->
-        eprintf "Gemini error: %s\n%!" err;
+      | `Channel_parse_error err ->
+        eprintf "[GEMINI] Channel parse error (msg #%d): %s\n%!" !gemini_message_count err;
+        return ()
+      | `Json_parse_error err ->
+        eprintf "[GEMINI] JSON parse error (msg #%d): %s\n%!" !gemini_message_count err;
         return ()
     )
-  ); *)
+  );
 
   (* Process Hyperliquid updates in background *)
+  let hyperliquid_first_update = ref true in
   don't_wait_for (
     Pipe.iter hyperliquid_pipe ~f:(fun book_result ->
       match book_result with
@@ -45,6 +56,10 @@ let test () =
         eprintf "Hyperliquid error: %s\n%!" err;
         return ()
       | Ok hyperliquid_book ->
+        if !hyperliquid_first_update then (
+          printf "[INFO] Hyperliquid data connected!\n%!";
+          hyperliquid_first_update := false
+        );
         consolidated := Consolidated_order_book.Book.update_hyperliquid !consolidated hyperliquid_book;
         return ()
     )
