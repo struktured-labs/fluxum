@@ -36,3 +36,11 @@
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async)
 )
+
+(executable
+ (name gemini_orderbook_curl)
+ (modules gemini_orderbook_curl)
+ (libraries core async gemini)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async)
+)

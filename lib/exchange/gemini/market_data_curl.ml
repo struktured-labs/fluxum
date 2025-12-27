@@ -42,9 +42,9 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
       active = true;
     } in
 
-    (* Start background task to receive messages with buffering for fragmented JSON *)
+    (* Start background task to receive messages with proper JSON object boundary detection *)
     don't_wait_for (
-      let buffer = ref "" in
+      let buffer = Buffer.create 4096 in
       let rec receive_loop () =
         if not t.active then (
           Pipe.close t.message_writer;
@@ -58,29 +58,54 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
             Pipe.close t.message_writer;
             return ()
           | Some payload ->
+            (* Debug: log received data *)
+            if String.length payload > 0 then
+              Log.Global.debug "Gemini libcurl received %d bytes" (String.length payload);
             (* Append to buffer *)
-            buffer := !buffer ^ payload;
-            (* Try to extract complete JSON messages *)
-            let rec extract_messages buf =
-              try
-                let json = Yojson.Safe.from_string buf in
-                (* Successfully parsed - write it and clear buffer *)
-                let json_str = Yojson.Safe.to_string json in
-                buffer := String.drop_prefix buf (String.length json_str);
-                (* Trim any whitespace before next message *)
-                buffer := String.lstrip !buffer;
-                let%bind () = Pipe.write t.message_writer json_str in
-                (* Check if there's more data to process *)
-                if String.length !buffer > 0 then
-                  extract_messages !buffer
-                else
-                  return ()
-              with
-              | _ ->
-                (* Incomplete JSON, wait for more data *)
+            Buffer.add_string buffer payload;
+
+            (* Extract complete JSON objects by counting braces *)
+            let rec extract_complete_json () =
+              let content = Buffer.contents buffer in
+              if String.length content = 0 then
                 return ()
+              else
+                (* Find a complete JSON object by matching braces *)
+                let rec find_json_end pos depth in_string escaped =
+                  if pos >= String.length content then
+                    None (* Incomplete JSON *)
+                  else
+                    let c = content.[pos] in
+                    match c, in_string, escaped with
+                    | '\\', true, false -> find_json_end (pos + 1) depth true true
+                    | '"', false, _ -> find_json_end (pos + 1) depth true false
+                    | '"', true, false -> find_json_end (pos + 1) depth false false
+                    | '{', false, _ -> find_json_end (pos + 1) (depth + 1) false false
+                    | '}', false, _ ->
+                      let new_depth = depth - 1 in
+                      if new_depth = 0 then
+                        Some (pos + 1) (* Found complete JSON *)
+                      else
+                        find_json_end (pos + 1) new_depth false false
+                    | _, _, _ -> find_json_end (pos + 1) depth in_string false
+                in
+
+                match find_json_end 0 0 false false with
+                | None ->
+                  (* No complete JSON yet, wait for more data *)
+                  return ()
+                | Some end_pos ->
+                  (* Extract the complete JSON *)
+                  let json_str = String.sub content ~pos:0 ~len:end_pos in
+                  (* Remove it from buffer *)
+                  Buffer.clear buffer;
+                  Buffer.add_string buffer (String.drop_prefix content end_pos);
+                  (* Send the complete JSON message *)
+                  let%bind () = Pipe.write t.message_writer json_str in
+                  (* Check for more complete objects in buffer *)
+                  extract_complete_json ()
             in
-            let%bind () = extract_messages !buffer in
+            let%bind () = extract_complete_json () in
             receive_loop ()
       in
       receive_loop ()

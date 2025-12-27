@@ -12,9 +12,9 @@ let test () =
   let update_count = ref 0 in
   let last_print_time = ref (Time_float_unix.now ()) in
 
-  (* Subscribe to Gemini order book (using original Cohttp WebSocket) *)
+  (* Subscribe to Gemini order book (using libcurl for unified WebSocket layer) *)
   let module Gemini_cfg = Gemini.Cfg.Production () in
-  let%bind gemini_pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in
+  let%bind gemini_pipe = Gemini.Order_book.Book.pipe_curl (module Gemini_cfg) ~symbol:`Btcusd () in
 
   (* Subscribe to Kraken order book *)
   let%bind kraken_pipe = Kraken.Order_book.Book.pipe ~symbol:"XBT/USD" ~depth:10 () in
