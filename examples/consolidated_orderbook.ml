@@ -5,7 +5,7 @@ let test () =
   let open Deferred.Let_syntax in
 
   printf "Starting consolidated order book for BTC/USD...\n";
-  printf "Connecting to Gemini and Kraken WebSockets...\n\n%!";
+  printf "Connecting to Gemini, Kraken, and Hyperliquid WebSockets...\n\n%!";
 
   (* Create consolidated book *)
   let consolidated = ref (Consolidated_order_book.Book.empty "BTC/USD") in
@@ -19,7 +19,18 @@ let test () =
   (* Subscribe to Kraken order book *)
   let%bind kraken_pipe = Kraken.Order_book.Book.pipe ~symbol:"XBT/USD" ~depth:10 () in
 
-  printf "✓ Connected to both exchanges\n\n%!";
+  (* Subscribe to Hyperliquid order book *)
+  let%bind hyperliquid_pipe_result = Hyperliquid.Order_book.Book.pipe ~symbol:"BTC" () in
+  let hyperliquid_pipe = match hyperliquid_pipe_result with
+    | Ok pipe -> pipe
+    | Error err ->
+      eprintf "Hyperliquid connection error: %s\n%!" (Error.to_string_hum err);
+      let reader, _writer = Pipe.create () in
+      Pipe.close_read reader;
+      reader
+  in
+
+  printf "✓ Connected to all exchanges\n\n%!";
 
   (* Process Gemini updates in background *)
   don't_wait_for (
@@ -30,6 +41,19 @@ let test () =
         return ()
       | `Channel_parse_error err | `Json_parse_error err ->
         eprintf "Gemini error: %s\n%!" err;
+        return ()
+    )
+  );
+
+  (* Process Hyperliquid updates in background *)
+  don't_wait_for (
+    Pipe.iter hyperliquid_pipe ~f:(fun book_result ->
+      match book_result with
+      | Error err ->
+        eprintf "Hyperliquid error: %s\n%!" err;
+        return ()
+      | Ok hyperliquid_book ->
+        consolidated := Consolidated_order_book.Book.update_hyperliquid !consolidated hyperliquid_book;
         return ()
     )
   );

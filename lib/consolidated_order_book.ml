@@ -10,6 +10,7 @@ module Bid_ask = Fluxum.Order_book_intf.Bid_ask
 type exchange_source =
   | Gemini
   | Kraken
+  | Hyperliquid
   | Multiple of exchange_source list
   [@@deriving sexp, compare, equal]
 
@@ -52,6 +53,7 @@ module Book = struct
     asks : Attributed_level.t Ask_price_map.t;
     gemini_book : Gemini.Order_book.Book.t option;
     kraken_book : Kraken.Order_book.Book.t option;
+    hyperliquid_book : Hyperliquid.Order_book.Book.t option;
     epoch : int;
     update_time : Time_float_unix.t;
   }
@@ -64,6 +66,7 @@ module Book = struct
     asks = Ask_price_map.empty;
     gemini_book = None;
     kraken_book = None;
+    hyperliquid_book = None;
     epoch = 0;
     update_time = Time_float_unix.now ();
   }
@@ -111,7 +114,20 @@ module Book = struct
                exchange = Kraken
              }))
       in
-      gemini_bids @ kraken_bids
+      let hyperliquid_bids = match t.hyperliquid_book with
+        | None -> []
+        | Some book ->
+          Map.to_alist book.Hyperliquid.Order_book.Book.bids
+          |> (fun list -> List.take list 100)
+          |> List.map ~f:(fun (_, level) ->
+            (level.Fluxum.Order_book_intf.Price_level.price,
+             { Attributed_level.
+               price = level.price;
+               volume = level.volume;
+               exchange = Hyperliquid
+             }))
+      in
+      gemini_bids @ kraken_bids @ hyperliquid_bids
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p2 p1) (* Descending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
       |> List.map ~f:(fun group ->
@@ -147,7 +163,20 @@ module Book = struct
                exchange = Kraken
              }))
       in
-      gemini_asks @ kraken_asks
+      let hyperliquid_asks = match t.hyperliquid_book with
+        | None -> []
+        | Some book ->
+          Map.to_alist book.Hyperliquid.Order_book.Book.asks
+          |> (fun list -> List.take list 100)
+          |> List.map ~f:(fun (_, level) ->
+            (level.Fluxum.Order_book_intf.Price_level.price,
+             { Attributed_level.
+               price = level.price;
+               volume = level.volume;
+               exchange = Hyperliquid
+             }))
+      in
+      gemini_asks @ kraken_asks @ hyperliquid_asks
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2) (* Ascending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
       |> List.map ~f:(fun group ->
@@ -167,6 +196,11 @@ module Book = struct
   (** Update Kraken book *)
   let update_kraken t kraken_book =
     let t = { t with kraken_book = Some kraken_book } in
+    rebuild t
+
+  (** Update Hyperliquid book *)
+  let update_hyperliquid t hyperliquid_book =
+    let t = { t with hyperliquid_book = Some hyperliquid_book } in
     rebuild t
 
   (** Get best bid *)
@@ -195,6 +229,7 @@ module Book = struct
   let rec exchange_to_string = function
     | Gemini -> "GEM"
     | Kraken -> "KRK"
+    | Hyperliquid -> "HYP"
     | Multiple sources ->
       List.map sources ~f:exchange_to_string
       |> String.concat ~sep:"+"
@@ -213,6 +248,7 @@ module Book = struct
     printf "Sources: ";
     if Option.is_some t.gemini_book then printf "[Gemini] ";
     if Option.is_some t.kraken_book then printf "[Kraken] ";
+    if Option.is_some t.hyperliquid_book then printf "[Hyperliquid] ";
     printf "\n\n";
 
     (* Print asks (highest to lowest for display) *)
