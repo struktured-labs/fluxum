@@ -49,7 +49,7 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
         if not t.active then (
           Pipe.close t.message_writer;
           return ()
-        ) else
+        ) else (
           let%bind msg_opt = Websocket_curl.receive ws in
           match msg_opt with
           | None ->
@@ -58,55 +58,33 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
             Pipe.close t.message_writer;
             return ()
           | Some payload ->
-            (* Debug: log received data *)
-            if String.length payload > 0 then
-              Log.Global.debug "Gemini libcurl received %d bytes" (String.length payload);
             (* Append to buffer *)
             Buffer.add_string buffer payload;
 
-            (* Extract complete JSON objects by counting braces *)
+            (* Extract complete JSON objects - try parsing incrementally *)
             let rec extract_complete_json () =
               let content = Buffer.contents buffer in
               if String.length content = 0 then
                 return ()
               else
-                (* Find a complete JSON object by matching braces *)
-                let rec find_json_end pos depth in_string escaped =
-                  if pos >= String.length content then
-                    None (* Incomplete JSON *)
-                  else
-                    let c = content.[pos] in
-                    match c, in_string, escaped with
-                    | '\\', true, false -> find_json_end (pos + 1) depth true true
-                    | '"', false, _ -> find_json_end (pos + 1) depth true false
-                    | '"', true, false -> find_json_end (pos + 1) depth false false
-                    | '{', false, _ -> find_json_end (pos + 1) (depth + 1) false false
-                    | '}', false, _ ->
-                      let new_depth = depth - 1 in
-                      if new_depth = 0 then
-                        Some (pos + 1) (* Found complete JSON *)
-                      else
-                        find_json_end (pos + 1) new_depth false false
-                    | _, _, _ -> find_json_end (pos + 1) depth in_string false
-                in
-
-                match find_json_end 0 0 false false with
-                | None ->
-                  (* No complete JSON yet, wait for more data *)
-                  return ()
-                | Some end_pos ->
-                  (* Extract the complete JSON *)
-                  let json_str = String.sub content ~pos:0 ~len:end_pos in
-                  (* Remove it from buffer *)
+                (* Try to parse as JSON - if successful, we have a complete object *)
+                try
+                  let _json = Yojson.Safe.from_string content in
+                  (* Successfully parsed - entire buffer is one JSON object *)
+                  if String.length content > 100000 then
+                    Log.Global.info "Gemini: Parsed large JSON (%d bytes), writing to pipe" (String.length content);
+                  let json_str = content in
                   Buffer.clear buffer;
-                  Buffer.add_string buffer (String.drop_prefix content end_pos);
-                  (* Send the complete JSON message *)
                   let%bind () = Pipe.write t.message_writer json_str in
-                  (* Check for more complete objects in buffer *)
                   extract_complete_json ()
+                with
+                | Yojson.Json_error _ ->
+                  (* Not a complete JSON yet, wait for more data *)
+                  return ()
             in
             let%bind () = extract_complete_json () in
             receive_loop ()
+        )
       in
       receive_loop ()
     );

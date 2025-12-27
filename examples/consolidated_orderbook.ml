@@ -5,7 +5,7 @@ let test () =
   let open Deferred.Let_syntax in
 
   printf "Starting consolidated order book for BTC/USD...\n";
-  printf "Connecting to Gemini, Kraken, and Hyperliquid WebSockets...\n\n%!";
+  printf "Connecting to Gemini and Kraken WebSockets...\n\n%!";
 
   (* Create consolidated book *)
   let consolidated = ref (Consolidated_order_book.Book.empty "BTC/USD") in
@@ -20,35 +20,35 @@ let test () =
   let%bind kraken_pipe = Kraken.Order_book.Book.pipe ~symbol:"XBT/USD" ~depth:10 () in
 
   (* Subscribe to Hyperliquid order book *)
-  let%bind hyperliquid_pipe = Hyperliquid.Order_book.Book.pipe ~symbol:"BTC" () in
+  (* Temporarily disabled to test GEM + KRK stability *)
+  (* let%bind hyperliquid_pipe = Hyperliquid.Order_book.Book.pipe ~symbol:"BTC" () in *)
 
-  printf "✓ Connected to all exchanges\n\n%!";
+  printf "✓ Connected to Gemini and Kraken\n\n%!";
 
   (* Process Gemini updates in background *)
   let gemini_first_update = ref true in
-  let gemini_message_count = ref 0 in
   don't_wait_for (
     Pipe.iter gemini_pipe ~f:(fun book_result ->
-      gemini_message_count := !gemini_message_count + 1;
       match book_result with
       | `Ok gemini_book ->
         if !gemini_first_update then (
-          printf "[INFO] Gemini data connected! (after %d messages)\n%!" !gemini_message_count;
+          printf "[INFO] Gemini data connected!\n%!";
           gemini_first_update := false
         );
         consolidated := Consolidated_order_book.Book.update_gemini !consolidated gemini_book;
         return ()
       | `Channel_parse_error err ->
-        eprintf "[GEMINI] Channel parse error (msg #%d): %s\n%!" !gemini_message_count err;
+        eprintf "[GEMINI] Channel parse error: %s\n%!" err;
         return ()
       | `Json_parse_error err ->
-        eprintf "[GEMINI] JSON parse error (msg #%d): %s\n%!" !gemini_message_count err;
+        eprintf "[GEMINI] JSON parse error: %s\n%!" err;
         return ()
     )
   );
 
   (* Process Hyperliquid updates in background *)
-  let hyperliquid_first_update = ref true in
+  (* Temporarily disabled *)
+  (* let hyperliquid_first_update = ref true in
   don't_wait_for (
     Pipe.iter hyperliquid_pipe ~f:(fun book_result ->
       match book_result with
@@ -63,7 +63,7 @@ let test () =
         consolidated := Consolidated_order_book.Book.update_hyperliquid !consolidated hyperliquid_book;
         return ()
     )
-  );
+  ); *)
 
   (* Process Kraken updates in foreground *)
   let%bind () =
