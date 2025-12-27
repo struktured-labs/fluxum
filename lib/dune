@@ -1,7 +1,7 @@
 (library
  (name fluxum)
  (public_name fluxum)
- (modules :standard \ websocket_curl curl_ext)
+ (modules :standard \ websocket_curl curl_ext consolidated_order_book)
  (libraries core async csvfields yojson)
  (preprocess (pps ppx_jane ppx_deriving_yojson ppx_csv_conv))
  (flags :standard -open Core -open Async))
@@ -23,3 +23,10 @@
  (modules websocket_curl)
  (libraries core async curl curl_ext uri base64 digestif)
  (preprocess (pps ppx_jane)))
+
+(library
+ (name consolidated_order_book)
+ (modules consolidated_order_book)
+ (libraries core async fluxum gemini kraken)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))

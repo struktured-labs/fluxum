@@ -20,3 +20,11 @@
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async)
 )
+
+(executable
+ (name consolidated_orderbook)
+ (modules consolidated_orderbook)
+ (libraries core async consolidated_order_book gemini kraken)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async)
+)
