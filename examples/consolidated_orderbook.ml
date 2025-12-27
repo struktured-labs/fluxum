@@ -5,38 +5,58 @@ let test () =
   let open Deferred.Let_syntax in
 
   printf "Starting consolidated order book for BTC/USD...\n";
-  printf "Connecting to Kraken WebSocket...\n\n%!";
+  printf "Connecting to Gemini and Kraken WebSockets...\n\n%!";
 
   (* Create consolidated book *)
   let consolidated = ref (Consolidated_order_book.Book.empty "BTC/USD") in
   let update_count = ref 0 in
+  let last_print_time = ref (Time_float_unix.now ()) in
+
+  (* Subscribe to Gemini order book *)
+  let module Gemini_cfg = Gemini.Cfg.Production () in
+  let%bind gemini_pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in
 
   (* Subscribe to Kraken order book *)
   let%bind kraken_pipe = Kraken.Order_book.Book.pipe ~symbol:"XBT/USD" ~depth:10 () in
 
-  (* For demonstration: You can add Gemini here once credentials are set up:
-   *
-   * module Gemini_cfg = Gemini.Cfg.Sandbox ()
-   * let%bind gemini_pipe = Gemini.Order_book.Book.pipe
-   *   (module Gemini_cfg) ~symbol:"BTCUSD" () in
-   *
-   * Then handle gemini updates similar to kraken below
-   *)
+  printf "✓ Connected to both exchanges\n\n%!";
 
-  (* Process Kraken updates *)
+  (* Process Gemini updates in background *)
+  don't_wait_for (
+    Pipe.iter gemini_pipe ~f:(fun book_result ->
+      match book_result with
+      | `Ok gemini_book ->
+        consolidated := Consolidated_order_book.Book.update_gemini !consolidated gemini_book;
+        return ()
+      | `Channel_parse_error err | `Json_parse_error err ->
+        eprintf "Gemini error: %s\n%!" err;
+        return ()
+    )
+  );
+
+  (* Process Kraken updates in foreground *)
   let%bind () =
     Pipe.iter kraken_pipe ~f:(fun book_result ->
       match book_result with
       | Error err ->
-        printf "Kraken error: %s\n%!" err;
+        eprintf "Kraken error: %s\n%!" err;
         return ()
       | Ok kraken_book ->
         consolidated := Consolidated_order_book.Book.update_kraken !consolidated kraken_book;
         update_count := !update_count + 1;
 
-        (* Print every 5 updates *)
-        if !update_count mod 5 = 0 then
+        (* Print every 5 updates or every 2 seconds *)
+        let now = Time_float_unix.now () in
+        let time_since_print = Time_float_unix.diff now !last_print_time in
+        let should_print =
+          !update_count mod 5 = 0 ||
+          Time_float_unix.Span.(time_since_print > of_sec 2.0)
+        in
+
+        if should_print then (
+          last_print_time := now;
           Consolidated_order_book.Book.pretty_print ~max_depth:8 !consolidated ();
+        );
 
         return ()
     )
