@@ -544,6 +544,28 @@ module Book = struct
           (book, `Ok book)
         | #Market_data.Error.t as e -> (book, e) )
 
+  (** Create order book pipe using libcurl WebSocket (simplified, more reliable) *)
+  let pipe_curl (module Cfg : Cfg.S) ~(symbol : Symbol.t) () =
+    let open Deferred.Let_syntax in
+    let book = empty symbol in
+    let%bind md_result = Market_data_curl.connect (module Cfg) ~symbol () in
+    match md_result with
+    | Error err ->
+      Log.Global.error "Gemini libcurl connection error: %s" err;
+      let reader, _writer = Pipe.create () in
+      Pipe.close_read reader;
+      return reader
+    | Ok md ->
+      let response_pipe = Market_data_curl.response_pipe md in
+      return (
+        Pipe.folding_map ~init:book response_pipe ~f:(fun book response ->
+          match response with
+          | `Ok response ->
+            let book = on_market_data book response in
+            (book, `Ok book)
+          | #Ws.Error.t as e -> (book, e))
+      )
+
   let pipe_exn (module Cfg : Cfg.S) ~symbol () =
     pipe (module Cfg) ~symbol ()
     >>| Pipe.map ~f:(function
