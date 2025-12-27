@@ -5,35 +5,27 @@ let test () =
   let open Deferred.Let_syntax in
 
   printf "Starting consolidated order book for BTC/USD...\n";
-  printf "Connecting to Gemini, Kraken, and Hyperliquid WebSockets...\n\n%!";
+  printf "Connecting to Kraken and Hyperliquid WebSockets...\n\n%!";
 
   (* Create consolidated book *)
   let consolidated = ref (Consolidated_order_book.Book.empty "BTC/USD") in
   let update_count = ref 0 in
   let last_print_time = ref (Time_float_unix.now ()) in
 
-  (* Subscribe to Gemini order book *)
-  let module Gemini_cfg = Gemini.Cfg.Production () in
-  let%bind gemini_pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in
+  (* Subscribe to Gemini order book (commented out - requires API credentials) *)
+  (* let module Gemini_cfg = Gemini.Cfg.Production () in
+  let%bind gemini_pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in *)
 
   (* Subscribe to Kraken order book *)
   let%bind kraken_pipe = Kraken.Order_book.Book.pipe ~symbol:"XBT/USD" ~depth:10 () in
 
   (* Subscribe to Hyperliquid order book *)
-  let%bind hyperliquid_pipe_result = Hyperliquid.Order_book.Book.pipe ~symbol:"BTC" () in
-  let hyperliquid_pipe = match hyperliquid_pipe_result with
-    | Ok pipe -> pipe
-    | Error err ->
-      eprintf "Hyperliquid connection error: %s\n%!" (Error.to_string_hum err);
-      let reader, _writer = Pipe.create () in
-      Pipe.close_read reader;
-      reader
-  in
+  let%bind hyperliquid_pipe = Hyperliquid.Order_book.Book.pipe ~symbol:"BTC" () in
 
   printf "✓ Connected to all exchanges\n\n%!";
 
-  (* Process Gemini updates in background *)
-  don't_wait_for (
+  (* Process Gemini updates in background (commented out - requires API credentials) *)
+  (* don't_wait_for (
     Pipe.iter gemini_pipe ~f:(fun book_result ->
       match book_result with
       | `Ok gemini_book ->
@@ -43,7 +35,7 @@ let test () =
         eprintf "Gemini error: %s\n%!" err;
         return ()
     )
-  );
+  ); *)
 
   (* Process Hyperliquid updates in background *)
   don't_wait_for (

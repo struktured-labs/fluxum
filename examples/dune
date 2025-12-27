@@ -28,3 +28,11 @@
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async)
 )
+
+(executable
+ (name hyperliquid_orderbook)
+ (modules hyperliquid_orderbook)
+ (libraries core async hyperliquid)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async)
+)
