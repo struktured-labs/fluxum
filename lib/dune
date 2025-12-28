@@ -14,7 +14,7 @@
  (foreign_stubs
   (language c)
   (names curl_ext_stubs)
-  (flags -I/usr/include))
+  (flags -I/usr/include -fPIC))
  (c_library_flags (-lcurl)))
 
 (library
