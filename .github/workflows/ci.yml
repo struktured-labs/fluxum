@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, claude ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config
+
+    - name: Set up OCaml
+      uses: ocaml/setup-ocaml@v2
+      with:
+        ocaml-compiler: 5.2.x
+
+    - name: Install opam dependencies
+      run: |
+        opam pin add -y fluxum .
+        opam install -y --deps-only fluxum
+
+    - name: Build
+      run: |
+        eval $(opam env)
+        dune build
+
+    - name: Run unit tests
+      run: |
+        eval $(opam env)
+        dune runtest
+      timeout-minutes: 10
+
+    - name: Run WebSocket integration tests (public endpoints only)
+      run: |
+        eval $(opam env)
+        # Test Gemini (public, no auth)
+        timeout 30 dune exec examples/gemini_orderbook_curl.exe || true
+
+        # Test Kraken (public, no auth)
+        timeout 30 dune exec examples/kraken_orderbook.exe || true
+
+        # Test Hyperliquid (public, no auth)
+        timeout 30 dune exec examples/hyperliquid_orderbook.exe || true
+      timeout-minutes: 5
+      continue-on-error: true  # Don't fail build on flaky network tests
+
+    - name: Build consolidated orderbook
+      run: |
+        eval $(opam env)
+        dune build examples/consolidated_orderbook.exe
+      timeout-minutes: 5
+
+  # Optional: Nightly integration tests with longer timeouts
+  integration-nightly:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - name: Set up OCaml
+      uses: ocaml/setup-ocaml@v2
+      with:
+        ocaml-compiler: 5.2.x
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config
+        opam pin add -y fluxum .
+        opam install -y --deps-only fluxum
+
+    - name: Build
+      run: |
+        eval $(opam env)
+        dune build
+
+    - name: Long-running WebSocket stability tests
+      run: |
+        eval $(opam env)
+        # Run for 3 minutes to test connection stability
+        timeout 180 dune exec examples/hyperliquid_orderbook.exe || echo "Test completed or timed out"
+        timeout 180 dune exec examples/consolidated_orderbook.exe || echo "Test completed or timed out"
+      timeout-minutes: 10
+      env:
+        # Use secrets for authenticated tests (if needed)
+        # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        # KRAKEN_API_KEY: ${{ secrets.KRAKEN_API_KEY }}
