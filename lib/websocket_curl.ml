@@ -46,7 +46,11 @@ let connect ~url =
         Curl.set_url conn connect_url;
         Curl.set_connectonly conn true;
         Curl.set_httpversion conn Curl.HTTP_VERSION_1_1;  (* Force HTTP/1.1, not HTTP/2 *)
+        Curl.set_nosignal conn true;  (* Prevent SIGPIPE signals *)
+        Curl.set_tcpnodelay conn true;  (* Disable Nagle's algorithm for low-latency sends *)
         Curl.perform conn;
+        (* Set socket to non-blocking mode for fast send/recv operations *)
+        Curl_ext.set_nonblocking conn;
         conn
       )
     )

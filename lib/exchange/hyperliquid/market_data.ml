@@ -37,9 +37,12 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.mainnet) () : (t, 
     } in
 
     (* Start background task to receive messages *)
+    Log.Global.info "Hyperliquid: Starting receive loop in background";
+    let receive_count = ref 0 in
     don't_wait_for (
       let rec receive_loop () =
         if not t.active then (
+          Log.Global.info "Hyperliquid: Receive loop ending (inactive)";
           Pipe.close t.message_writer;
           return ()
         ) else
@@ -47,14 +50,55 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.mainnet) () : (t, 
           match msg_opt with
           | None ->
             (* Connection closed *)
+            Log.Global.info "Hyperliquid: Connection closed by server";
             t.active <- false;
             Pipe.close t.message_writer;
             return ()
           | Some payload ->
+            receive_count := !receive_count + 1;
+            if !receive_count mod 50 = 0 then
+              Log.Global.info "Hyperliquid: Received %d messages so far" !receive_count;
             let%bind () = Pipe.write t.message_writer payload in
             receive_loop ()
       in
       receive_loop ()
+    );
+
+    (* Start background task to send periodic pings to keep connection alive *)
+    (* Send first ping immediately, then every 2.5 seconds *)
+    (* NOTE: With 2s timeout on C stub, 2.5s interval provides safe margin for Hyperliquid's ~5s timeout *)
+    Log.Global.info "Hyperliquid: Starting ping loop (every 2.5 seconds)";
+    let ping_count = ref 0 in
+    don't_wait_for (
+      let rec ping_loop () =
+        if not t.active then (
+          Log.Global.info "Hyperliquid: Ping loop ending (inactive after %d pings)" !ping_count;
+          return ()
+        ) else (
+          ping_count := !ping_count + 1;
+          let start_time = Time_float_unix.now () in
+          Log.Global.info "Hyperliquid: Sending ping #%d at %s"
+            !ping_count
+            (Time_float_unix.to_string_abs start_time ~zone:(force Time_float_unix.Zone.local));
+          let%bind send_result = try_with (fun () -> Websocket_curl.send ws "{\"method\":\"ping\"}") in
+          let end_time = Time_float_unix.now () in
+          let duration = Time_float_unix.diff end_time start_time in
+          let duration_ms = Time_float_unix.Span.to_ms duration in
+          (match send_result with
+          | Ok () ->
+            if Float.(duration_ms > 1000.0) then
+              Log.Global.info "Hyperliquid: Ping #%d took %.2f ms (WARNING: >1s)" !ping_count duration_ms
+            else
+              Log.Global.info "Hyperliquid: Ping #%d sent successfully in %.2f ms" !ping_count duration_ms
+          | Error exn ->
+            Log.Global.error "Hyperliquid: Ping #%d failed after %.2f ms: %s"
+              !ping_count duration_ms (Exn.to_string exn)
+          );
+          let%bind () = after (Time_float.Span.of_sec 2.5) in
+          ping_loop ()
+        )
+      in
+      ping_loop ()
     );
 
     (* Send subscription messages for each stream *)

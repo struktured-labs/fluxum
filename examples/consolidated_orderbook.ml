@@ -5,7 +5,7 @@ let test () =
   let open Deferred.Let_syntax in
 
   printf "Starting consolidated order book for BTC/USD...\n";
-  printf "Connecting to Gemini and Kraken WebSockets...\n\n%!";
+  printf "Connecting to Gemini, Kraken, and Hyperliquid WebSockets...\n\n%!";
 
   (* Create consolidated book *)
   let consolidated = ref (Consolidated_order_book.Book.empty "BTC/USD") in
@@ -20,10 +20,9 @@ let test () =
   let%bind kraken_pipe = Kraken.Order_book.Book.pipe ~symbol:"XBT/USD" ~depth:10 () in
 
   (* Subscribe to Hyperliquid order book *)
-  (* Temporarily disabled to test GEM + KRK stability *)
-  (* let%bind hyperliquid_pipe = Hyperliquid.Order_book.Book.pipe ~symbol:"BTC" () in *)
+  let%bind hyperliquid_pipe = Hyperliquid.Order_book.Book.pipe ~symbol:"BTC" () in
 
-  printf "✓ Connected to Gemini and Kraken\n\n%!";
+  printf "✓ Connected to all three exchanges\n\n%!";
 
   (* Process Gemini updates in background *)
   let gemini_first_update = ref true in
@@ -47,8 +46,7 @@ let test () =
   );
 
   (* Process Hyperliquid updates in background *)
-  (* Temporarily disabled *)
-  (* let hyperliquid_first_update = ref true in
+  let hyperliquid_first_update = ref true in
   don't_wait_for (
     Pipe.iter hyperliquid_pipe ~f:(fun book_result ->
       match book_result with
@@ -63,7 +61,7 @@ let test () =
         consolidated := Consolidated_order_book.Book.update_hyperliquid !consolidated hyperliquid_book;
         return ()
     )
-  ); *)
+  );
 
   (* Process Kraken updates in foreground *)
   let%bind () =

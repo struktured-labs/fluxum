@@ -43,10 +43,14 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
     } in
 
     (* Start background task to receive messages with proper JSON object boundary detection *)
+    Log.Global.info "Gemini: Starting receive loop in background";
+    let receive_count = ref 0 in
+    let parsed_count = ref 0 in
     don't_wait_for (
       let buffer = Buffer.create 4096 in
       let rec receive_loop () =
         if not t.active then (
+          Log.Global.info "Gemini: Receive loop ending (inactive)";
           Pipe.close t.message_writer;
           return ()
         ) else (
@@ -54,10 +58,14 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
           match msg_opt with
           | None ->
             (* Connection closed *)
+            Log.Global.info "Gemini: Connection closed by server";
             t.active <- false;
             Pipe.close t.message_writer;
             return ()
           | Some payload ->
+            receive_count := !receive_count + 1;
+            if !receive_count mod 50 = 0 then
+              Log.Global.info "Gemini: Received %d chunks so far" !receive_count;
             (* Append to buffer *)
             Buffer.add_string buffer payload;
 
@@ -71,8 +79,12 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
                 try
                   let _json = Yojson.Safe.from_string content in
                   (* Successfully parsed - entire buffer is one JSON object *)
+                  parsed_count := !parsed_count + 1;
                   if String.length content > 100000 then
-                    Log.Global.info "Gemini: Parsed large JSON (%d bytes), writing to pipe" (String.length content);
+                    Log.Global.info "Gemini: Parsed large JSON (%d bytes, msg #%d), writing to pipe"
+                      (String.length content) !parsed_count
+                  else if !parsed_count mod 100 = 0 then
+                    Log.Global.info "Gemini: Parsed %d messages so far" !parsed_count;
                   let json_str = content in
                   Buffer.clear buffer;
                   let%bind () = Pipe.write t.message_writer json_str in
