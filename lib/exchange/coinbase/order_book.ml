@@ -114,7 +114,14 @@ module Book = struct
     let url = Option.value url ~default:Ws.Endpoint.advanced_trade in
     let%bind ws_result = Ws.connect ~url ~streams () in
     match ws_result with
-    | Error _err ->
+    | Error err ->
+      eprintf "[COINBASE] WebSocket connection failed: %s\n%!" (Error.to_string_hum err);
+      eprintf "[COINBASE] Symbol: %s, URL: %s\n%!" product_id url;
+      eprintf "[COINBASE] This is likely due to:\n";
+      eprintf "  - Missing or invalid headers (User-Agent, Origin)\n";
+      eprintf "  - Authentication required for this endpoint\n";
+      eprintf "  - Geographic IP restrictions\n";
+      eprintf "  - Network connectivity issues\n%!";
       let reader, _writer = Pipe.create () in
       Pipe.close_read reader;
       return (Ok reader)

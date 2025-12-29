@@ -103,7 +103,16 @@ module Book = struct
     let streams = [Ws.Stream.Depth { symbol; levels = Some depth }] in
     let%bind ws_result = Ws.connect ~streams () in
     match ws_result with
-    | Error _err ->
+    | Error err ->
+      eprintf "[BINANCE] WebSocket connection failed: %s\n%!" (Error.to_string_hum err);
+      let symbol_str = Fluxum.Types.Symbol.to_string symbol in
+      eprintf "[BINANCE] Symbol: %s, Depth: %d\n%!" symbol_str depth;
+      eprintf "[BINANCE] Stream name: %s@depth%d\n%!" (String.lowercase symbol_str) depth;
+      eprintf "[BINANCE] This is likely due to:\n";
+      eprintf "  - 451 status (Geographic IP block or legal restrictions)\n";
+      eprintf "  - Missing User-Agent header\n";
+      eprintf "  - Invalid stream name format\n";
+      eprintf "  - Rate limiting or temporary ban\n%!";
       let reader, _writer = Pipe.create () in
       Pipe.close_read reader;
       return (Ok reader)
