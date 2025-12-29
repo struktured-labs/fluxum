@@ -24,7 +24,7 @@
 (executable
  (name consolidated_orderbook)
  (modules consolidated_orderbook)
- (libraries core async consolidated_order_book gemini kraken hyperliquid)
+ (libraries core async consolidated_order_book gemini kraken hyperliquid bitrue binance coinbase)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async)
 )
@@ -32,7 +32,7 @@
 (executable
  (name consolidated_orderbook_arb)
  (modules consolidated_orderbook_arb)
- (libraries core async consolidated_order_book gemini kraken hyperliquid bitrue)
+ (libraries core async consolidated_order_book gemini kraken hyperliquid bitrue binance coinbase)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async)
 )

@@ -12,6 +12,8 @@ type exchange_source =
   | Kraken
   | Hyperliquid
   | Bitrue
+  | Binance
+  | Coinbase
   | Multiple of exchange_source list
   [@@deriving sexp, compare, equal]
 
@@ -56,6 +58,8 @@ module Book = struct
     kraken_book : Kraken.Order_book.Book.t option;
     hyperliquid_book : Hyperliquid.Order_book.Book.t option;
     bitrue_book : Bitrue.Order_book.Book.t option;
+    binance_book : Binance.Order_book.Book.t option;
+    coinbase_book : Coinbase.Order_book.Book.t option;
     epoch : int;
     update_time : Time_float_unix.t;
   }
@@ -70,6 +74,8 @@ module Book = struct
     kraken_book = None;
     hyperliquid_book = None;
     bitrue_book = None;
+    binance_book = None;
+    coinbase_book = None;
     epoch = 0;
     update_time = Time_float_unix.now ();
   }
@@ -143,7 +149,33 @@ module Book = struct
                exchange = Bitrue
              }))
       in
-      gemini_bids @ kraken_bids @ hyperliquid_bids @ bitrue_bids
+      let binance_bids = match t.binance_book with
+        | None -> []
+        | Some book ->
+          Map.to_alist book.Binance.Order_book.Book.bids
+          |> (fun list -> List.take list 100)
+          |> List.map ~f:(fun (_, level) ->
+            (level.Fluxum.Order_book_intf.Price_level.price,
+             { Attributed_level.
+               price = level.price;
+               volume = level.volume;
+               exchange = Binance
+             }))
+      in
+      let coinbase_bids = match t.coinbase_book with
+        | None -> []
+        | Some book ->
+          Map.to_alist book.Coinbase.Order_book.Book.bids
+          |> (fun list -> List.take list 100)
+          |> List.map ~f:(fun (_, level) ->
+            (level.Fluxum.Order_book_intf.Price_level.price,
+             { Attributed_level.
+               price = level.price;
+               volume = level.volume;
+               exchange = Coinbase
+             }))
+      in
+      gemini_bids @ kraken_bids @ hyperliquid_bids @ bitrue_bids @ binance_bids @ coinbase_bids
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p2 p1) (* Descending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
       |> List.map ~f:(fun group ->
@@ -205,7 +237,33 @@ module Book = struct
                exchange = Bitrue
              }))
       in
-      gemini_asks @ kraken_asks @ hyperliquid_asks @ bitrue_asks
+      let binance_asks = match t.binance_book with
+        | None -> []
+        | Some book ->
+          Map.to_alist book.Binance.Order_book.Book.asks
+          |> (fun list -> List.take list 100)
+          |> List.map ~f:(fun (_, level) ->
+            (level.Fluxum.Order_book_intf.Price_level.price,
+             { Attributed_level.
+               price = level.price;
+               volume = level.volume;
+               exchange = Binance
+             }))
+      in
+      let coinbase_asks = match t.coinbase_book with
+        | None -> []
+        | Some book ->
+          Map.to_alist book.Coinbase.Order_book.Book.asks
+          |> (fun list -> List.take list 100)
+          |> List.map ~f:(fun (_, level) ->
+            (level.Fluxum.Order_book_intf.Price_level.price,
+             { Attributed_level.
+               price = level.price;
+               volume = level.volume;
+               exchange = Coinbase
+             }))
+      in
+      gemini_asks @ kraken_asks @ hyperliquid_asks @ bitrue_asks @ binance_asks @ coinbase_asks
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2) (* Ascending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
       |> List.map ~f:(fun group ->
@@ -237,6 +295,16 @@ module Book = struct
     let t = { t with bitrue_book = Some bitrue_book } in
     rebuild t
 
+  (** Update Binance book *)
+  let update_binance t binance_book =
+    let t = { t with binance_book = Some binance_book } in
+    rebuild t
+
+  (** Update Coinbase book *)
+  let update_coinbase t coinbase_book =
+    let t = { t with coinbase_book = Some coinbase_book } in
+    rebuild t
+
   (** Get best bid *)
   let best_bid t =
     Map.min_elt t.bids
@@ -265,6 +333,8 @@ module Book = struct
     | Kraken -> "KRK"
     | Hyperliquid -> "HYP"
     | Bitrue -> "BTR"
+    | Binance -> "BIN"
+    | Coinbase -> "CBP"
     | Multiple sources ->
       List.map sources ~f:exchange_to_string
       |> String.concat ~sep:"+"
@@ -285,6 +355,8 @@ module Book = struct
     if Option.is_some t.kraken_book then printf "[Kraken] ";
     if Option.is_some t.hyperliquid_book then printf "[Hyperliquid] ";
     if Option.is_some t.bitrue_book then printf "[Bitrue] ";
+    if Option.is_some t.binance_book then printf "[Binance] ";
+    if Option.is_some t.coinbase_book then printf "[Coinbase] ";
     printf "\n\n";
 
     (* Print asks (highest to lowest for display) *)

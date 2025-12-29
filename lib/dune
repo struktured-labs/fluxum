@@ -27,6 +27,6 @@
 (library
  (name consolidated_order_book)
  (modules consolidated_order_book)
- (libraries core async fluxum gemini kraken hyperliquid bitrue)
+ (libraries core async fluxum gemini kraken hyperliquid bitrue binance coinbase)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async))

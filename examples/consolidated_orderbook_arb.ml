@@ -8,6 +8,8 @@ let parse_exchange_name name =
   | "kraken" | "krk" -> Some `Kraken
   | "hyperliquid" | "hyp" -> Some `Hyperliquid
   | "bitrue" | "btr" -> Some `Bitrue
+  | "binance" | "bin" -> Some `Binance
+  | "coinbase" | "cbp" | "cb" -> Some `Coinbase
   | _ -> None
 
 (** Helper: Validate and convert exchange names *)
@@ -26,6 +28,8 @@ type book_update =
   | Kraken_update of (Kraken.Order_book.Book.t, string) Result.t
   | Hyperliquid_update of (Hyperliquid.Order_book.Book.t, string) Result.t
   | Bitrue_update of (Bitrue.Order_book.Book.t, string) Result.t
+  | Binance_update of (Binance.Order_book.Book.t, string) Result.t
+  | Coinbase_update of (Coinbase.Order_book.Book.t, string) Result.t
 
 (** Print startup diagnostics *)
 let print_diagnostics () =
@@ -40,13 +44,15 @@ let print_diagnostics () =
   printf "===========================\n\n%!"
 
 (** Exchange identifier for arbitrage *)
-type exchange = Gemini | Kraken | Hyperliquid | Bitrue
+type exchange = Gemini | Kraken | Hyperliquid | Bitrue | Binance | Coinbase
 
 let exchange_to_string = function
   | Gemini -> "Gemini"
   | Kraken -> "Kraken"
   | Hyperliquid -> "Hyperliquid"
   | Bitrue -> "Bitrue"
+  | Binance -> "Binance"
+  | Coinbase -> "Coinbase"
 
 (** Trading fee configuration per exchange (as percentage) *)
 type fee_config = {
@@ -54,6 +60,8 @@ type fee_config = {
   kraken_taker: float;
   hyperliquid_taker: float;
   bitrue_taker: float;
+  binance_taker: float;
+  coinbase_taker: float;
 }
 
 (** Default fee configuration - typical taker fees *)
@@ -62,6 +70,8 @@ let default_fees = {
   kraken_taker = 0.26;       (* 0.26% *)
   hyperliquid_taker = 0.03;  (* 0.03% *)
   bitrue_taker = 0.10;       (* 0.10% *)
+  binance_taker = 0.10;      (* 0.10% *)
+  coinbase_taker = 0.60;     (* 0.60% - Advanced Trade *)
 }
 
 (** Get taker fee for an exchange *)
@@ -71,6 +81,8 @@ let get_taker_fee fees exchange =
   | Kraken -> fees.kraken_taker
   | Hyperliquid -> fees.hyperliquid_taker
   | Bitrue -> fees.bitrue_taker
+  | Binance -> fees.binance_taker
+  | Coinbase -> fees.coinbase_taker
 
 (** Arbitrage opportunity *)
 type arb_opportunity = {
@@ -131,10 +143,32 @@ let get_exchange_best_bid_ask (book: Consolidated_order_book.Book.t) exchange =
        match bids, asks with
        | bid :: _, ask :: _ -> Some (bid.price, bid.volume, ask.price, ask.volume)
        | _ -> None)
+  | Binance ->
+    (match book.binance_book with
+     | None -> None
+     | Some ex_book ->
+       let bids = Map.to_alist ex_book.Binance.Order_book.Book.bids
+         |> (fun list -> List.take list 1) |> List.map ~f:snd in
+       let asks = Map.to_alist ex_book.Binance.Order_book.Book.asks
+         |> (fun list -> List.take list 1) |> List.map ~f:snd in
+       match bids, asks with
+       | bid :: _, ask :: _ -> Some (bid.price, bid.volume, ask.price, ask.volume)
+       | _ -> None)
+  | Coinbase ->
+    (match book.coinbase_book with
+     | None -> None
+     | Some ex_book ->
+       let bids = Map.to_alist ex_book.Coinbase.Order_book.Book.bids
+         |> (fun list -> List.take list 1) |> List.map ~f:snd in
+       let asks = Map.to_alist ex_book.Coinbase.Order_book.Book.asks
+         |> (fun list -> List.take list 1) |> List.map ~f:snd in
+       match bids, asks with
+       | bid :: _, ask :: _ -> Some (bid.price, bid.volume, ask.price, ask.volume)
+       | _ -> None)
 
 (** Detect arbitrage opportunities across all exchange pairs *)
 let detect_arbitrage ?(fees=default_fees) (book: Consolidated_order_book.Book.t) : arb_opportunity list =
-  let exchanges = [Gemini; Kraken; Hyperliquid; Bitrue] in
+  let exchanges = [Gemini; Kraken; Hyperliquid; Bitrue; Binance; Coinbase] in
   let opportunities = ref [] in
 
   (* Check all exchange pairs *)
@@ -298,7 +332,7 @@ let test ~exchanges ~depth ~max_display =
 
   (* Parse and validate exchanges *)
   let selected = match exchanges with
-    | [] -> [`Gemini; `Kraken; `Hyperliquid; `Bitrue]  (* default: all *)
+    | [] -> [`Gemini; `Kraken; `Hyperliquid; `Bitrue; `Binance; `Coinbase]  (* default: all *)
     | names -> validate_exchanges names
   in
 
@@ -307,7 +341,9 @@ let test ~exchanges ~depth ~max_display =
       | `Gemini -> "Gemini"
       | `Kraken -> "Kraken"
       | `Hyperliquid -> "Hyperliquid"
-      | `Bitrue -> "Bitrue")
+      | `Bitrue -> "Bitrue"
+      | `Binance -> "Binance"
+      | `Coinbase -> "Coinbase")
     |> String.concat ~sep:", "
   in
 
@@ -367,11 +403,43 @@ let test ~exchanges ~depth ~max_display =
       create_closed_pipe ()
   in
 
+  (* Conditionally connect to Binance *)
+  let%bind binance_pipe_result =
+    if List.mem selected `Binance ~equal:Poly.equal then (
+      let binance_symbol = Fluxum.Types.Symbol.of_string "BTCUSDT" in
+      Binance.Order_book.Book.pipe ~symbol:binance_symbol ()
+    ) else (
+      return (Ok (create_closed_pipe ()))
+    )
+  in
+  let binance_pipe = match binance_pipe_result with
+    | Ok pipe -> Pipe.map pipe ~f:(fun result -> Binance_update result)
+    | Error err ->
+      eprintf "Binance connection failed: %s\n%!" (Error.to_string_hum err);
+      create_closed_pipe ()
+  in
+
+  (* Conditionally connect to Coinbase *)
+  let%bind coinbase_pipe_result =
+    if List.mem selected `Coinbase ~equal:Poly.equal then (
+      let coinbase_symbol = Fluxum.Types.Symbol.of_string "BTC-USD" in
+      Coinbase.Order_book.Book.pipe ~symbol:coinbase_symbol ()
+    ) else (
+      return (Ok (create_closed_pipe ()))
+    )
+  in
+  let coinbase_pipe = match coinbase_pipe_result with
+    | Ok pipe -> Pipe.map pipe ~f:(fun result -> Coinbase_update result)
+    | Error err ->
+      eprintf "Coinbase connection failed: %s\n%!" (Error.to_string_hum err);
+      create_closed_pipe ()
+  in
+
   printf "✓ Connected to selected exchanges\n\n%!";
 
   (* Merge all selected exchange pipes into unified stream *)
   let merged_pipe =
-    Pipe.interleave [gemini_pipe; kraken_pipe; hyperliquid_pipe; bitrue_pipe]
+    Pipe.interleave [gemini_pipe; kraken_pipe; hyperliquid_pipe; bitrue_pipe; binance_pipe; coinbase_pipe]
   in
 
   (* Track first updates for connection diagnostics *)
@@ -379,6 +447,8 @@ let test ~exchanges ~depth ~max_display =
   let kraken_first_update = ref true in
   let hyperliquid_first_update = ref true in
   let bitrue_first_update = ref true in
+  let binance_first_update = ref true in
+  let coinbase_first_update = ref true in
 
   (* Process all updates in unified foreground loop *)
   let%bind () =
@@ -439,6 +509,32 @@ let test ~exchanges ~depth ~max_display =
              );
              consolidated := Consolidated_order_book.Book.update_bitrue !consolidated bitrue_book;
              return ())
+
+        | Binance_update book_result ->
+          (match book_result with
+           | Error err ->
+             eprintf "Binance error: %s\n%!" err;
+             return ()
+           | Ok binance_book ->
+             if !binance_first_update then (
+               printf "[INFO] Binance data connected!\n%!";
+               binance_first_update := false
+             );
+             consolidated := Consolidated_order_book.Book.update_binance !consolidated binance_book;
+             return ())
+
+        | Coinbase_update book_result ->
+          (match book_result with
+           | Error err ->
+             eprintf "Coinbase error: %s\n%!" err;
+             return ()
+           | Ok coinbase_book ->
+             if !coinbase_first_update then (
+               printf "[INFO] Coinbase data connected!\n%!";
+               coinbase_first_update := false
+             );
+             consolidated := Consolidated_order_book.Book.update_coinbase !consolidated coinbase_book;
+             return ())
       in
 
       (* Update counter and trigger display if needed *)
@@ -479,11 +575,13 @@ let () =
        \  ./consolidated_orderbook_arb -e gemini\n\n\
        Note: Arbitrage detection requires at least 2 exchanges.\n\
        Use ASYNC_CONFIG='((max_num_threads 32))' for 4+ exchanges.\n\n\
-       Available exchanges: gemini, kraken, hyperliquid, bitrue")
+       Available exchanges: gemini, kraken, hyperliquid, bitrue, binance, coinbase\n\
+       Exchange fees (taker): Gemini 0.35%, Kraken 0.26%, Hyperliquid 0.03%,\n\
+       Bitrue 0.10%, Binance 0.10%, Coinbase 0.60%")
     (Command.Spec.(
       empty
       +> flag "--exchanges" (listed string)
-           ~doc:"EXCHANGE Enable exchange (gemini|kraken|hyperliquid|bitrue). \
+           ~doc:"EXCHANGE Enable exchange (gemini|kraken|hyperliquid|bitrue|binance|coinbase). \
                  Can be repeated. Short form: -e. Default: all"
       +> flag "-e" (listed string)
            ~doc:"" (* Hidden alias for --exchanges *)
