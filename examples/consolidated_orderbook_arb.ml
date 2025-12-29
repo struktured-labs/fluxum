@@ -48,6 +48,30 @@ let exchange_to_string = function
   | Hyperliquid -> "Hyperliquid"
   | Bitrue -> "Bitrue"
 
+(** Trading fee configuration per exchange (as percentage) *)
+type fee_config = {
+  gemini_taker: float;
+  kraken_taker: float;
+  hyperliquid_taker: float;
+  bitrue_taker: float;
+}
+
+(** Default fee configuration - typical taker fees *)
+let default_fees = {
+  gemini_taker = 0.35;       (* 0.35% *)
+  kraken_taker = 0.26;       (* 0.26% *)
+  hyperliquid_taker = 0.03;  (* 0.03% *)
+  bitrue_taker = 0.10;       (* 0.10% *)
+}
+
+(** Get taker fee for an exchange *)
+let get_taker_fee fees exchange =
+  match exchange with
+  | Gemini -> fees.gemini_taker
+  | Kraken -> fees.kraken_taker
+  | Hyperliquid -> fees.hyperliquid_taker
+  | Bitrue -> fees.bitrue_taker
+
 (** Arbitrage opportunity *)
 type arb_opportunity = {
   buy_exchange: exchange;
@@ -58,6 +82,10 @@ type arb_opportunity = {
   profit_pct: float;
   buy_volume: float;
   sell_volume: float;
+  buy_fee_pct: float;
+  sell_fee_pct: float;
+  net_profit: float;
+  net_profit_pct: float;
 }
 
 (** Get best bid/ask from individual exchange books *)
@@ -105,7 +133,7 @@ let get_exchange_best_bid_ask (book: Consolidated_order_book.Book.t) exchange =
        | _ -> None)
 
 (** Detect arbitrage opportunities across all exchange pairs *)
-let detect_arbitrage (book: Consolidated_order_book.Book.t) : arb_opportunity list =
+let detect_arbitrage ?(fees=default_fees) (book: Consolidated_order_book.Book.t) : arb_opportunity list =
   let exchanges = [Gemini; Kraken; Hyperliquid; Bitrue] in
   let opportunities = ref [] in
 
@@ -120,6 +148,16 @@ let detect_arbitrage (book: Consolidated_order_book.Book.t) : arb_opportunity li
           if Float.(sell_bid > buy_ask) then
             let profit = sell_bid -. buy_ask in
             let profit_pct = 100. *. profit /. buy_ask in
+
+            (* Calculate fees *)
+            let buy_fee_pct = get_taker_fee fees buy_ex in
+            let sell_fee_pct = get_taker_fee fees sell_ex in
+            let total_fee_pct = buy_fee_pct +. sell_fee_pct in
+
+            (* Net profit after fees *)
+            let net_profit_pct = profit_pct -. total_fee_pct in
+            let net_profit = buy_ask *. net_profit_pct /. 100. in
+
             opportunities := {
               buy_exchange = buy_ex;
               sell_exchange = sell_ex;
@@ -129,14 +167,18 @@ let detect_arbitrage (book: Consolidated_order_book.Book.t) : arb_opportunity li
               profit_pct;
               buy_volume = buy_ask_vol;
               sell_volume = sell_bid_vol;
+              buy_fee_pct;
+              sell_fee_pct;
+              net_profit;
+              net_profit_pct;
             } :: !opportunities
         | _ -> ()
     )
   );
 
-  (* Sort by profit percentage (descending) *)
+  (* Sort by net profit percentage (descending) *)
   List.sort !opportunities ~compare:(fun a b ->
-    Float.compare b.profit_pct a.profit_pct)
+    Float.compare b.net_profit_pct a.net_profit_pct)
 
 (** Pretty print with arbitrage highlighting *)
 let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.t) () =
@@ -168,18 +210,37 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
       bold arb_bg reset;
 
     List.iteri arb_opps ~f:(fun i opp ->
-      printf "%s[ARB #%d]%s Buy on %s%-9s%s @ %s$%.2f%s → Sell on %s%-9s%s @ %s$%.2f%s  "
+      (* Color code based on net profitability *)
+      let profit_color =
+        if Float.(opp.net_profit_pct >= 0.5) then "\027[1m\027[32m"  (* Bold green: very profitable *)
+        else if Float.(opp.net_profit_pct >= 0.2) then "\027[33m"    (* Yellow: marginally profitable *)
+        else "\027[31m"                                                (* Red: unprofitable *)
+      in
+
+      printf "%s[ARB #%d]%s Buy on %s%-9s%s @ %s$%.2f%s → Sell on %s%-9s%s @ %s$%.2f%s\n"
         arb_highlight (i+1) reset
         cyan (exchange_to_string opp.buy_exchange) reset
         green opp.buy_price reset
         magenta (exchange_to_string opp.sell_exchange) reset
         green opp.sell_price reset;
-      printf "%sPROFIT: $%.2f (%.3f%%)%s\n"
-        arb_highlight opp.profit opp.profit_pct reset;
-      printf "       Buy volume: %.4f BTC | Sell volume: %.4f BTC | "
-        opp.buy_volume opp.sell_volume;
-      printf "Max size: %.4f BTC\n\n"
-        (Float.min opp.buy_volume opp.sell_volume);
+
+      printf "       Gross: %s$%.2f (%.3f%%)%s | Fees: %.2f%% + %.2f%% = %.2f%%\n"
+        blue opp.profit opp.profit_pct reset
+        opp.buy_fee_pct opp.sell_fee_pct (opp.buy_fee_pct +. opp.sell_fee_pct);
+
+      printf "       %sNet Profit: $%.2f (%.3f%%)%s"
+        profit_color opp.net_profit opp.net_profit_pct reset;
+
+      if Float.(opp.net_profit_pct >= 0.5) then
+        printf " ✓ PROFITABLE"
+      else if Float.(opp.net_profit_pct >= 0.2) then
+        printf " ⚠ MARGINAL"
+      else
+        printf " ✗ UNPROFITABLE";
+
+      printf "\n";
+      printf "       Buy volume: %.4f BTC | Sell volume: %.4f BTC | Max size: %.4f BTC\n\n"
+        opp.buy_volume opp.sell_volume (Float.min opp.buy_volume opp.sell_volume);
     );
     printf "%s%s%s\n\n" reset (String.make 75 '-') reset;
   ) else (
