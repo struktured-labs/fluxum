@@ -44,3 +44,35 @@
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async)
 )
+
+(executable
+ (name mexc_orderbook)
+ (modules mexc_orderbook)
+ (libraries core async mexc)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async)
+)
+
+(executable
+ (name binance_orderbook)
+ (modules binance_orderbook)
+ (libraries core async binance)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async)
+)
+
+(executable
+ (name bitrue_orderbook)
+ (modules bitrue_orderbook)
+ (libraries core async bitrue)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async)
+)
+
+(executable
+ (name bitrue_orderbook_debug)
+ (modules bitrue_orderbook_debug)
+ (libraries core async bitrue)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async)
+)

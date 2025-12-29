@@ -77,21 +77,18 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.mainnet) () : (t, 
         ) else (
           ping_count := !ping_count + 1;
           let start_time = Time_float_unix.now () in
-          Log.Global.info "Hyperliquid: Sending ping #%d at %s"
-            !ping_count
-            (Time_float_unix.to_string_abs start_time ~zone:(force Time_float_unix.Zone.local));
           let%bind send_result = try_with (fun () -> Websocket_curl.send ws "{\"method\":\"ping\"}") in
           let end_time = Time_float_unix.now () in
           let duration = Time_float_unix.diff end_time start_time in
           let duration_ms = Time_float_unix.Span.to_ms duration in
           (match send_result with
           | Ok () ->
-            if Float.(duration_ms > 1000.0) then
-              Log.Global.info "Hyperliquid: Ping #%d took %.2f ms (WARNING: >1s)" !ping_count duration_ms
-            else
-              Log.Global.info "Hyperliquid: Ping #%d sent successfully in %.2f ms" !ping_count duration_ms
+            if Float.(duration_ms > 100.0) then
+              eprintf "Hyperliquid: Ping #%d took %.2f ms%s\n%!"
+                !ping_count duration_ms
+                (if Float.(duration_ms > 1000.0) then " (WARNING: >1s)" else "")
           | Error exn ->
-            Log.Global.error "Hyperliquid: Ping #%d failed after %.2f ms: %s"
+            eprintf "Hyperliquid: Ping #%d failed after %.2f ms: %s\n%!"
               !ping_count duration_ms (Exn.to_string exn)
           );
           let%bind () = after (Time_float.Span.of_sec 2.5) in

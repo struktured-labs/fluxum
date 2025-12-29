@@ -118,19 +118,19 @@ module Book = struct
       update_time = Time_float_unix.now ();
     }
 
-  (** Create live order book pipe from Bitrue WebSocket *)
+  (** Create live order book pipe from Bitrue WebSocket (libcurl) *)
   let pipe ~symbol ?url () : (t, string) Result.t Pipe.Reader.t Deferred.Or_error.t =
     let symbol_str = Fluxum.Types.Symbol.to_string symbol in
     let streams = [Ws.Stream.Depth symbol_str] in
     let url = Option.value url ~default:Ws.Endpoint.market in
-    let%bind ws_result = Ws.connect ~url ~streams () in
-    match ws_result with
-    | Error _err ->
+    let%bind md_result = Market_data_curl.connect ~url ~streams () in
+    match md_result with
+    | Error err ->
       let reader, _writer = Pipe.create () in
       Pipe.close_read reader;
-      return (Ok reader)
-    | Ok ws ->
-      let messages = Ws.messages ws in
+      return (Error (Error.of_string err))
+    | Ok md ->
+      let messages = Market_data_curl.messages md in
       let book_reader, book_writer = Pipe.create () in
       let book_ref = ref (empty symbol) in
 
@@ -141,6 +141,10 @@ module Book = struct
             | Ws.Message.Depth depth ->
               book_ref := apply_depth_update !book_ref depth;
               Pipe.write book_writer (Ok !book_ref)
+            | Ws.Message.SubResponse resp ->
+              Log.Global.info "Bitrue: Subscription %s"
+                (Option.value resp.status ~default:"acknowledged");
+              Deferred.unit
             | _ -> Deferred.unit
           with exn ->
             Pipe.write book_writer (Error (Exn.to_string exn))

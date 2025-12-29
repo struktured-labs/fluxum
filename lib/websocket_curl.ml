@@ -191,20 +191,27 @@ let send t payload =
   if t.closed then
     Deferred.unit
   else
-    Deferred.Or_error.try_with (fun () ->
-      In_thread.run (fun () ->
-        let frame = encode_text_frame payload in
-        let bytes = Bytes.of_string frame in
-        let rec send_all offset =
-          if offset >= Bytes.length bytes then ()
-          else
-            let sent = Curl_ext.send t.curl bytes offset (Bytes.length bytes - offset) in
-            if sent = 0 then failwith "Connection closed"
-            else send_all (offset + sent)
-        in
-        send_all 0
-      )
-    )
+    let send_with_timeout () =
+      Deferred.any
+        [ (Deferred.Or_error.try_with (fun () ->
+             In_thread.run (fun () ->
+               let frame = encode_text_frame payload in
+               let bytes = Bytes.of_string frame in
+               let rec send_all offset =
+                 if offset >= Bytes.length bytes then ()
+                 else
+                   let sent = Curl_ext.send t.curl bytes offset (Bytes.length bytes - offset) in
+                   if sent = 0 then failwith "Connection closed"
+                   else send_all (offset + sent)
+               in
+               send_all 0
+             )
+           ))
+        ; (let%map () = after (Time_float.Span.of_sec 1.5) in
+           Error (Error.of_string "WebSocket send timeout after 1.5s"))
+        ]
+    in
+    send_with_timeout ()
     >>| function
     | Ok () -> ()
     | Error _ -> ()

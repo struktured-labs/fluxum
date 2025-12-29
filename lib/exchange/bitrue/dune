@@ -1,6 +1,6 @@
 (library
  (name bitrue)
- (modules cfg rest ws order_book bitrue)
- (libraries core async fluxum yojson uri cohttp-async cohttp_async_websocket)
+ (modules cfg rest ws market_data_curl order_book bitrue)
+ (libraries core async fluxum yojson uri cohttp-async cohttp_async_websocket websocket_curl)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))
