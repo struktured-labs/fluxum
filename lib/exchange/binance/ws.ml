@@ -8,6 +8,8 @@ module Endpoint = struct
   let spot_stream = "wss://stream.binance.com:443"
   let spot_stream_alt = "wss://stream.binance.com:9443"
   let data_stream = "wss://data-stream.binance.vision"
+  let us_stream = "wss://stream.binance.us:443"
+  let us_stream_alt = "wss://stream.binance.us:9443"
 end
 
 (** Stream types *)

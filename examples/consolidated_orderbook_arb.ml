@@ -404,35 +404,25 @@ let test ~exchanges ~depth ~max_display =
   in
 
   (* Conditionally connect to Binance *)
-  let%bind binance_pipe_result =
+  let%bind binance_pipe =
     if List.mem selected `Binance ~equal:Poly.equal then (
       let binance_symbol = Fluxum.Types.Symbol.of_string "BTCUSDT" in
-      Binance.Order_book.Book.pipe ~symbol:binance_symbol ()
+      let%bind pipe = Binance.Order_book.Book.pipe ~symbol:binance_symbol () in
+      return (Pipe.map pipe ~f:(fun result -> Binance_update result))
     ) else (
-      return (Ok (create_closed_pipe ()))
+      return (create_closed_pipe ())
     )
-  in
-  let binance_pipe = match binance_pipe_result with
-    | Ok pipe -> Pipe.map pipe ~f:(fun result -> Binance_update result)
-    | Error err ->
-      eprintf "Binance connection failed: %s\n%!" (Error.to_string_hum err);
-      create_closed_pipe ()
   in
 
   (* Conditionally connect to Coinbase *)
-  let%bind coinbase_pipe_result =
+  let%bind coinbase_pipe =
     if List.mem selected `Coinbase ~equal:Poly.equal then (
       let coinbase_symbol = Fluxum.Types.Symbol.of_string "BTC-USD" in
-      Coinbase.Order_book.Book.pipe ~symbol:coinbase_symbol ()
+      let%bind pipe = Coinbase.Order_book.Book.pipe ~symbol:coinbase_symbol () in
+      return (Pipe.map pipe ~f:(fun result -> Coinbase_update result))
     ) else (
-      return (Ok (create_closed_pipe ()))
+      return (create_closed_pipe ())
     )
-  in
-  let coinbase_pipe = match coinbase_pipe_result with
-    | Ok pipe -> Pipe.map pipe ~f:(fun result -> Coinbase_update result)
-    | Error err ->
-      eprintf "Coinbase connection failed: %s\n%!" (Error.to_string_hum err);
-      create_closed_pipe ()
   in
 
   printf "✓ Connected to selected exchanges\n\n%!";

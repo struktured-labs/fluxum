@@ -1,6 +1,6 @@
 (library
  (name binance)
- (modules cfg ws order_book binance)
- (libraries core async fluxum yojson cohttp_async_websocket uri)
+ (modules cfg ws order_book market_data binance)
+ (libraries core async fluxum yojson cohttp_async_websocket websocket_curl uri)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))

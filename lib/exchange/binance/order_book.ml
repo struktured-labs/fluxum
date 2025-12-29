@@ -99,25 +99,25 @@ module Book = struct
     }
 
   (** Create live order book pipe from Binance WebSocket *)
-  let pipe ~symbol ?(depth = 20) () : (t, string) Result.t Pipe.Reader.t Deferred.Or_error.t =
+  let pipe ~symbol ?(depth = 20) ?(url = Ws.Endpoint.us_stream) () : (t, string) Result.t Pipe.Reader.t Deferred.t =
+    let open Deferred.Let_syntax in
     let streams = [Ws.Stream.Depth { symbol; levels = Some depth }] in
-    let%bind ws_result = Ws.connect ~streams () in
-    match ws_result with
+    let%bind md_result = Market_data.connect ~streams ~url () in
+    match md_result with
     | Error err ->
-      eprintf "[BINANCE] WebSocket connection failed: %s\n%!" (Error.to_string_hum err);
+      eprintf "[BINANCE] WebSocket connection failed: %s\n%!" err;
       let symbol_str = Fluxum.Types.Symbol.to_string symbol in
-      eprintf "[BINANCE] Symbol: %s, Depth: %d\n%!" symbol_str depth;
+      eprintf "[BINANCE] Symbol: %s, Depth: %d, URL: %s\n%!" symbol_str depth url;
       eprintf "[BINANCE] Stream name: %s@depth%d\n%!" (String.lowercase symbol_str) depth;
       eprintf "[BINANCE] This is likely due to:\n";
-      eprintf "  - 451 status (Geographic IP block or legal restrictions)\n";
-      eprintf "  - Missing User-Agent header\n";
+      eprintf "  - Network connectivity issues\n";
       eprintf "  - Invalid stream name format\n";
       eprintf "  - Rate limiting or temporary ban\n%!";
       let reader, _writer = Pipe.create () in
       Pipe.close_read reader;
-      return (Ok reader)
-    | Ok ws ->
-      let messages = Ws.messages ws in
+      return reader
+    | Ok md ->
+      let messages = Market_data.messages md in
       let book_reader, book_writer = Pipe.create () in
       let book_ref = ref (empty symbol) in
 
@@ -138,7 +138,7 @@ module Book = struct
         >>| fun () -> Pipe.close book_writer
       );
 
-      return (Ok book_reader)
+      return book_reader
 
   let symbol t = t.symbol
   let epoch t = t.epoch

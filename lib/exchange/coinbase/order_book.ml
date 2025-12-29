@@ -108,25 +108,26 @@ module Book = struct
     }
 
   (** Create live order book pipe from Coinbase WebSocket *)
-  let pipe ~symbol ?url () : (t, string) Result.t Pipe.Reader.t Deferred.Or_error.t =
+  let pipe ~symbol ?url () : (t, string) Result.t Pipe.Reader.t Deferred.t =
+    let open Deferred.Let_syntax in
     let product_id = Fluxum.Types.Symbol.to_string symbol in
     let streams = [Ws.Stream.Level2 [product_id]] in
     let url = Option.value url ~default:Ws.Endpoint.advanced_trade in
-    let%bind ws_result = Ws.connect ~url ~streams () in
-    match ws_result with
+    let%bind md_result = Market_data.connect ~streams ~url () in
+    match md_result with
     | Error err ->
-      eprintf "[COINBASE] WebSocket connection failed: %s\n%!" (Error.to_string_hum err);
+      eprintf "[COINBASE] WebSocket connection failed: %s\n%!" err;
       eprintf "[COINBASE] Symbol: %s, URL: %s\n%!" product_id url;
       eprintf "[COINBASE] This is likely due to:\n";
+      eprintf "  - TLS handshake failure (incompatible TLS configuration)\n";
       eprintf "  - Missing or invalid headers (User-Agent, Origin)\n";
       eprintf "  - Authentication required for this endpoint\n";
-      eprintf "  - Geographic IP restrictions\n";
       eprintf "  - Network connectivity issues\n%!";
       let reader, _writer = Pipe.create () in
       Pipe.close_read reader;
-      return (Ok reader)
-    | Ok ws ->
-      let messages = Ws.messages ws in
+      return reader
+    | Ok md ->
+      let messages = Market_data.messages md in
       let book_reader, book_writer = Pipe.create () in
       let book_ref = ref (empty symbol) in
 
@@ -144,7 +145,7 @@ module Book = struct
         >>| fun () -> Pipe.close book_writer
       );
 
-      return (Ok book_reader)
+      return book_reader
 
   let symbol t = t.symbol
   let epoch t = t.epoch
