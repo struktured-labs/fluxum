@@ -54,6 +54,21 @@ module Stream = struct
       ("channels", `List channel_groups);
     ]
 
+  let to_subscribe_message_authenticated ~api_key ~signature ~timestamp streams =
+    let channel_groups = List.map streams ~f:(fun stream ->
+      `Assoc [
+        ("name", `String (channel_name stream));
+        ("product_ids", `List (List.map (product_ids stream) ~f:(fun id -> `String id)));
+      ]
+    ) in
+    `Assoc [
+      ("type", `String "subscribe");
+      ("channels", `List channel_groups);
+      ("api_key", `String api_key);
+      ("signature", `String signature);
+      ("timestamp", `String timestamp);
+    ]
+
   let to_unsubscribe_message streams =
     let channel_groups = List.map streams ~f:(fun stream ->
       `Assoc [

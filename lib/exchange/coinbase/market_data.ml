@@ -71,10 +71,38 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.exchange) () : (t,
 
     (* Send subscription messages for each stream *)
     let%bind () =
-      let subscribe_msg = Ws.Stream.to_subscribe_message streams in
-      let msg_str = Yojson.Safe.to_string subscribe_msg in
-      Log.Global.info "Coinbase: Sending subscription: %s" msg_str;
-      Websocket_curl.send ws msg_str
+      (* Check if API credentials are available for authentication *)
+      match Sys.getenv "COINBASE_API_KEY", Sys.getenv "COINBASE_API_SECRET" with
+      | Some api_key, Some api_secret ->
+        (* Generate authentication signature *)
+        let timestamp = Int63.to_string (Time_ns.to_int63_ns_since_epoch (Time_ns.now ())) in
+        let channel = List.hd_exn streams |> Ws.Stream.channel_name in
+        let product_ids_str =
+          List.hd_exn streams
+          |> Ws.Stream.product_ids
+          |> String.concat ~sep:","
+        in
+        let signature = Signature.coinbase_ws_signature
+          ~api_secret
+          ~timestamp
+          ~channel
+          ~product_ids:product_ids_str
+        in
+        let subscribe_msg = Ws.Stream.to_subscribe_message_authenticated
+          ~api_key
+          ~signature
+          ~timestamp
+          streams
+        in
+        let msg_str = Yojson.Safe.to_string subscribe_msg in
+        Log.Global.info "Coinbase: Sending authenticated subscription: %s" msg_str;
+        Websocket_curl.send ws msg_str
+      | _ ->
+        (* No credentials, try unauthenticated subscription (will fail for level2) *)
+        let subscribe_msg = Ws.Stream.to_subscribe_message streams in
+        let msg_str = Yojson.Safe.to_string subscribe_msg in
+        Log.Global.info "Coinbase: Sending unauthenticated subscription: %s" msg_str;
+        Websocket_curl.send ws msg_str
     in
 
     return (Ok t)
