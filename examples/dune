@@ -30,6 +30,14 @@
 )
 
 (executable
+ (name consolidated_orderbook_arb)
+ (modules consolidated_orderbook_arb)
+ (libraries core async consolidated_order_book gemini kraken hyperliquid bitrue)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async)
+)
+
+(executable
  (name hyperliquid_orderbook)
  (modules hyperliquid_orderbook)
  (libraries core async hyperliquid)
