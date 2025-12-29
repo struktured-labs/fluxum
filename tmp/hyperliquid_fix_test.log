@@ -1,0 +1,8 @@
+Error parsing command line:
+
+  unknown flag -e
+
+For usage information, run
+
+  consolidated_orderbook.exe -help
+

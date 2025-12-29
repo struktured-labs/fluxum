@@ -112,7 +112,7 @@ module Book = struct
     let open Deferred.Let_syntax in
     let product_id = Fluxum.Types.Symbol.to_string symbol in
     let streams = [Ws.Stream.Level2 [product_id]] in
-    let url = Option.value url ~default:Ws.Endpoint.advanced_trade in
+    let url = Option.value url ~default:Ws.Endpoint.exchange in
     let%bind md_result = Market_data.connect ~streams ~url () in
     match md_result with
     | Error err ->

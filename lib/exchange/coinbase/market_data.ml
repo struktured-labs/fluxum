@@ -14,7 +14,7 @@ type t = {
 }
 
 (** Connect to Coinbase WebSocket and subscribe to streams *)
-let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.advanced_trade) () : (t, string) Result.t Deferred.t =
+let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.exchange) () : (t, string) Result.t Deferred.t =
   let open Deferred.Let_syntax in
   let uri = Uri.of_string url in
 
@@ -56,7 +56,10 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.advanced_trade) ()
             return ()
           | Some payload ->
             receive_count := !receive_count + 1;
-            if !receive_count mod 100 = 0 then
+            (* Log first few messages for debugging *)
+            if !receive_count <= 5 then
+              Log.Global.info "Coinbase: Message #%d: %s" !receive_count payload
+            else if !receive_count mod 100 = 0 then
               Log.Global.info "Coinbase: Received %d messages so far" !receive_count;
             let%bind () = Pipe.write t.message_writer payload in
             receive_loop ()

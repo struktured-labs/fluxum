@@ -9,6 +9,8 @@ open Async
 
 module Endpoint = struct
   let advanced_trade = "wss://advanced-trade-ws.coinbase.com"
+  let pro = "wss://ws-feed.pro.coinbase.com"  (* Legacy Coinbase Pro - public data *)
+  let exchange = "wss://ws-feed.exchange.coinbase.com"  (* Alternative endpoint *)
 end
 
 (* ============================================================ *)
@@ -49,8 +51,6 @@ module Stream = struct
     ) in
     `Assoc [
       ("type", `String "subscribe");
-      ("product_ids", `List []);
-      ("channel", `String "");
       ("channels", `List channel_groups);
     ]
 

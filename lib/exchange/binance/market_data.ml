@@ -14,7 +14,7 @@ type t = {
 }
 
 (** Connect to Binance WebSocket and subscribe to streams *)
-let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.spot_stream) () : (t, string) Result.t Deferred.t =
+let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.data_stream) () : (t, string) Result.t Deferred.t =
   let open Deferred.Let_syntax in
 
   (* Build WebSocket URL with stream names *)

@@ -99,7 +99,7 @@ module Book = struct
     }
 
   (** Create live order book pipe from Binance WebSocket *)
-  let pipe ~symbol ?(depth = 20) ?(url = Ws.Endpoint.us_stream) () : (t, string) Result.t Pipe.Reader.t Deferred.t =
+  let pipe ~symbol ?(depth = 20) ?(url = Ws.Endpoint.data_stream) () : (t, string) Result.t Pipe.Reader.t Deferred.t =
     let open Deferred.Let_syntax in
     let streams = [Ws.Stream.Depth { symbol; levels = Some depth }] in
     let%bind md_result = Market_data.connect ~streams ~url () in
