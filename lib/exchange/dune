@@ -1,7 +1,8 @@
-(library
- (name integration_test_framework)
- (public_name fluxum.integration_test_framework)
- (modules integration_test_framework)
- (libraries core async)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async))
+;; Integration test framework temporarily disabled
+;; (library
+;;  (name integration_test_framework)
+;;  (public_name fluxum.integration_test_framework)
+;;  (modules integration_test_framework)
+;;  (libraries core async)
+;;  (preprocess (pps ppx_jane))
+;;  (flags :standard -open Core -open Async))

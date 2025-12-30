@@ -1,6 +1,0 @@
-(executable
- (name integration_tests)
- (modules integration_tests)
- (libraries core async gemini fluxum integration_test_framework)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async))

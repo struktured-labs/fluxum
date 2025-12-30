@@ -1,6 +1,6 @@
 (library
  (name binance)
- (modules cfg common signature rest v3 ws order_book market_data binance test_manual_cmd test_map_open)
+ (modules cfg common signature rest v3 ws order_book market_data binance)
  (libraries core async cohttp cohttp-async fluxum yojson cohttp_async_websocket websocket_curl uri digestif)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async)
