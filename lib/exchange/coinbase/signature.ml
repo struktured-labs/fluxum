@@ -6,9 +6,7 @@ let base64_encode data =
   Base64.encode_exn data
 
 let base64_decode data =
-  match Base64.decode data with
-  | Ok s -> s
-  | Error _ -> failwith "Invalid base64 data"
+  Base64.decode data
 
 (* HMAC-SHA256 using digestif *)
 let hmac_sha256 ~secret ~message =
@@ -44,19 +42,19 @@ let hmac_sha256 ~secret ~message =
     - api_key
 *)
 let coinbase_ws_signature ~api_secret ~timestamp ~channel ~product_ids =
-  try
-    (* Decode the base64 API secret *)
-    let api_secret_decoded = base64_decode api_secret in
+  let open Result.Let_syntax in
+  let%bind api_secret_decoded = base64_decode api_secret in
 
-    (* Build the message: timestamp + channel + product_ids *)
-    let message = sprintf "%s%s%s" timestamp channel product_ids in
+  (* Build the message: timestamp + channel + product_ids *)
+  let message = sprintf "%s%s%s" timestamp channel product_ids in
 
-    (* Compute HMAC-SHA256 *)
-    let sig_binary = hmac_sha256 ~secret:api_secret_decoded ~message in
+  (* Compute HMAC-SHA256 *)
+  let sig_binary = hmac_sha256 ~secret:api_secret_decoded ~message in
 
-    (* Convert to hex string *)
+  (* Convert to hex string *)
+  let hex_sig =
     String.to_list sig_binary
     |> List.map ~f:(fun c -> sprintf "%02x" (Char.to_int c))
     |> String.concat ~sep:""
-  with
-  | e -> failwith (sprintf "Coinbase signature error: %s" (Exn.to_string e))
+  in
+  Ok hex_sig
