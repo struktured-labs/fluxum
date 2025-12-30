@@ -97,7 +97,9 @@ jobs:
         timeout 180 dune exec examples/hyperliquid_orderbook.exe || echo "Test completed or timed out"
         timeout 180 dune exec examples/consolidated_orderbook.exe || echo "Test completed or timed out"
       timeout-minutes: 10
-      env:
-        # Use secrets for authenticated tests (if needed)
-        # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        # KRAKEN_API_KEY: ${{ secrets.KRAKEN_API_KEY }}
+      # Uncomment to use secrets for authenticated tests:
+      # env:
+      #   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      #   GEMINI_API_SECRET: ${{ secrets.GEMINI_API_SECRET }}
+      #   KRAKEN_API_KEY: ${{ secrets.KRAKEN_API_KEY }}
+      #   KRAKEN_API_SECRET: ${{ secrets.KRAKEN_API_SECRET }}
