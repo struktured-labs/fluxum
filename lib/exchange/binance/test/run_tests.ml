@@ -283,6 +283,228 @@ let test_books_multiple_symbols () =
   ignore (assert_true (List.mem symbols "BTCUSDT" ~equal:String.equal) "Contains BTCUSDT");
   ignore (assert_true (List.mem symbols "ETHUSDT" ~equal:String.equal) "Contains ETHUSDT")
 
+(* ===== REST API Tests ===== *)
+
+(* Signature Tests *)
+let test_signature_query_string () =
+  printf "\n[Signature] Query string building\n";
+  let params = [("symbol", "LTCBTC"); ("side", "BUY"); ("type", "LIMIT")] in
+  let query = Binance.Signature.build_query_string params in
+  ignore (assert_string_equal "symbol=LTCBTC&side=BUY&type=LIMIT" query "Basic query string");
+
+  (* Test URL encoding *)
+  let params_encoded = [("key", "hello world"); ("value", "test@123")] in
+  let query_encoded = Binance.Signature.build_query_string params_encoded in
+  ignore (assert_true (String.is_substring query_encoded ~substring:"hello%20world") "Query string URL encoding")
+
+let test_signature_hmac_format () =
+  printf "\n[Signature] HMAC-SHA256 signature format\n";
+  let params = [("symbol", "BTCUSDT"); ("side", "BUY")] in
+  let signature = Binance.Signature.sign ~api_secret:"test_secret" ~params in
+  (* Signature should be 64 hex characters (32 bytes * 2) *)
+  ignore (assert_true (String.length signature = 64) "Signature is 64 hex characters");
+  (* Signature should be lowercase hex *)
+  ignore (assert_true (String.for_all signature ~f:(fun c -> Char.is_alphanum c && not (Char.is_uppercase c))) "Signature is lowercase hex")
+
+let test_signature_official_example () =
+  printf "\n[Signature] Official Binance signature example\n";
+  (* From Binance API docs - https://developers.binance.com/docs/binance-spot-api-docs/rest-api#signed-trade-and-user_data-endpoint-security *)
+  let api_secret = "NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j" in
+  let params =
+    [ ("symbol", "LTCBTC")
+    ; ("side", "BUY")
+    ; ("type", "LIMIT")
+    ; ("timeInForce", "GTC")
+    ; ("quantity", "1")
+    ; ("price", "0.1")
+    ; ("recvWindow", "5000")
+    ; ("timestamp", "1499827319559")
+    ] in
+  let signature = Binance.Signature.sign ~api_secret ~params in
+  let expected = "c8db56825ae71d6d79447849e617115f4a920fa2acdcab2b053c4b2838bd6b71" in
+  ignore (assert_string_equal expected signature "Official Binance example signature matches")
+
+let test_signature_deterministic () =
+  printf "\n[Signature] Deterministic signatures\n";
+  let params = [("symbol", "BTCUSDT"); ("timestamp", "1234567890")] in
+  let sig1 = Binance.Signature.sign ~api_secret:"secret123" ~params in
+  let sig2 = Binance.Signature.sign ~api_secret:"secret123" ~params in
+  ignore (assert_string_equal sig1 sig2 "Same inputs produce same signature")
+
+(* Common Types Tests *)
+let test_common_side () =
+  printf "\n[Common] Side enum\n";
+  ignore (assert_string_equal "BUY" (Binance.Common.Side.to_string `BUY) "BUY to string");
+  ignore (assert_string_equal "SELL" (Binance.Common.Side.to_string `SELL) "SELL to string");
+  ignore (assert_true (Option.is_some (Binance.Common.Side.of_string_opt "BUY")) "Parse BUY");
+  ignore (assert_true (Option.is_some (Binance.Common.Side.of_string_opt "SELL")) "Parse SELL");
+  ignore (assert_true (Option.is_none (Binance.Common.Side.of_string_opt "INVALID")) "Invalid side returns None")
+
+let test_common_order_type () =
+  printf "\n[Common] Order type enum\n";
+  ignore (assert_string_equal "LIMIT" (Binance.Common.Order_type.to_string `LIMIT) "LIMIT to string");
+  ignore (assert_string_equal "MARKET" (Binance.Common.Order_type.to_string `MARKET) "MARKET to string");
+  ignore (assert_string_equal "STOP_LOSS" (Binance.Common.Order_type.to_string `STOP_LOSS) "STOP_LOSS to string");
+  ignore (assert_true (Option.is_some (Binance.Common.Order_type.of_string_opt "LIMIT")) "Parse LIMIT");
+  ignore (assert_true (Option.is_some (Binance.Common.Order_type.of_string_opt "MARKET")) "Parse MARKET")
+
+let test_common_time_in_force () =
+  printf "\n[Common] Time in force enum\n";
+  ignore (assert_string_equal "GTC" (Binance.Common.Time_in_force.to_string `GTC) "GTC to string");
+  ignore (assert_string_equal "IOC" (Binance.Common.Time_in_force.to_string `IOC) "IOC to string");
+  ignore (assert_string_equal "FOK" (Binance.Common.Time_in_force.to_string `FOK) "FOK to string");
+  ignore (assert_true (Option.is_some (Binance.Common.Time_in_force.of_string_opt "GTC")) "Parse GTC")
+
+let test_common_order_status () =
+  printf "\n[Common] Order status enum\n";
+  ignore (assert_string_equal "NEW" (Binance.Common.Order_status.to_string `NEW) "NEW to string");
+  ignore (assert_string_equal "FILLED" (Binance.Common.Order_status.to_string `FILLED) "FILLED to string");
+  ignore (assert_string_equal "CANCELED" (Binance.Common.Order_status.to_string `CANCELED) "CANCELED to string");
+  ignore (assert_true (Option.is_some (Binance.Common.Order_status.of_string_opt "NEW")) "Parse NEW");
+  ignore (assert_true (Option.is_some (Binance.Common.Order_status.of_string_opt "FILLED")) "Parse FILLED")
+
+(* Response Parsing Tests *)
+let test_response_parse_success () =
+  printf "\n[Response] Parse success response\n";
+  let json = Yojson.Safe.from_string {|{"serverTime": 1234567890}|} in
+  let parse_server_time json =
+    match json with
+    | `Assoc fields ->
+      (match List.Assoc.find fields ~equal:String.equal "serverTime" with
+      | Some (`Int time) -> Ok time
+      | Some (`Intlit s) -> Ok (Int.of_string s)
+      | _ -> Error "Missing serverTime")
+    | _ -> Error "Not an object"
+  in
+  let result = Binance.Rest.Response.parse json parse_server_time in
+  match result with
+  | `Ok time -> ignore (assert_true (time = 1234567890) "Parsed serverTime correctly")
+  | _ ->
+    incr tests_run;
+    incr tests_failed;
+    printf "  ✗ FAIL: Expected success response\n"
+
+let test_response_parse_error () =
+  printf "\n[Response] Parse error response\n";
+  let json = Yojson.Safe.from_string {|{"code": -1100, "msg": "Invalid parameter"}|} in
+  let parse_any _json = Ok () in
+  let result = Binance.Rest.Response.parse json parse_any in
+  match result with
+  | `Api_error err ->
+    ignore (assert_true (err.code = -1100) "Error code is -1100");
+    ignore (assert_string_equal "Invalid parameter" err.msg "Error message matches")
+  | _ ->
+    incr tests_run;
+    incr tests_failed;
+    printf "  ✗ FAIL: Expected error response\n"
+
+let test_response_parse_array () =
+  printf "\n[Response] Parse array response\n";
+  let json = Yojson.Safe.from_string {|[{"symbol": "BTCUSDT"}, {"symbol": "ETHUSDT"}]|} in
+  let parse_symbols json =
+    match json with
+    | `List items -> Ok (List.length items)
+    | _ -> Error "Not a list"
+  in
+  let result = Binance.Rest.Response.parse json parse_symbols in
+  match result with
+  | `Ok count -> ignore (assert_true (count = 2) "Parsed array with 2 items")
+  | _ ->
+    incr tests_run;
+    incr tests_failed;
+    printf "  ✗ FAIL: Expected array response\n"
+
+(* JSON Deserialization Tests *)
+let test_json_server_time () =
+  printf "\n[JSON] Server time deserialization\n";
+  let json_str = {|{"serverTime": 1499827319559}|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Binance.V3.Server_time.T.response_of_yojson json with
+  | Ok response ->
+    ignore (assert_int64_equal 1499827319559L response.serverTime "Server time parsed correctly")
+  | Error msg ->
+    incr tests_run;
+    incr tests_failed;
+    printf "  ✗ FAIL: JSON parse error: %s\n" msg
+
+let test_json_depth () =
+  printf "\n[JSON] Depth deserialization\n";
+  let json_str = {|{
+    "lastUpdateId": 1027024,
+    "bids": [["4.00000000", "431.00000000"]],
+    "asks": [["4.00000200", "12.00000000"]]
+  }|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Binance.V3.Depth.T.response_of_yojson json with
+  | Ok response ->
+    ignore (assert_int64_equal 1027024L response.lastUpdateId "Last update ID");
+    ignore (assert_true (List.length response.bids = 1) "Has 1 bid");
+    ignore (assert_true (List.length response.asks = 1) "Has 1 ask")
+  | Error msg ->
+    incr tests_run;
+    incr tests_failed;
+    printf "  ✗ FAIL: JSON parse error: %s\n" msg
+
+let test_json_ticker () =
+  printf "\n[JSON] 24hr ticker deserialization\n";
+  let json_str = {|{
+    "symbol": "BTCUSDT",
+    "priceChange": "100.00",
+    "priceChangePercent": "2.5",
+    "weightedAvgPrice": "49500.00",
+    "prevClosePrice": "49900.00",
+    "lastPrice": "50000.00",
+    "lastQty": "0.1",
+    "bidPrice": "49999.00",
+    "bidQty": "1.0",
+    "askPrice": "50001.00",
+    "askQty": "1.0",
+    "openPrice": "49900.00",
+    "highPrice": "50100.00",
+    "lowPrice": "49800.00",
+    "volume": "12345.67",
+    "quoteVolume": "123456789.00",
+    "openTime": 1499827319559,
+    "closeTime": 1499913719559,
+    "firstId": 28385,
+    "lastId": 28460,
+    "count": 76
+  }|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Binance.V3.Ticker_24hr.T.response_of_yojson json with
+  | Ok response ->
+    ignore (assert_string_equal "BTCUSDT" response.symbol "Ticker symbol");
+    ignore (assert_string_equal "50000.00" response.lastPrice "Last price");
+    ignore (assert_int64_equal 76L response.count "Trade count")
+  | Error msg ->
+    incr tests_run;
+    incr tests_failed;
+    printf "  ✗ FAIL: JSON parse error: %s\n" msg
+
+let test_json_account () =
+  printf "\n[JSON] Account info deserialization\n";
+  let json_str = {|{
+    "makerCommission": 10,
+    "takerCommission": 10,
+    "canTrade": true,
+    "canWithdraw": true,
+    "canDeposit": true,
+    "balances": [
+      {"asset": "BTC", "free": "1.5", "locked": "0.0"},
+      {"asset": "ETH", "free": "10.0", "locked": "0.5"}
+    ]
+  }|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Binance.V3.Account.T.response_of_yojson json with
+  | Ok response ->
+    ignore (assert_true (response.makerCommission = 10) "Maker commission");
+    ignore (assert_true response.canTrade "Can trade");
+    ignore (assert_true (List.length response.balances = 2) "Has 2 balances")
+  | Error msg ->
+    incr tests_run;
+    incr tests_failed;
+    printf "  ✗ FAIL: JSON parse error: %s\n" msg
+
 (* Main test runner *)
 let () =
   printf "===========================================\n";
@@ -315,6 +537,29 @@ let () =
   let _ = test_books_empty () in
   let _ = test_books_set_and_get () in
   let _ = test_books_multiple_symbols () in
+
+  (* REST API Tests - Signature *)
+  let _ = test_signature_query_string () in
+  let _ = test_signature_hmac_format () in
+  let _ = test_signature_official_example () in
+  let _ = test_signature_deterministic () in
+
+  (* REST API Tests - Common Types *)
+  let _ = test_common_side () in
+  let _ = test_common_order_type () in
+  let _ = test_common_time_in_force () in
+  let _ = test_common_order_status () in
+
+  (* REST API Tests - Response Parsing *)
+  let _ = test_response_parse_success () in
+  let _ = test_response_parse_error () in
+  let _ = test_response_parse_array () in
+
+  (* REST API Tests - JSON Deserialization *)
+  let _ = test_json_server_time () in
+  let _ = test_json_depth () in
+  let _ = test_json_ticker () in
+  let _ = test_json_account () in
 
   (* Summary *)
   printf "\n===========================================\n";

@@ -1,7 +1,8 @@
 (library
  (name mexc)
  (modules cfg signature common rest v1 order_book ws mexc fluxum_adapter)
- (libraries core async fluxum yojson digestif uri cohttp-async cohttp_async_websocket)
+ (libraries core async cohttp cohttp-async fluxum yojson digestif uri cohttp_async_websocket)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async)
+ (library_flags -linkall)
 )

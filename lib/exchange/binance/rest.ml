@@ -1,4 +1,4 @@
-(** MEXC REST API Client *)
+(** Binance REST API Client *)
 
 open Core
 open Async
@@ -58,28 +58,18 @@ module Operation = struct
 end
 
 module Response = struct
-  (** Parse MEXC response - handles both wrapped and direct formats
+  (** Parse Binance response - handles both success and error formats
 
-      MEXC can return:
-      - Direct JSON: {"symbol": "BTCUSDT", ...}
-      - Wrapped with code: {"code": 0, "data": {...}}
-      - Error: {"code": 400, "msg": "error message"}
+      Binance can return:
+      - Success: Direct JSON object or array
+      - Error: {"code": <int>, "msg": "<string>"}
   *)
   let parse json result_of_yojson =
     match json with
     | `Assoc fields -> (
-      (* Check for error response with non-zero code *)
+      (* Check for error response with code field *)
       match List.Assoc.find fields ~equal:String.equal "code" with
-      | Some (`Int code) when code <> 0 ->
-        let msg =
-          List.Assoc.find fields ~equal:String.equal "msg"
-          |> Option.value_map ~default:"Unknown error" ~f:(function
-            | `String s -> s
-            | j -> Yojson.Safe.to_string j)
-        in
-        `Api_error Error.{ code; msg }
-      | Some (`String code_str) when not (String.equal code_str "0") ->
-        let code = Int.of_string_opt code_str |> Option.value ~default:(-1) in
+      | Some (`Int code) ->
         let msg =
           List.Assoc.find fields ~equal:String.equal "msg"
           |> Option.value_map ~default:"Unknown error" ~f:(function
@@ -88,20 +78,11 @@ module Response = struct
         in
         `Api_error Error.{ code; msg }
       | _ ->
-        (* Try to parse data field first, then try direct parsing *)
-        let data =
-          List.Assoc.find fields ~equal:String.equal "data"
-          |> Option.value ~default:json
-        in
-        (match result_of_yojson data with
+        (* Success response - parse directly *)
+        (match result_of_yojson json with
         | Result.Ok x -> `Ok x
-        | Result.Error _ ->
-          (* Fallback: try parsing the whole json *)
-          (match result_of_yojson json with
-          | Result.Ok x -> `Ok x
-          | Result.Error e ->
-            `Json_parse_error
-              Error.{ message = e; body = Yojson.Safe.to_string json })))
+        | Result.Error e ->
+          `Json_parse_error Error.{ message = e; body = Yojson.Safe.to_string json }))
     | `List _ ->
       (* Direct array response *)
       (match result_of_yojson json with
@@ -110,10 +91,7 @@ module Response = struct
         `Json_parse_error Error.{ message = e; body = Yojson.Safe.to_string json })
     | _ ->
       `Json_parse_error
-        Error.
-          { message = "Unexpected response format"
-          ; body = Yojson.Safe.to_string json
-          }
+        Error.{ message = "Unexpected response format"; body = Yojson.Safe.to_string json }
 end
 
 module Request (Operation : Operation.S) = struct
@@ -131,7 +109,7 @@ module Request (Operation : Operation.S) = struct
         let final_params = params_with_ts @ [ ("signature", signature) ] in
         let headers =
           Cohttp.Header.of_list
-            [ ("X-MEXC-APIKEY", Cfg.api_key)
+            [ ("X-MBX-APIKEY", Cfg.api_key)
             ; ("Content-Type", "application/json")
             ]
         in
@@ -147,14 +125,14 @@ module Request (Operation : Operation.S) = struct
     let uri =
       Uri.make
         ~scheme:"https"
-        ~host:"api.mexc.com"
+        ~host:Cfg.base_url
         ~path
         ~query:(List.map params ~f:(fun (k, v) -> (k, [ v ])))
         ()
     in
 
     Log.Global.debug
-      "MEXC API call: %s %s"
+      "Binance API call: %s %s"
       (match Operation.http_method with
       | `GET -> "GET"
       | `POST -> "POST"
@@ -163,18 +141,19 @@ module Request (Operation : Operation.S) = struct
 
     let make_request () =
       match Operation.http_method with
-      | `GET -> Cohttp_async.Client.get ~headers uri
+      | `GET ->
+        if Operation.requires_auth
+        then Cohttp_async.Client.get ~headers ?interrupt:None ?ssl_config:None uri
+        else Cohttp_async.Client.get ?interrupt:None ?ssl_config:None uri
       | `POST ->
+        (* For POST, include params in both query string and body *)
         let query_string = Signature.build_query_string params in
         let body = Cohttp_async.Body.of_string query_string in
         let headers =
-          Cohttp.Header.replace
-            headers
-            "Content-Type"
-            "application/x-www-form-urlencoded"
+          Cohttp.Header.replace headers "Content-Type" "application/x-www-form-urlencoded"
         in
-        Cohttp_async.Client.post ~headers ~body uri
-      | `DELETE -> Cohttp_async.Client.delete ~headers uri
+        Cohttp_async.Client.post ~headers ~body ?chunked:None ?interrupt:None ?ssl_config:None uri
+      | `DELETE -> Cohttp_async.Client.delete ~headers ?chunked:None ?interrupt:None ?ssl_config:None uri
     in
 
     make_request () >>= fun (response, body) ->
@@ -199,11 +178,9 @@ module Request (Operation : Operation.S) = struct
       Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
     | (code : Cohttp.Code.status_code) ->
       Cohttp_async.Body.to_string body >>| fun b ->
-      failwiths
-        ~here:[%here]
-        (sprintf "Unexpected MEXC API status code (body=%S)" b)
-        code
-        Cohttp.Code.sexp_of_status_code
+      failwiths ~here:[%here]
+        (sprintf "Unexpected Binance API status code (body=%S)" b)
+        code Cohttp.Code.sexp_of_status_code
 end
 
 module Make (Operation : Operation.S) = struct
@@ -213,7 +190,7 @@ module Make (Operation : Operation.S) = struct
     let open Command.Let_syntax in
     ( Operation.name
     , Command.async
-        ~summary:(sprintf "MEXC %s endpoint" Operation.endpoint)
+        ~summary:(sprintf "Binance %s endpoint" Operation.endpoint)
         [%map_open
           let config = Cfg.param
           and req = anon ("request" %: sexp) in
@@ -224,16 +201,13 @@ module Make (Operation : Operation.S) = struct
             Deferred.return () >>= fun () ->
             request config req >>= function
             | `Ok response ->
-              Log.Global.info
-                "Response: %s"
+              Log.Global.info "Response: %s"
                 (Sexp.to_string_hum (Operation.sexp_of_response response));
               Log.Global.flushed ()
             | #Error.t as err ->
-              failwiths
-                ~here:[%here]
-                (sprintf "MEXC %s failed" Operation.endpoint)
-                err
-                Error.sexp_of_t] )
+              failwiths ~here:[%here]
+                (sprintf "Binance %s failed" Operation.endpoint)
+                err Error.sexp_of_t] )
 end
 
 module Make_no_arg (Operation : Operation.S_NO_ARG) = struct
@@ -243,7 +217,7 @@ module Make_no_arg (Operation : Operation.S_NO_ARG) = struct
     let open Command.Let_syntax in
     ( Operation.name
     , Command.async
-        ~summary:(sprintf "MEXC %s endpoint" Operation.endpoint)
+        ~summary:(sprintf "Binance %s endpoint" Operation.endpoint)
         [%map_open
           let config = Cfg.param in
           fun () ->
@@ -252,16 +226,13 @@ module Make_no_arg (Operation : Operation.S_NO_ARG) = struct
             Deferred.return () >>= fun () ->
             request config () >>= function
             | `Ok response ->
-              Log.Global.info
-                "Response: %s"
+              Log.Global.info "Response: %s"
                 (Sexp.to_string_hum (Operation.sexp_of_response response));
               Log.Global.flushed ()
             | #Error.t as err ->
-              failwiths
-                ~here:[%here]
-                (sprintf "MEXC %s failed" Operation.endpoint)
-                err
-                Error.sexp_of_t] )
+              failwiths ~here:[%here]
+                (sprintf "Binance %s failed" Operation.endpoint)
+                err Error.sexp_of_t] )
 end
 
 module Make_with_params
@@ -276,7 +247,7 @@ struct
     let open Command.Let_syntax in
     ( Operation.name
     , Command.async
-        ~summary:(sprintf "MEXC %s endpoint" Operation.endpoint)
+        ~summary:(sprintf "Binance %s endpoint" Operation.endpoint)
         [%map_open
           let config = Cfg.param
           and req = Params.params
@@ -287,20 +258,18 @@ struct
               | Some sexp -> Operation.request_of_sexp sexp
               | None -> req
             in
-            Log.Global.info
-              "Request: %s"
+            Log.Global.info "Request: %s"
               (Operation.sexp_of_request req |> Sexp.to_string);
             let config = Cfg.or_default config in
+            (* CRITICAL: Add intermediate deferred to initialize async scheduler *)
+            Deferred.return () >>= fun () ->
             request config req >>= function
             | `Ok response ->
-              Log.Global.info
-                "Response: %s"
+              Log.Global.info "Response: %s"
                 (Sexp.to_string_hum (Operation.sexp_of_response response));
               Log.Global.flushed ()
             | #Error.t as err ->
-              failwiths
-                ~here:[%here]
-                (sprintf "MEXC %s failed" Operation.endpoint)
-                err
-                Error.sexp_of_t] )
+              failwiths ~here:[%here]
+                (sprintf "Binance %s failed" Operation.endpoint)
+                err Error.sexp_of_t] )
 end
