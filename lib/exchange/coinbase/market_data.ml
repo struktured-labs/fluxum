@@ -82,11 +82,16 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.exchange) () : (t,
           |> Ws.Stream.product_ids
           |> String.concat ~sep:","
         in
-        let signature = Signature.coinbase_ws_signature
+        let signature_result = Signature.coinbase_ws_signature
           ~api_secret
           ~timestamp
           ~channel
           ~product_ids:product_ids_str
+        in
+        let signature =
+          match signature_result with
+          | Ok s -> s
+          | Error (`Msg msg) -> failwith msg
         in
         let subscribe_msg = Ws.Stream.to_subscribe_message_authenticated
           ~api_key

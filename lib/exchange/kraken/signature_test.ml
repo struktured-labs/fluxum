@@ -21,7 +21,11 @@ let test_kraken_signature () =
   let post_data = "nonce=1234567890000" in
   
   (* This should produce a signature without errors *)
-  let signature = Kraken.Signature.kraken_signature ~api_secret_b64 ~api_path ~nonce ~post_data in
+  let signature =
+    match Kraken.Signature.kraken_signature ~api_secret_b64 ~api_path ~nonce ~post_data with
+    | Ok s -> s
+    | Error (`Msg msg) -> failwith msg
+  in
   
   (* Verify it's non-empty and looks like base64 *)
   match String.is_empty signature with

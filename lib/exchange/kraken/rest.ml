@@ -108,12 +108,17 @@ module Post (Operation : Operation.S) = struct
     let api_path = sprintf "/0/private/%s" Operation.endpoint in
 
     (* Generate signature *)
-    let signature =
+    let signature_result =
       Signature.kraken_signature
         ~api_secret_b64:Cfg.api_secret
         ~api_path
         ~nonce
         ~post_data
+    in
+    let signature =
+      match signature_result with
+      | Ok s -> s
+      | Error (`Msg msg) -> failwith msg
     in
 
     (* Build headers *)

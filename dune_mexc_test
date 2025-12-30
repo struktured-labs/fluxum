@@ -1,0 +1,5 @@
+(executable
+ (name test_mexc_rest)
+ (libraries core async mexc)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))

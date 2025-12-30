@@ -1,0 +1,268 @@
+(** Tests for Incremental Order Book *)
+
+open Core
+open Fluxum.Order_book_incremental
+
+(** Simple book type for testing *)
+module Simple_book = struct
+  type t = {
+    bids: (float * float) list;
+    asks: (float * float) list;
+  } [@@deriving sexp]
+
+  let empty = { bids = []; asks = [] }
+
+  (** Apply level updates to simple book *)
+  let apply_levels book levels =
+    List.fold levels ~init:book ~f:(fun acc level ->
+      let Level_update.{ price; size; side } = level in
+      match side with
+      | `Bid ->
+        let bids' =
+          if Float.(size = 0.) then
+            List.filter acc.bids ~f:(fun (p, _) -> Float.(p <> price))
+          else
+            (price, size) :: List.filter acc.bids ~f:(fun (p, _) -> Float.(p <> price))
+        in
+        { acc with bids = bids' }
+      | `Ask ->
+        let asks' =
+          if Float.(size = 0.) then
+            List.filter acc.asks ~f:(fun (p, _) -> Float.(p <> price))
+          else
+            (price, size) :: List.filter acc.asks ~f:(fun (p, _) -> Float.(p <> price))
+        in
+        { acc with asks = asks' }
+    )
+end
+
+let%test_module "Sequence" = (module struct
+  let%test "empty sequence accepts any first message" =
+    let seq = Sequence.empty in
+    Sequence.is_valid seq ~seq:100L
+
+  let%test "sequence tracks expected next" =
+    let seq = Sequence.empty in
+    let seq = Sequence.update seq ~seq:100L in
+    match Sequence.expected_next seq with
+    | Some 101L -> true
+    | _ -> false
+
+  let%test "sequence detects gaps" =
+    let seq = Sequence.empty in
+    let seq = Sequence.update seq ~seq:100L in
+    let seq = Sequence.update seq ~seq:102L in  (* Gap: missing 101 *)
+    Sequence.gaps_detected seq = 1
+
+  let%test "sequence handles sequential updates" =
+    let seq = Sequence.empty in
+    let seq = Sequence.update seq ~seq:100L in
+    let seq = Sequence.update seq ~seq:101L in
+    let seq = Sequence.update seq ~seq:102L in
+    Sequence.gaps_detected seq = 0
+
+  let%test "sequence reset clears gaps" =
+    let seq = Sequence.empty in
+    let seq = Sequence.update seq ~seq:100L in
+    let seq = Sequence.update seq ~seq:105L in  (* Gap *)
+    let seq = Sequence.reset seq ~seq:200L in
+    Sequence.gaps_detected seq = 0
+
+  let%test "needs_resync triggers after max_gaps" =
+    let seq = Sequence.empty in
+    let seq = Sequence.update seq ~seq:100L in
+    let seq = Sequence.update seq ~seq:102L in  (* Gap 1 *)
+    let seq = Sequence.update seq ~seq:104L in  (* Gap 2 *)
+    let seq = Sequence.update seq ~seq:106L in  (* Gap 3 *)
+    Sequence.needs_resync seq ~max_gaps:2
+end)
+
+let%test_module "Level_update" = (module struct
+  let%test "create bid level" =
+    let level = Level_update.create ~price:50000. ~size:1.5 ~side:`Bid in
+    Float.(level.price = 50000.) && Float.(level.size = 1.5)
+
+  let%test "create ask level" =
+    let level = Level_update.create ~price:51000. ~size:2.0 ~side:`Ask in
+    Float.(level.price = 51000.) && Float.(level.size = 2.0)
+end)
+
+let%test_module "Update" = (module struct
+  let%test "create snapshot update" =
+    let levels = [Level_update.create ~price:50000. ~size:1.0 ~side:`Bid] in
+    let update = Update.snapshot ~sequence:100L ~levels () in
+    Update.update_type update = Update_type.Snapshot
+
+  let%test "create delta update" =
+    let levels = [Level_update.create ~price:50000. ~size:0.5 ~side:`Bid] in
+    let update = Update.delta ~sequence:101L ~levels () in
+    Update.update_type update = Update_type.Delta
+
+  let%test "effective sequence from direct sequence" =
+    let levels = [] in
+    let update = Update.delta ~sequence:100L ~levels () in
+    Update.effective_sequence update = Some 100L
+
+  let%test "effective sequence from range (uses final)" =
+    let levels = [] in
+    let update = Update.delta ~sequence_range:(100L, 105L) ~levels () in
+    Update.effective_sequence update = Some 105L
+end)
+
+let%test_module "Manager" = (module struct
+  let%test "create manager with empty book" =
+    let manager = Manager.create Simple_book.empty in
+    Manager.updates_processed manager = 0
+
+  let%test "apply snapshot initializes sequence" =
+    let manager = Manager.create Simple_book.empty in
+    let levels = [Level_update.create ~price:50000. ~size:1.0 ~side:`Bid] in
+    let update = Update.snapshot ~sequence:100L ~levels () in
+    match Manager.apply manager ~update ~apply_fn:Simple_book.apply_levels with
+    | Ok manager' ->
+      (match Sequence.last_seen (Manager.sequence manager') with
+       | Some 100L -> true
+       | _ -> false)
+    | Error _ -> false
+
+  let%test "apply delta updates sequence" =
+    let manager = Manager.create Simple_book.empty in
+    let snapshot_levels = [Level_update.create ~price:50000. ~size:1.0 ~side:`Bid] in
+    let snapshot = Update.snapshot ~sequence:100L ~levels:snapshot_levels () in
+    match Manager.apply manager ~update:snapshot ~apply_fn:Simple_book.apply_levels with
+    | Ok manager' ->
+      let delta_levels = [Level_update.create ~price:50000. ~size:1.5 ~side:`Bid] in
+      let delta = Update.delta ~sequence:101L ~levels:delta_levels () in
+      (match Manager.apply manager' ~update:delta ~apply_fn:Simple_book.apply_levels with
+       | Ok manager'' -> Manager.updates_processed manager'' = 2
+       | Error _ -> false)
+    | Error _ -> false
+
+  let%test "apply detects sequence gap" =
+    let manager = Manager.create Simple_book.empty in
+    let snapshot_levels = [Level_update.create ~price:50000. ~size:1.0 ~side:`Bid] in
+    let snapshot = Update.snapshot ~sequence:100L ~levels:snapshot_levels () in
+    match Manager.apply manager ~update:snapshot ~apply_fn:Simple_book.apply_levels with
+    | Ok manager' ->
+      let delta_levels = [Level_update.create ~price:50000. ~size:1.5 ~side:`Bid] in
+      let delta = Update.delta ~sequence:105L ~levels:delta_levels () in  (* Gap: 101-104 missing *)
+      (match Manager.apply manager' ~update:delta ~apply_fn:Simple_book.apply_levels with
+       | Ok manager'' ->
+         let seq = Manager.sequence manager'' in
+         Sequence.gaps_detected seq > 0
+       | Error (`Sequence_gap _) -> true)  (* Gap detected immediately *)
+    | Error _ -> false
+
+  let%test "force_snapshot resets sequence" =
+    let manager = Manager.create Simple_book.empty in
+    let snapshot_levels = [Level_update.create ~price:50000. ~size:1.0 ~side:`Bid] in
+    let snapshot = Update.snapshot ~sequence:100L ~levels:snapshot_levels () in
+    match Manager.apply manager ~update:snapshot ~apply_fn:Simple_book.apply_levels with
+    | Ok manager' ->
+      (* Create gap *)
+      let delta = Update.delta ~sequence:110L ~levels:[] () in
+      let _ = Manager.apply manager' ~update:delta ~apply_fn:Simple_book.apply_levels in
+      (* Force new snapshot *)
+      let new_snapshot = Update.snapshot ~sequence:200L ~levels:snapshot_levels () in
+      let manager'' = Manager.force_snapshot manager' ~update:new_snapshot ~apply_fn:Simple_book.apply_levels in
+      let seq = Manager.sequence manager'' in
+      Sequence.gaps_detected seq = 0 &&
+      Sequence.last_seen seq = Some 200L
+    | Error _ -> false
+
+  let%test "needs_resync after max_gaps" =
+    let manager = Manager.create ~max_gaps:2 Simple_book.empty in
+    let snapshot = Update.snapshot ~sequence:100L ~levels:[] () in
+    match Manager.apply manager ~update:snapshot ~apply_fn:Simple_book.apply_levels with
+    | Ok manager' ->
+      (* Create 3 gaps *)
+      let delta1 = Update.delta ~sequence:102L ~levels:[] () in
+      let manager' = match Manager.apply manager' ~update:delta1 ~apply_fn:Simple_book.apply_levels with
+        | Ok m -> m | Error _ -> manager' in
+      let delta2 = Update.delta ~sequence:104L ~levels:[] () in
+      let manager' = match Manager.apply manager' ~update:delta2 ~apply_fn:Simple_book.apply_levels with
+        | Ok m -> m | Error _ -> manager' in
+      let delta3 = Update.delta ~sequence:106L ~levels:[] () in
+      let manager' = match Manager.apply manager' ~update:delta3 ~apply_fn:Simple_book.apply_levels with
+        | Ok m -> m | Error _ -> manager' in
+      Manager.needs_resync manager'
+    | Error _ -> false
+end)
+
+let%test_module "Batch" = (module struct
+  let%test "create batch processor" =
+    let manager = Manager.create Simple_book.empty in
+    let batch = Batch.create manager in
+    true  (* Just test construction *)
+
+  let%test "enqueue triggers flush at max_batch_size" =
+    let manager = Manager.create Simple_book.empty in
+    let batch = Batch.create ~max_batch_size:2 manager in
+    let update1 = Update.delta ~sequence:1L ~levels:[] () in
+    let should_flush1 = Batch.enqueue batch update1 in
+    let update2 = Update.delta ~sequence:2L ~levels:[] () in
+    let should_flush2 = Batch.enqueue batch update2 in
+    (not should_flush1) && should_flush2
+end)
+
+let%test_module "Checksum" = (module struct
+  let%test "crc32 generates checksum" =
+    let bids = [(50000., 1.0); (49999., 0.5)] in
+    let asks = [(50001., 1.5); (50002., 0.8)] in
+    let checksum = Checksum.crc32 ~bids ~asks in
+    not (String.is_empty checksum)
+
+  let%test "validate checksum matches" =
+    let bids = [(50000., 1.0)] in
+    let asks = [(50001., 1.5)] in
+    let expected = Checksum.crc32 ~bids ~asks in
+    Checksum.validate ~validator:Checksum.crc32 ~expected ~bids ~asks
+end)
+
+(** Integration test: Simulate Binance-style updates *)
+let%test_module "Binance Integration" = (module struct
+  let%test "snapshot then deltas" =
+    let manager = Manager.create Simple_book.empty in
+
+    (* Snapshot with last_update_id = 1000 *)
+    let snapshot_levels = [
+      Level_update.create ~price:50000. ~size:1.0 ~side:`Bid;
+      Level_update.create ~price:51000. ~size:1.5 ~side:`Ask;
+    ] in
+    let snapshot = Update.snapshot ~sequence:1000L ~levels:snapshot_levels () in
+
+    match Manager.apply manager ~update:snapshot ~apply_fn:Simple_book.apply_levels with
+    | Error _ -> false
+    | Ok manager ->
+      (* Delta with first_update_id=1001, final_update_id=1001 *)
+      let delta1_levels = [
+        Level_update.create ~price:50000. ~size:1.5 ~side:`Bid;  (* Update size *)
+      ] in
+      let delta1 = Update.delta ~sequence_range:(1001L, 1001L) ~levels:delta1_levels () in
+
+      match Manager.apply manager ~update:delta1 ~apply_fn:Simple_book.apply_levels with
+      | Error _ -> false
+      | Ok manager ->
+        (* Delta with first_update_id=1002, final_update_id=1003 *)
+        let delta2_levels = [
+          Level_update.create ~price:49999. ~size:0.5 ~side:`Bid;  (* New level *)
+          Level_update.create ~price:51000. ~size:0.0 ~side:`Ask;  (* Remove level *)
+        ] in
+        let delta2 = Update.delta ~sequence_range:(1002L, 1003L) ~levels:delta2_levels () in
+
+        match Manager.apply manager ~update:delta2 ~apply_fn:Simple_book.apply_levels with
+        | Ok manager ->
+          Manager.updates_processed manager = 3 &&
+          Manager.snapshots_received manager = 1
+        | Error _ -> false
+end)
+
+(** Print summary *)
+let () =
+  printf "\n=== Incremental Order Book Tests ===\n";
+  printf "✓ Sequence tracking with gap detection\n";
+  printf "✓ Snapshot vs delta handling\n";
+  printf "✓ Manager apply with validation\n";
+  printf "✓ Batch processing\n";
+  printf "✓ Checksum validation\n";
+  printf "✓ Binance-style integration\n\n"

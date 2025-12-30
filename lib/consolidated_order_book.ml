@@ -382,9 +382,11 @@ module Book = struct
     let best_bid = best_bid t in
     let best_ask = best_ask t in
     let spread = best_ask.price -. best_bid.price in
-    let spread_pct = if Float.(best_bid.price > 0.) then
-      100. *. spread /. best_bid.price
-    else 0. in
+    let spread_pct =
+      match Float.(best_bid.price > 0.) with
+      | true -> 100. *. spread /. best_bid.price
+      | false -> 0.
+    in
     printf "\n--- Spread: $%.2f (%.4f%%) ---\n\n" spread spread_pct;
 
     (* Print bids *)
@@ -406,14 +408,18 @@ module Book = struct
   let vwap_bid t ~volume =
     let rec accumulate remaining acc_cost levels =
       match levels with
-      | [] -> if Float.(remaining > 0.) then None else Some (acc_cost /. volume)
+      | [] ->
+        (match Float.(remaining > 0.) with
+         | true -> None
+         | false -> Some (acc_cost /. volume))
       | level :: rest ->
-        if Float.(remaining <= level.Attributed_level.volume) then
-          let cost = remaining *. level.price in
-          Some ((acc_cost +. cost) /. volume)
-        else
-          let cost = level.volume *. level.price in
-          accumulate (remaining -. level.volume) (acc_cost +. cost) rest
+        (match Float.(remaining <= level.Attributed_level.volume) with
+         | true ->
+           let cost = remaining *. level.price in
+           Some ((acc_cost +. cost) /. volume)
+         | false ->
+           let cost = level.volume *. level.price in
+           accumulate (remaining -. level.volume) (acc_cost +. cost) rest)
     in
     let levels = best_n_bids t ~n:100 () in
     accumulate volume 0. levels
@@ -422,14 +428,18 @@ module Book = struct
   let vwap_ask t ~volume =
     let rec accumulate remaining acc_cost levels =
       match levels with
-      | [] -> if Float.(remaining > 0.) then None else Some (acc_cost /. volume)
+      | [] ->
+        (match Float.(remaining > 0.) with
+         | true -> None
+         | false -> Some (acc_cost /. volume))
       | level :: rest ->
-        if Float.(remaining <= level.Attributed_level.volume) then
-          let cost = remaining *. level.price in
-          Some ((acc_cost +. cost) /. volume)
-        else
-          let cost = level.volume *. level.price in
-          accumulate (remaining -. level.volume) (acc_cost +. cost) rest
+        (match Float.(remaining <= level.Attributed_level.volume) with
+         | true ->
+           let cost = remaining *. level.price in
+           Some ((acc_cost +. cost) /. volume)
+         | false ->
+           let cost = level.volume *. level.price in
+           accumulate (remaining -. level.volume) (acc_cost +. cost) rest)
     in
     let levels = best_n_asks t ~n:100 () in
     accumulate volume 0. levels
@@ -594,15 +604,16 @@ module Analytics = struct
     let total_ask_volume = List.fold asks ~init:0. ~f:(fun acc l -> acc +. l.Attributed_level.volume) in
 
     let weighted_mid_price =
-      if Float.(best_bid.price > 0. && best_ask.price > 0.) then
-        (best_bid.price +. best_ask.price) /. 2.
-      else 0.
+      match Float.(best_bid.price > 0. && best_ask.price > 0.) with
+      | true -> (best_bid.price +. best_ask.price) /. 2.
+      | false -> 0.
     in
 
     let spread = best_ask.price -. best_bid.price in
-    let spread_bps = if Float.(best_bid.price > 0.) then
-      10000. *. spread /. best_bid.price
-    else 0.
+    let spread_bps =
+      match Float.(best_bid.price > 0.) with
+      | true -> 10000. *. spread /. best_bid.price
+      | false -> 0.
     in
 
     let bid_depth_1pct = Book.liquidity_depth t ~side:`Bid ~percentage:1. in

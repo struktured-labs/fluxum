@@ -2,6 +2,6 @@
  (name exchange_common)
  (public_name fluxum.exchange_common)
  (modules crypto)
- (libraries core digestif base64 uri)
+ (libraries core core_unix digestif base64 uri)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core))
