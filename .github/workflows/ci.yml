@@ -25,6 +25,7 @@ jobs:
       uses: ocaml/setup-ocaml@v2
       with:
         ocaml-compiler: 5.2.x
+        opam-disable-sandboxing: true
 
     - name: Install opam dependencies
       run: |
@@ -77,6 +78,7 @@ jobs:
       uses: ocaml/setup-ocaml@v2
       with:
         ocaml-compiler: 5.2.x
+        opam-disable-sandboxing: true
 
     - name: Install dependencies
       run: |
