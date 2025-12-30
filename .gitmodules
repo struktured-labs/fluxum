@@ -3,4 +3,4 @@
 	url = https://github.com/janestreet/async_ssl.git
 [submodule "vendor/cohttp_async_websocket"]
 	path = vendor/cohttp_async_websocket
-	url = https://github.com/vbmithr/cohttp-async-websocket.git
+	url = https://github.com/janestreet/cohttp_async_websocket.git
