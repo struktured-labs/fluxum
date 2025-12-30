@@ -1,4 +1,0 @@
-(executable
- (name test_ws_final)
- (libraries core async websocket_curl)
- (preprocess (pps ppx_jane)))

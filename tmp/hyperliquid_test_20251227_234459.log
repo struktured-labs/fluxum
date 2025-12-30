@@ -1,8 +1,0 @@
-Connecting to Hyperliquid order book for BTC...
-2025-12-27 23:44:59.540396-05:00 Info Hyperliquid: Starting receive loop in background
-2025-12-27 23:44:59.540422-05:00 Info Hyperliquid: Starting ping loop (every 2.5 seconds)
-2025-12-27 23:45:04.577782-05:00 Info Hyperliquid: Sending ping #1 at 2025-12-27 23:44:59.540424-05:00
-2025-12-27 23:45:04.577857-05:00 Info Hyperliquid: Connection closed by server
-✓ Connected to Hyperliquid WebSocket
-Waiting for order book data...
-Order book stream ended

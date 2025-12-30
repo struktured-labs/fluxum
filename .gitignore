@@ -2,3 +2,4 @@ setenv.sh
 _build
 data
 logs
+tmp/
