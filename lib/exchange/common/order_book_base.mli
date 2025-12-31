@@ -48,6 +48,7 @@ end) : sig
     val symbol : t -> Config.symbol
     val epoch : t -> int
     val update_time : t -> float
+    val metadata : t -> Config.metadata
 
     val set :
       ?timestamp:float ->
@@ -74,6 +75,8 @@ end) : sig
     val best_n_asks : t -> n:int -> unit -> Price_level.t list
     val all_bids : t -> Price_level.t list
     val all_asks : t -> Price_level.t list
+    val bids_alist : t -> (float * Price_level.t) list
+    val asks_alist : t -> (float * Price_level.t) list
 
     val vwap_buy : t -> volume:float -> float option
     val vwap_sell : t -> volume:float -> float option

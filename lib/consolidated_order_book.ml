@@ -159,10 +159,10 @@ module Book = struct
       let binance_bids = match t.binance_book with
         | None -> []
         | Some book ->
-          Map.to_alist book.Binance.Order_book.Book.bids
+          Binance.Order_book.Book.bids_alist book
           |> (fun list -> List.take list 100)
           |> List.map ~f:(fun (_, level) ->
-            (level.Fluxum.Order_book_intf.Price_level.price,
+            (level.Exchange_common.Order_book_base.Price_level.price,
              { Attributed_level.
                price = level.price;
                volume = level.volume;
@@ -247,10 +247,10 @@ module Book = struct
       let binance_asks = match t.binance_book with
         | None -> []
         | Some book ->
-          Map.to_alist book.Binance.Order_book.Book.asks
+          Binance.Order_book.Book.asks_alist book
           |> (fun list -> List.take list 100)
           |> List.map ~f:(fun (_, level) ->
-            (level.Fluxum.Order_book_intf.Price_level.price,
+            (level.Exchange_common.Order_book_base.Price_level.price,
              { Attributed_level.
                price = level.price;
                volume = level.volume;

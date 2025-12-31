@@ -76,6 +76,7 @@ end) = struct
     let symbol t = t.symbol
     let epoch t = t.epoch
     let update_time t = t.update_time
+    let metadata t = t.metadata
 
     (** Set a price level (size=0 removes the level) *)
     let set ?timestamp ?(metadata = Config.default_metadata ()) t ~side ~price ~size =
@@ -145,6 +146,12 @@ end) = struct
 
     (** Get all asks *)
     let all_asks t = Map.data t.asks
+
+    (** Get bids as association list (price, level) *)
+    let bids_alist t = Map.to_alist t.bids
+
+    (** Get asks as association list (price, level) *)
+    let asks_alist t = Map.to_alist t.asks
 
     (** Calculate VWAP for buying (consuming asks) *)
     let vwap_buy t ~volume =
