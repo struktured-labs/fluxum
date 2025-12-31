@@ -1,73 +1,50 @@
-(** Coinbase Order Book - Implements unified Order_book_intf *)
+(** Coinbase Order Book - Uses common Order_book_base *)
 
 open Core
 open Async
 
 (** Re-export types from unified interface *)
-module Price_level = Fluxum.Order_book_intf.Price_level
+module Price_level = Exchange_common.Order_book_base.Price_level
 module Bid_ask = Fluxum.Order_book_intf.Bid_ask
 
-(** Price comparators *)
-module Bid_price = struct
-  include Float
-  include Comparator.Make (struct
-    type t = float [@@deriving sexp, compare, equal]
-    let compare p p' = Float.compare p p' |> Int.neg  (* Descending *)
-  end)
-end
+(** Coinbase-specific metadata *)
+type metadata = {
+  sequence_num: int64;
+} [@@deriving sexp]
 
-module Ask_price = Float
+let default_metadata () = { sequence_num = 0L }
 
-module Bid_price_map = Map.Make_using_comparator (Bid_price)
-module Ask_price_map = Map.Make (Ask_price)
+(** Instantiate order book base with Coinbase-specific types *)
+module Book_base = Exchange_common.Order_book_base.Make (struct
+  type symbol = Fluxum.Types.Symbol.t
+  let sexp_of_symbol = Fluxum.Types.Symbol.sexp_of_t
+  let symbol_of_sexp = Fluxum.Types.Symbol.t_of_sexp
+  let compare_symbol = Fluxum.Types.Symbol.compare
 
-(** Single symbol order book *)
+  type nonrec metadata = metadata
+  let sexp_of_metadata = sexp_of_metadata
+  let metadata_of_sexp = metadata_of_sexp
+  let default_metadata = default_metadata
+end)
+
+(** Single symbol order book with Coinbase-specific extensions *)
 module Book = struct
-  type t = {
-    symbol: Fluxum.Types.Symbol.t;
-    bids: Price_level.t Bid_price_map.t;
-    asks: Price_level.t Ask_price_map.t;
-    sequence_num: int64;
-    epoch: int;
-    update_time: Time_float_unix.t;
-  } [@@deriving fields, sexp]
+  include Book_base.Book
 
-  let empty ?(timestamp) ?(sequence_num = 0L) symbol =
-    let update_time = Option.value_or_thunk timestamp ~default:Time_float_unix.now in
-    { symbol;
-      bids = Bid_price_map.empty;
-      asks = Ask_price_map.empty;
-      sequence_num;
-      epoch = 0;
-      update_time;
-    }
+  (** Create empty book (timestamp and sequence_num set on first update) *)
+  let empty ?timestamp:_ ?sequence_num:_ symbol =
+    create ~symbol
 
-  let set ?timestamp t ~side ~price ~size =
-    let update_time = Option.value_or_thunk timestamp ~default:Time_float_unix.now in
-    let epoch = t.epoch + 1 in
-    match Float.(equal zero size) with
-    | true -> (
-      match side with
-      | `Bid -> { t with bids = Map.remove t.bids price; epoch; update_time }
-      | `Ask -> { t with asks = Map.remove t.asks price; epoch; update_time })
-    | false -> (
-      let data = Price_level.create ~price ~volume:size in
-      match side with
-      | `Bid -> { t with bids = Map.set t.bids ~key:price ~data; epoch; update_time }
-      | `Ask -> { t with asks = Map.set t.asks ~key:price ~data; epoch; update_time })
-
-  let best_bid t =
-    Map.min_elt t.bids
-    |> Option.value_map ~default:Price_level.empty ~f:snd
-
-  let best_ask t =
-    Map.min_elt t.asks
-    |> Option.value_map ~default:Price_level.empty ~f:snd
+  (** Get sequence number *)
+  let sequence_num t =
+    let m : metadata = metadata t in
+    m.sequence_num
 
   (** Apply level2 update from Coinbase WebSocket *)
   let apply_level2_update t (msg : Ws.Message.level2) =
+    let new_metadata = { sequence_num = msg.sequence_num } in
     (* Coinbase sends updates with events containing price_level and new_quantity *)
-    let t_with_updates = List.fold msg.events ~init:t ~f:(fun acc event ->
+    List.fold msg.events ~init:t ~f:(fun acc event ->
       List.fold event.updates ~init:acc ~f:(fun acc2 update ->
         let price = Float.of_string update.price_level in
         let size = Float.of_string update.new_quantity in
@@ -76,36 +53,26 @@ module Book = struct
           | "offer" | "ask" -> `Ask
           | _ -> `Bid  (* Default, shouldn't happen *)
         in
-        set acc2 ~side ~price ~size
+        set acc2 ~side ~price ~size ~metadata:new_metadata
       )
-    ) in
-    { t_with_updates with sequence_num = msg.sequence_num }
+    )
 
   (** Apply REST API product book *)
   let apply_product_book t (book : Rest.Types.product_book) =
-    (* Replace entire book *)
-    let bids = List.fold book.bids ~init:Bid_price_map.empty ~f:(fun acc level ->
+    (* Build level list from REST response *)
+    let bid_levels = List.filter_map book.bids ~f:(fun level ->
       let price = Float.of_string level.price in
-      let volume = Float.of_string level.size in
-      if Float.(volume > 0.) then
-        Map.set acc ~key:price ~data:(Price_level.create ~price ~volume)
-      else
-        acc
+      let size = Float.of_string level.size in
+      if Float.(size > 0.) then Some (`Bid, price, size) else None
     ) in
-    let asks = List.fold book.asks ~init:Ask_price_map.empty ~f:(fun acc level ->
+    let ask_levels = List.filter_map book.asks ~f:(fun level ->
       let price = Float.of_string level.price in
-      let volume = Float.of_string level.size in
-      if Float.(volume > 0.) then
-        Map.set acc ~key:price ~data:(Price_level.create ~price ~volume)
-      else
-        acc
+      let size = Float.of_string level.size in
+      if Float.(size > 0.) then Some (`Ask, price, size) else None
     ) in
-    { t with
-      bids;
-      asks;
-      epoch = t.epoch + 1;
-      update_time = Time_float_unix.now ();
-    }
+    let all_levels = bid_levels @ ask_levels in
+    let new_book = create ~symbol:(symbol t) in
+    set_many new_book all_levels
 
   (** Create live order book pipe from Coinbase WebSocket *)
   let pipe ~symbol ?url () : (t, string) Result.t Pipe.Reader.t Deferred.t =
@@ -146,22 +113,10 @@ module Book = struct
       );
 
       return book_reader
-
-  let symbol t = t.symbol
-  let epoch t = t.epoch
-  let sequence_num t = t.sequence_num
 end
 
 (** Multi-symbol order books *)
 module Books = struct
-  type t = Book.t Fluxum.Types.Symbol.Map.t [@@deriving sexp]
+  include Book_base.Books
   type book = Book.t
-
-  let empty = Fluxum.Types.Symbol.Map.empty
-  let symbols t = Map.keys t
-  let book t symbol = Map.find t symbol
-  let book_exn t symbol = Map.find_exn t symbol
-
-  let set_book t (book : book) =
-    Map.set t ~key:(Book.symbol book) ~data:book
 end

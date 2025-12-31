@@ -59,26 +59,26 @@ let test_order_book_empty () =
   let book = Coinbase.Order_book.Book.empty "BTC-USD" in
   let best_bid = Coinbase.Order_book.Book.best_bid book in
   let best_ask = Coinbase.Order_book.Book.best_ask book in
-  ignore (assert_float_equal 0.0 (Fluxum.Order_book_intf.Price_level.price best_bid) "Empty book has zero best bid price");
-  ignore (assert_float_equal 0.0 (Fluxum.Order_book_intf.Price_level.volume best_bid) "Empty book has zero best bid volume");
-  ignore (assert_float_equal 0.0 (Fluxum.Order_book_intf.Price_level.price best_ask) "Empty book has zero best ask price");
-  ignore (assert_float_equal 0.0 (Fluxum.Order_book_intf.Price_level.volume best_ask) "Empty book has zero best ask volume")
+  ignore (assert_float_equal 0.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Empty book has zero best bid price");
+  ignore (assert_float_equal 0.0 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Empty book has zero best bid volume");
+  ignore (assert_float_equal 0.0 (Exchange_common.Order_book_base.Price_level.price best_ask) "Empty book has zero best ask price");
+  ignore (assert_float_equal 0.0 (Exchange_common.Order_book_base.Price_level.volume best_ask) "Empty book has zero best ask volume")
 
 let test_order_book_add_bid () =
   printf "\n[Order Book] Add bid\n";
   let book = Coinbase.Order_book.Book.empty "BTC-USD" in
   let book = Coinbase.Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.5 in
   let best_bid = Coinbase.Order_book.Book.best_bid book in
-  ignore (assert_float_equal 50000.0 (Fluxum.Order_book_intf.Price_level.price best_bid) "Best bid price is 50000.0");
-  ignore (assert_float_equal 1.5 (Fluxum.Order_book_intf.Price_level.volume best_bid) "Best bid volume is 1.5")
+  ignore (assert_float_equal 50000.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Best bid price is 50000.0");
+  ignore (assert_float_equal 1.5 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Best bid volume is 1.5")
 
 let test_order_book_add_ask () =
   printf "\n[Order Book] Add ask\n";
   let book = Coinbase.Order_book.Book.empty "BTC-USD" in
   let book = Coinbase.Order_book.Book.set book ~side:`Ask ~price:51000.0 ~size:2.0 in
   let best_ask = Coinbase.Order_book.Book.best_ask book in
-  ignore (assert_float_equal 51000.0 (Fluxum.Order_book_intf.Price_level.price best_ask) "Best ask price is 51000.0");
-  ignore (assert_float_equal 2.0 (Fluxum.Order_book_intf.Price_level.volume best_ask) "Best ask volume is 2.0")
+  ignore (assert_float_equal 51000.0 (Exchange_common.Order_book_base.Price_level.price best_ask) "Best ask price is 51000.0");
+  ignore (assert_float_equal 2.0 (Exchange_common.Order_book_base.Price_level.volume best_ask) "Best ask volume is 2.0")
 
 let test_order_book_multiple_bids () =
   printf "\n[Order Book] Multiple bids - best is highest\n";
@@ -87,8 +87,8 @@ let test_order_book_multiple_bids () =
   let book = Coinbase.Order_book.Book.set book ~side:`Bid ~price:50100.0 ~size:2.0 in
   let book = Coinbase.Order_book.Book.set book ~side:`Bid ~price:49900.0 ~size:1.5 in
   let best_bid = Coinbase.Order_book.Book.best_bid book in
-  ignore (assert_float_equal 50100.0 (Fluxum.Order_book_intf.Price_level.price best_bid) "Best bid is highest price (50100.0)");
-  ignore (assert_float_equal 2.0 (Fluxum.Order_book_intf.Price_level.volume best_bid) "Best bid volume is 2.0")
+  ignore (assert_float_equal 50100.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Best bid is highest price (50100.0)");
+  ignore (assert_float_equal 2.0 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Best bid volume is 2.0")
 
 let test_order_book_multiple_asks () =
   printf "\n[Order Book] Multiple asks - best is lowest\n";
@@ -97,8 +97,8 @@ let test_order_book_multiple_asks () =
   let book = Coinbase.Order_book.Book.set book ~side:`Ask ~price:50900.0 ~size:2.0 in
   let book = Coinbase.Order_book.Book.set book ~side:`Ask ~price:51100.0 ~size:1.5 in
   let best_ask = Coinbase.Order_book.Book.best_ask book in
-  ignore (assert_float_equal 50900.0 (Fluxum.Order_book_intf.Price_level.price best_ask) "Best ask is lowest price (50900.0)");
-  ignore (assert_float_equal 2.0 (Fluxum.Order_book_intf.Price_level.volume best_ask) "Best ask volume is 2.0")
+  ignore (assert_float_equal 50900.0 (Exchange_common.Order_book_base.Price_level.price best_ask) "Best ask is lowest price (50900.0)");
+  ignore (assert_float_equal 2.0 (Exchange_common.Order_book_base.Price_level.volume best_ask) "Best ask volume is 2.0")
 
 let test_order_book_remove_level () =
   printf "\n[Order Book] Remove price level with zero size\n";
@@ -107,8 +107,8 @@ let test_order_book_remove_level () =
   let book = Coinbase.Order_book.Book.set book ~side:`Bid ~price:50100.0 ~size:2.0 in
   let book = Coinbase.Order_book.Book.set book ~side:`Bid ~price:50100.0 ~size:0.0 in
   let best_bid = Coinbase.Order_book.Book.best_bid book in
-  ignore (assert_float_equal 50000.0 (Fluxum.Order_book_intf.Price_level.price best_bid) "After removing 50100, best bid is 50000.0");
-  ignore (assert_float_equal 1.0 (Fluxum.Order_book_intf.Price_level.volume best_bid) "Best bid volume is 1.0")
+  ignore (assert_float_equal 50000.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "After removing 50100, best bid is 50000.0");
+  ignore (assert_float_equal 1.0 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Best bid volume is 1.0")
 
 let test_order_book_update_level () =
   printf "\n[Order Book] Update existing price level\n";
@@ -116,8 +116,8 @@ let test_order_book_update_level () =
   let book = Coinbase.Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
   let book = Coinbase.Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:3.5 in
   let best_bid = Coinbase.Order_book.Book.best_bid book in
-  ignore (assert_float_equal 50000.0 (Fluxum.Order_book_intf.Price_level.price best_bid) "Price remains 50000.0");
-  ignore (assert_float_equal 3.5 (Fluxum.Order_book_intf.Price_level.volume best_bid) "Volume updated to 3.5")
+  ignore (assert_float_equal 50000.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Price remains 50000.0");
+  ignore (assert_float_equal 3.5 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Volume updated to 3.5")
 
 let test_order_book_epoch () =
   printf "\n[Order Book] Epoch increments on updates\n";
@@ -253,7 +253,7 @@ let test_books_set_and_get () =
   match Coinbase.Order_book.Books.book books "BTC-USD" with
   | Some book ->
     let best_bid = Coinbase.Order_book.Book.best_bid book in
-    ignore (assert_float_equal 50000.0 (Fluxum.Order_book_intf.Price_level.price best_bid) "Retrieved book has correct bid")
+    ignore (assert_float_equal 50000.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Retrieved book has correct bid")
   | None ->
     incr tests_run;
     incr tests_failed;

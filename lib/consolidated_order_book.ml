@@ -146,10 +146,10 @@ module Book = struct
       let bitrue_bids = match t.bitrue_book with
         | None -> []
         | Some book ->
-          Map.to_alist book.Bitrue.Order_book.Book.bids
+          Bitrue.Order_book.Book.bids_alist book
           |> (fun list -> List.take list 100)
           |> List.map ~f:(fun (_, level) ->
-            (level.Fluxum.Order_book_intf.Price_level.price,
+            (level.Exchange_common.Order_book_base.Price_level.price,
              { Attributed_level.
                price = level.price;
                volume = level.volume;
@@ -172,10 +172,10 @@ module Book = struct
       let coinbase_bids = match t.coinbase_book with
         | None -> []
         | Some book ->
-          Map.to_alist book.Coinbase.Order_book.Book.bids
+          Coinbase.Order_book.Book.bids_alist book
           |> (fun list -> List.take list 100)
           |> List.map ~f:(fun (_, level) ->
-            (level.Fluxum.Order_book_intf.Price_level.price,
+            (level.Exchange_common.Order_book_base.Price_level.price,
              { Attributed_level.
                price = level.price;
                volume = level.volume;
@@ -234,10 +234,10 @@ module Book = struct
       let bitrue_asks = match t.bitrue_book with
         | None -> []
         | Some book ->
-          Map.to_alist book.Bitrue.Order_book.Book.asks
+          Bitrue.Order_book.Book.asks_alist book
           |> (fun list -> List.take list 100)
           |> List.map ~f:(fun (_, level) ->
-            (level.Fluxum.Order_book_intf.Price_level.price,
+            (level.Exchange_common.Order_book_base.Price_level.price,
              { Attributed_level.
                price = level.price;
                volume = level.volume;
@@ -260,10 +260,10 @@ module Book = struct
       let coinbase_asks = match t.coinbase_book with
         | None -> []
         | Some book ->
-          Map.to_alist book.Coinbase.Order_book.Book.asks
+          Coinbase.Order_book.Book.asks_alist book
           |> (fun list -> List.take list 100)
           |> List.map ~f:(fun (_, level) ->
-            (level.Fluxum.Order_book_intf.Price_level.price,
+            (level.Exchange_common.Order_book_base.Price_level.price,
              { Attributed_level.
                price = level.price;
                volume = level.volume;

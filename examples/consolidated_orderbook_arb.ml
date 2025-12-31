@@ -136,9 +136,9 @@ let get_exchange_best_bid_ask (book: Consolidated_order_book.Book.t) exchange =
     (match book.bitrue_book with
      | None -> None
      | Some ex_book ->
-       let bids = Map.to_alist ex_book.Bitrue.Order_book.Book.bids
+       let bids = Bitrue.Order_book.Book.bids_alist ex_book
          |> (fun list -> List.take list 1) |> List.map ~f:snd in
-       let asks = Map.to_alist ex_book.Bitrue.Order_book.Book.asks
+       let asks = Bitrue.Order_book.Book.asks_alist ex_book
          |> (fun list -> List.take list 1) |> List.map ~f:snd in
        match bids, asks with
        | bid :: _, ask :: _ -> Some (bid.price, bid.volume, ask.price, ask.volume)
@@ -158,9 +158,9 @@ let get_exchange_best_bid_ask (book: Consolidated_order_book.Book.t) exchange =
     (match book.coinbase_book with
      | None -> None
      | Some ex_book ->
-       let bids = Map.to_alist ex_book.Coinbase.Order_book.Book.bids
+       let bids = Coinbase.Order_book.Book.bids_alist ex_book
          |> (fun list -> List.take list 1) |> List.map ~f:snd in
-       let asks = Map.to_alist ex_book.Coinbase.Order_book.Book.asks
+       let asks = Coinbase.Order_book.Book.asks_alist ex_book
          |> (fun list -> List.take list 1) |> List.map ~f:snd in
        match bids, asks with
        | bid :: _, ask :: _ -> Some (bid.price, bid.volume, ask.price, ask.volume)

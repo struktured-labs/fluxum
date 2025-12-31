@@ -59,10 +59,10 @@ let test_order_book_empty () =
   let book = Bitrue.Order_book.Book.empty "BTCUSDT" in
   let best_bid = Bitrue.Order_book.Book.best_bid book in
   let best_ask = Bitrue.Order_book.Book.best_ask book in
-  ignore (assert_float_equal 0.0 (Fluxum.Order_book_intf.Price_level.price best_bid) "Empty book has zero best bid price");
-  ignore (assert_float_equal 0.0 (Fluxum.Order_book_intf.Price_level.volume best_bid) "Empty book has zero best bid volume");
-  ignore (assert_float_equal 0.0 (Fluxum.Order_book_intf.Price_level.price best_ask) "Empty book has zero best ask price");
-  ignore (assert_float_equal 0.0 (Fluxum.Order_book_intf.Price_level.volume best_ask) "Empty book has zero best ask volume")
+  ignore (assert_float_equal 0.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Empty book has zero best bid price");
+  ignore (assert_float_equal 0.0 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Empty book has zero best bid volume");
+  ignore (assert_float_equal 0.0 (Exchange_common.Order_book_base.Price_level.price best_ask) "Empty book has zero best ask price");
+  ignore (assert_float_equal 0.0 (Exchange_common.Order_book_base.Price_level.volume best_ask) "Empty book has zero best ask volume")
 
 let test_order_book_operations () =
   printf "\n[Order Book] Basic operations\n";
@@ -71,10 +71,10 @@ let test_order_book_operations () =
   let book = Bitrue.Order_book.Book.set book ~side:`Ask ~price:51000.0 ~size:2.0 in
   let best_bid = Bitrue.Order_book.Book.best_bid book in
   let best_ask = Bitrue.Order_book.Book.best_ask book in
-  ignore (assert_float_equal 50000.0 (Fluxum.Order_book_intf.Price_level.price best_bid) "Best bid price");
-  ignore (assert_float_equal 1.5 (Fluxum.Order_book_intf.Price_level.volume best_bid) "Best bid volume");
-  ignore (assert_float_equal 51000.0 (Fluxum.Order_book_intf.Price_level.price best_ask) "Best ask price");
-  ignore (assert_float_equal 2.0 (Fluxum.Order_book_intf.Price_level.volume best_ask) "Best ask volume")
+  ignore (assert_float_equal 50000.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Best bid price");
+  ignore (assert_float_equal 1.5 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Best bid volume");
+  ignore (assert_float_equal 51000.0 (Exchange_common.Order_book_base.Price_level.price best_ask) "Best ask price");
+  ignore (assert_float_equal 2.0 (Exchange_common.Order_book_base.Price_level.volume best_ask) "Best ask volume")
 
 let test_order_book_sorting () =
   printf "\n[Order Book] Price level sorting\n";
@@ -85,8 +85,8 @@ let test_order_book_sorting () =
   let book = Bitrue.Order_book.Book.set book ~side:`Ask ~price:50900.0 ~size:2.0 in
   let best_bid = Bitrue.Order_book.Book.best_bid book in
   let best_ask = Bitrue.Order_book.Book.best_ask book in
-  ignore (assert_float_equal 50100.0 (Fluxum.Order_book_intf.Price_level.price best_bid) "Best bid is highest");
-  ignore (assert_float_equal 50900.0 (Fluxum.Order_book_intf.Price_level.price best_ask) "Best ask is lowest")
+  ignore (assert_float_equal 50100.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Best bid is highest");
+  ignore (assert_float_equal 50900.0 (Exchange_common.Order_book_base.Price_level.price best_ask) "Best ask is lowest")
 
 (* WebSocket Message Parsing Tests *)
 let test_ws_parse_ping () =
