@@ -31,4 +31,5 @@
   (async_websocket (>= v0.16.0))
   ctypes
   ctypes-foreign
+  mirage-crypto
   (odoc :with-doc)))
