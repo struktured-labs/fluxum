@@ -27,5 +27,6 @@
               cohttp_async_websocket
               websocket_curl
               fluxum
+              exchange_common
   )
 )

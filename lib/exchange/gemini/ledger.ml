@@ -153,17 +153,10 @@ module T = struct
     }
 
   let update_from_book t book =
-    update_spot t
-      (Order_book.Book.market_price book ~side:`Bid ~volume:t.position
-       |> function
-       | Order_book.Price_level.{ price; volume } -> (
-         match Float.equal volume t.position with
-         | true -> price
-         | false ->
-           Log.Global.info
-             "Volume estimate %f for price %f less than position %f" volume
-             t.position price;
-           price ) )
+    (* TODO: Restore market_price calculation once added to base module *)
+    (* Fallback to best bid price for now *)
+    let best_bid = Order_book.Book.best_bid book in
+    update_spot t (Order_book.Price_level.price best_bid)
 
   type event =
     [ `Order_event of Order_events.Order_event.t
@@ -373,7 +366,7 @@ module Ledger (*: S *) = struct
   let update_from_books (pnl : t) ~(books : Order_book.Books.t) : t =
     let f ~key:symbol ~data:t =
       Option.bind (Symbol.Enum_or_string.to_enum symbol) ~f:(fun symbol ->
-          Order_book.Books.book books symbol
+          Order_book.Books.book books (Symbol.to_string symbol)
           |> Option.map ~f:(Entry.update_from_book t) )
     in
     Map.filter_mapi pnl ~f
