@@ -19,7 +19,7 @@ let main () =
 
   (* Connect to Gemini *)
   let module Gemini_cfg = Gemini.Cfg.Production () in
-  let%bind gemini_pipe = Gemini.Order_book.Book.pipe_curl (module Gemini_cfg) ~symbol:`Btcusd () in
+  let%bind gemini_pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in
 
   (* Connect to Kraken *)
   let%bind kraken_pipe = Kraken.Order_book.Book.pipe ~symbol:"XBT/USD" () in

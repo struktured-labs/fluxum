@@ -24,13 +24,22 @@ let test () =
         update_count := !update_count + 1;
         let elapsed = Time_float_unix.diff (Time_float_unix.now ()) start_time in
 
-        (* Pretty print the order book *)
-        Order_book.Book.pretty_print ~max_depth:5 book ();
+        (* Display order book *)
+        let mid = Order_book.Book.mid_price book in
+        let spread = Order_book.Book.spread book in
+        let best_bid = Order_book.Book.best_bid book in
+        let best_ask = Order_book.Book.best_ask book in
 
-        (* Show update stats *)
-        printf "Update #%d (%.1fs elapsed)\n" !update_count
+        printf "=== Kraken BTC/USD (Update #%d) ===\n" !update_count;
+        printf "Mid: $%.2f | Spread: $%.2f\n"mid spread;
+        printf "Best Bid: %.2f @ %.8f\n"
+          Exchange_common.Order_book_base.Price_level.(price best_bid)
+          Exchange_common.Order_book_base.Price_level.(volume best_bid);
+        printf "Best Ask: %.2f @ %.8f\n"
+          Exchange_common.Order_book_base.Price_level.(price best_ask)
+          Exchange_common.Order_book_base.Price_level.(volume best_ask);
+        printf "Elapsed: %.1fs | Press Ctrl+C to exit\n\n%!"
           (Time_float_unix.Span.to_sec elapsed);
-        printf "Press Ctrl+C to exit\n\n%!";
 
         return ()
     )

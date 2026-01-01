@@ -30,7 +30,7 @@ let test () =
     printf "Waiting for order book data...\n\n%!";
 
     (* Create order book *)
-    let book = ref (Mexc.Order_book.Book.empty "BTCUSDT") in
+    let book = ref (Mexc.Order_book.Book.create ~symbol:"BTCUSDT") in
     let update_count = ref 0 in
 
     (* Process messages *)
@@ -50,7 +50,7 @@ let test () =
              update_count := !update_count + 1;
 
              (* Clear and rebuild order book *)
-             book := Mexc.Order_book.Book.empty "BTCUSDT";
+             book := Mexc.Order_book.Book.create ~symbol:"BTCUSDT";
 
              (* Add bids *)
              List.iter depth.bids ~f:(fun item ->
@@ -67,8 +67,11 @@ let test () =
              );
 
              (* Display every 5 updates *)
-             if !update_count mod 5 = 0 then
-               Mexc.Order_book.Book.pretty_print ~max_depth:10 !book;
+             if !update_count mod 5 = 0 then begin
+               let mid = Mexc.Order_book.Book.mid_price !book in
+               let spread = Mexc.Order_book.Book.spread !book in
+               printf "Update #%d: Mid=%.2f Spread=%.2f\n%!" !update_count mid spread
+             end;
 
              return ()
 
@@ -80,17 +83,20 @@ let test () =
              List.iter depth.bids ~f:(fun item ->
                let price = Float.of_string item.price in
                let size = Float.of_string item.quantity in
-               book := Mexc.Order_book.Book.update !book ~side:`Bid ~price ~size
+               book := Mexc.Order_book.Book.set !book ~side:`Bid ~price ~size
              );
 
              List.iter depth.asks ~f:(fun item ->
                let price = Float.of_string item.price in
                let size = Float.of_string item.quantity in
-               book := Mexc.Order_book.Book.update !book ~side:`Ask ~price ~size
+               book := Mexc.Order_book.Book.set !book ~side:`Ask ~price ~size
              );
 
-             if !update_count mod 10 = 0 then
-               Mexc.Order_book.Book.pretty_print ~max_depth:10 !book;
+             if !update_count mod 10 = 0 then begin
+               let mid = Mexc.Order_book.Book.mid_price !book in
+               let spread = Mexc.Order_book.Book.spread !book in
+               printf "Update #%d: Mid=%.2f Spread=%.2f\n%!" !update_count mid spread
+             end;
 
              return ()
 

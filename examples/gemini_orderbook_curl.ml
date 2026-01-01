@@ -7,7 +7,7 @@ let test () =
   printf "Testing Gemini order book with libcurl...\n%!";
 
   let module Gemini_cfg = Gemini.Cfg.Production () in
-  let%bind gemini_pipe = Gemini.Order_book.Book.pipe_curl (module Gemini_cfg) ~symbol:`Btcusd () in
+  let%bind gemini_pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in
 
   printf "✓ Connected to Gemini libcurl WebSocket\n%!";
   printf "Waiting for order book data...\n%!";

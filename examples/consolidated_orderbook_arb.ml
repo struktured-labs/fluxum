@@ -125,9 +125,9 @@ let get_exchange_best_bid_ask (book: Consolidated_order_book.Book.t) exchange =
     (match book.hyperliquid_book with
      | None -> None
      | Some ex_book ->
-       let bids = Map.to_alist ex_book.Hyperliquid.Order_book.Book.bids
+       let bids = Hyperliquid.Order_book.Book.bids_alist ex_book
          |> (fun list -> List.take list 1) |> List.map ~f:snd in
-       let asks = Map.to_alist ex_book.Hyperliquid.Order_book.Book.asks
+       let asks = Hyperliquid.Order_book.Book.asks_alist ex_book
          |> (fun list -> List.take list 1) |> List.map ~f:snd in
        match bids, asks with
        | bid :: _, ask :: _ -> Some (bid.price, bid.volume, ask.price, ask.volume)
@@ -360,7 +360,7 @@ let test ~exchanges ~depth ~max_display =
   let%bind gemini_pipe =
     if List.mem selected `Gemini ~equal:Poly.equal then (
       let module Gemini_cfg = Gemini.Cfg.Production () in
-      let%bind pipe = Gemini.Order_book.Book.pipe_curl (module Gemini_cfg) ~symbol:`Btcusd () in
+      let%bind pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in
       return (Pipe.map pipe ~f:(fun result -> Gemini_update result))
     ) else (
       return (create_closed_pipe ())

@@ -29,8 +29,8 @@ let test () =
 
         (* Display order book info *)
         printf "\n=== Hyperliquid %s Order Book (Update #%d) ===\n"
-          book.symbol !update_count;
-        printf "Epoch: %d | Elapsed: %.1fs\n" book.epoch
+          (Hyperliquid.Order_book.Book.symbol book) !update_count;
+        printf "Epoch: %d | Elapsed: %.1fs\n" (Hyperliquid.Order_book.Book.epoch book)
           (Time_float_unix.Span.to_sec elapsed);
 
         (* Get best bid and ask *)

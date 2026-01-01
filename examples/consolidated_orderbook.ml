@@ -76,7 +76,7 @@ let test ~exchanges ~depth ~max_display =
   let%bind gemini_pipe =
     if List.mem selected `Gemini ~equal:Poly.equal then (
       let module Gemini_cfg = Gemini.Cfg.Production () in
-      let%bind pipe = Gemini.Order_book.Book.pipe_curl (module Gemini_cfg) ~symbol:`Btcusd () in
+      let%bind pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in
       return (Pipe.map pipe ~f:(fun result -> Gemini_update result))
     ) else (
       return (create_closed_pipe ())

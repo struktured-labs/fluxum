@@ -4,22 +4,26 @@ open Core
 open Async
 open Consolidated_order_book
 
+(* Bring Book module into scope *)
+module Book = Consolidated_order_book.Book
+
 (** Helper to create test books *)
 let make_gemini_book symbol =
-  let book = Gemini.Order_book.Book.empty symbol in
+  let book = Gemini.Order_book.Book.create ~symbol in
   book
 
 let make_kraken_book symbol =
-  let book = Kraken.Order_book.Book.empty symbol in
+  let book = Kraken.Order_book.Book.create ~symbol in
   book
 
 let make_binance_book symbol =
-  let book = Binance.Order_book.Book.empty symbol in
+  let book = Binance.Order_book.Book.create ~symbol in
   book
 
 (** Helper for float equality *)
 let float_equal ?(tolerance = 0.0001) a b =
-  Float.abs (a -. b) < tolerance
+  let open Float in
+  abs (a -. b) < tolerance
 
 let%test_module "Attributed_level" = (module struct
   let%test "create attributed level" =
@@ -42,22 +46,22 @@ end)
 
 let%test_module "Book - Creation and Basic Operations" = (module struct
   let%test "create empty consolidated book" =
-    let book = Book.empty ~symbol:"BTC/USD" in
+    let book = Book.empty "BTC/USD" in
     String.equal (Book.symbol book) "BTC/USD"
 
   let%test "empty book has zero epoch" =
-    let book = Book.empty ~symbol:"BTC/USD" in
+    let book = Book.empty "BTC/USD" in
     Book.epoch book = 0
 
   let%test "empty book has no best prices" =
-    let book = Book.empty ~symbol:"BTC/USD" in
+    let book = Book.empty "BTC/USD" in
     let best_bid = Book.best_bid book in
     let best_ask = Book.best_ask book in
     float_equal (Attributed_level.price best_bid) 0. &&
     float_equal (Attributed_level.price best_ask) 0.
 
   let%test "spread on empty book is zero" =
-    let book = Book.empty ~symbol:"BTC/USD" in
+    let book = Book.empty "BTC/USD" in
     match Book.spread book with
     | Some spread -> float_equal spread 0.
     | None -> true  (* Also acceptable for empty book *)
@@ -65,7 +69,7 @@ end)
 
 let%test_module "Book - Single Exchange Updates" = (module struct
   let%test "update from gemini book" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
     let gemini_book = make_gemini_book `Btcusd in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.5 in
@@ -75,7 +79,7 @@ let%test_module "Book - Single Exchange Updates" = (module struct
     float_equal (Attributed_level.volume best_bid) 1.5
 
   let%test "update from kraken book" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
     let kraken_book = make_kraken_book "BTC/USD" in
     let kraken_book = Kraken.Order_book.Book.set kraken_book
                         ~side:`Ask ~price:51000. ~size:2.0 in
@@ -84,7 +88,7 @@ let%test_module "Book - Single Exchange Updates" = (module struct
     float_equal (Attributed_level.price best_ask) 51000.
 
   let%test "update from binance book" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
     let binance_book = make_binance_book "BTCUSDT" in
     let binance_book = Binance.Order_book.Book.set binance_book
                         ~side:`Bid ~price:49999. ~size:3.0 in
@@ -92,7 +96,7 @@ let%test_module "Book - Single Exchange Updates" = (module struct
     Book.epoch consolidated > 0
 
   let%test "sequential updates increment epoch" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
     let gemini_book = make_gemini_book `Btcusd in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
@@ -110,7 +114,7 @@ end)
 
 let%test_module "Book - Multi-Exchange Aggregation" = (module struct
   let%test "best bid from multiple exchanges - simple" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: bid at 50000 *)
     let gemini_book = make_gemini_book `Btcusd in
@@ -128,7 +132,7 @@ let%test_module "Book - Multi-Exchange Aggregation" = (module struct
     float_equal (Attributed_level.price best_bid) 50001.
 
   let%test "best ask from multiple exchanges - simple" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: ask at 51000 *)
     let gemini_book = make_gemini_book `Btcusd in
@@ -146,7 +150,7 @@ let%test_module "Book - Multi-Exchange Aggregation" = (module struct
     float_equal (Attributed_level.price best_ask) 50999.
 
   let%test "volume aggregation at same price" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: bid at 50000 with 1.0 BTC *)
     let gemini_book = make_gemini_book `Btcusd in
@@ -167,7 +171,7 @@ let%test_module "Book - Multi-Exchange Aggregation" = (module struct
     | None -> false
 
   let%test "exchange attribution tracking" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     let gemini_book = make_gemini_book `Btcusd in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -183,7 +187,7 @@ let%test_module "Book - Multi-Exchange Aggregation" = (module struct
     | None -> false
 
   let%test "multiple exchanges at same price" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     let gemini_book = make_gemini_book `Btcusd in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -206,7 +210,7 @@ end)
 
 let%test_module "Book - Spread Calculations" = (module struct
   let%test "spread across exchanges" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: bid at 50000 *)
     let gemini_book = make_gemini_book `Btcusd in
@@ -225,7 +229,7 @@ let%test_module "Book - Spread Calculations" = (module struct
     | None -> false
 
   let%test "tight spread detection" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     let gemini_book = make_gemini_book `Btcusd in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -242,7 +246,7 @@ let%test_module "Book - Spread Calculations" = (module struct
     | None -> false
 
   let%test "best prices from different exchanges" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: worse bid/ask *)
     let gemini_book = make_gemini_book `Btcusd in
@@ -272,7 +276,7 @@ end)
 
 let%test_module "Book - Deep Books" = (module struct
   let%test "multiple price levels from single exchange" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     let gemini_book = make_gemini_book `Btcusd in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -287,7 +291,7 @@ let%test_module "Book - Deep Books" = (module struct
     Map.length bid_levels = 3
 
   let%test "interleaved price levels from multiple exchanges" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: 50000, 49998 *)
     let gemini_book = make_gemini_book `Btcusd in
@@ -309,7 +313,7 @@ let%test_module "Book - Deep Books" = (module struct
     Map.length bid_levels = 4
 
   let%test "level removal on zero volume" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     let gemini_book = make_gemini_book `Btcusd in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -327,7 +331,7 @@ end)
 
 let%test_module "Arbitrage Detection" = (module struct
   let%test "no arbitrage when properly ordered" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     let gemini_book = make_gemini_book `Btcusd in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -341,7 +345,7 @@ let%test_module "Arbitrage Detection" = (module struct
     | None -> false
 
   let%test "potential arbitrage - crossed market" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: high ask at 51000 *)
     let gemini_book = make_gemini_book `Btcusd in
@@ -362,7 +366,7 @@ end)
 
 let%test_module "Edge Cases and Stress Tests" = (module struct
   let%test "very close prices" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     let gemini_book = make_gemini_book `Btcusd in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -378,7 +382,7 @@ let%test_module "Edge Cases and Stress Tests" = (module struct
     float_equal ~tolerance:0.000001 (Attributed_level.price best_bid) 50000.0002
 
   let%test "large volume aggregation" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     let gemini_book = make_gemini_book `Btcusd in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -396,7 +400,7 @@ let%test_module "Edge Cases and Stress Tests" = (module struct
     | None -> false
 
   let%test "exchange override - later update wins for same source" =
-    let consolidated = Book.empty ~symbol:"BTC/USD" in
+    let consolidated = Book.empty "BTC/USD" in
 
     let gemini_book1 = make_gemini_book `Btcusd in
     let gemini_book1 = Gemini.Order_book.Book.set gemini_book1
