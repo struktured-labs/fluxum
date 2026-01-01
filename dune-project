@@ -29,7 +29,6 @@
   (curl (>= 0.9.0))
   csvfields
   (async_websocket (>= v0.16.0))
-  (async_ssl (>= v0.16.0))
   ctypes
   ctypes-foreign
   (odoc :with-doc)))

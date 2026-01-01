@@ -1,1 +1,1 @@
-(data_only_dirs vendor)
+(dirs :standard vendor)
