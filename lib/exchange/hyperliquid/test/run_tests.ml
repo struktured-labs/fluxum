@@ -339,12 +339,12 @@ let test_order_book () =
   (* Test best_bid on empty book *)
   let best_bid = Hyperliquid.Order_book.Book.best_bid book in
   test_assert "Empty book best_bid is empty"
-    (Float.equal best_bid.Fluxum.Order_book_intf.Price_level.price 0.0);
+    (Float.equal best_bid.Exchange_common.Order_book_base.Price_level.price 0.0);
 
   (* Test best_ask on empty book *)
   let best_ask = Hyperliquid.Order_book.Book.best_ask book in
   test_assert "Empty book best_ask is empty"
-    (Float.equal best_ask.Fluxum.Order_book_intf.Price_level.price 0.0);
+    (Float.equal best_ask.Exchange_common.Order_book_base.Price_level.price 0.0);
 
   (* Test set bid *)
   let book = Hyperliquid.Order_book.Book.set book ~side:`Bid ~price:42000.0 ~size:1.5 in

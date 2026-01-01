@@ -38,7 +38,9 @@ module Orderbook = struct
               (* Clear screen and print updated book *)
               printf "\027[2J\027[H";  (* ANSI clear screen *)
               printf "=== Order Book Update #%d - %s ===\n\n" !update_count symbol;
-              Order_book.Book.pretty_print book ();
+              (* FIXME: Refactored order book doesn't have pretty_print yet *)
+              (* Order_book.Book.pretty_print book (); *)
+              printf "Book updated (epoch: %d)\n" (Order_book.Book.epoch book);
               printf "\n";
 
               if limit > 0 && !update_count >= limit then

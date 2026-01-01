@@ -1,131 +1,82 @@
-(** Hyperliquid Order Book - Implements unified Order_book_intf *)
+(** Hyperliquid Order Book - Uses common Order_book_base *)
 
 open Core
 open Async
 
 (** Re-export types from unified interface *)
-module Price_level = Fluxum.Order_book_intf.Price_level
+module Price_level = Exchange_common.Order_book_base.Price_level
 module Bid_ask = Fluxum.Order_book_intf.Bid_ask
 
-(** Price comparators *)
-module Bid_price = struct
-  include Float
-  include Comparator.Make (struct
-    type t = float [@@deriving sexp, compare, equal]
-    let compare p p' = Float.compare p p' |> Int.neg  (* Descending *)
-  end)
-end
+(** Hyperliquid-specific metadata *)
+type metadata = {
+  last_update_time: int64;
+} [@@deriving sexp]
 
-module Ask_price = Float
+let default_metadata () = { last_update_time = 0L }
 
-module Bid_price_map = Map.Make_using_comparator (Bid_price)
-module Ask_price_map = Map.Make (Ask_price)
+(** Instantiate order book base with Hyperliquid-specific types *)
+module Book_base = Exchange_common.Order_book_base.Make (struct
+  type symbol = Fluxum.Types.Symbol.t
+  let sexp_of_symbol = Fluxum.Types.Symbol.sexp_of_t
+  let symbol_of_sexp = Fluxum.Types.Symbol.t_of_sexp
+  let compare_symbol = Fluxum.Types.Symbol.compare
 
-(** Single symbol order book *)
+  type nonrec metadata = metadata
+  let sexp_of_metadata = sexp_of_metadata
+  let metadata_of_sexp = metadata_of_sexp
+  let default_metadata = default_metadata
+end)
+
+(** Single symbol order book with Hyperliquid-specific extensions *)
 module Book = struct
-  type t = {
-    symbol: Fluxum.Types.Symbol.t;
-    bids: Price_level.t Bid_price_map.t;
-    asks: Price_level.t Ask_price_map.t;
-    last_update_time: int64;
-    epoch: int;
-    update_time: Time_float_unix.t;
-  } [@@deriving fields, sexp]
+  include Book_base.Book
 
-  let empty ?(timestamp) ?(last_update_time = 0L) symbol =
-    let update_time = Option.value_or_thunk timestamp ~default:Time_float_unix.now in
-    { symbol;
-      bids = Bid_price_map.empty;
-      asks = Ask_price_map.empty;
-      last_update_time;
-      epoch = 0;
-      update_time;
-    }
-
-  let set ?timestamp t ~side ~price ~size =
-    let update_time = Option.value_or_thunk timestamp ~default:Time_float_unix.now in
-    let epoch = t.epoch + 1 in
-    match Float.(equal zero size) with
-    | true -> (
-      match side with
-      | `Bid -> { t with bids = Map.remove t.bids price; epoch; update_time }
-      | `Ask -> { t with asks = Map.remove t.asks price; epoch; update_time })
-    | false -> (
-      let data = Price_level.create ~price ~volume:size in
-      match side with
-      | `Bid -> { t with bids = Map.set t.bids ~key:price ~data; epoch; update_time }
-      | `Ask -> { t with asks = Map.set t.asks ~key:price ~data; epoch; update_time })
-
-  let best_bid t =
-    Map.min_elt t.bids
-    |> Option.value_map ~default:Price_level.empty ~f:snd
-
-  let best_ask t =
-    Map.min_elt t.asks
-    |> Option.value_map ~default:Price_level.empty ~f:snd
+  let empty ?timestamp:_ ?last_update_time:_ symbol =
+    create ~symbol
 
   (** Apply L2 book update from Hyperliquid.
       Hyperliquid l2Book has levels as [[bids], [asks]] where each level is {px, sz, n} *)
   let apply_l2_book t (book : Ws.Message.l2_book) =
+    let new_metadata = { last_update_time = book.time } in
     let bids, asks = match book.levels with
       | [bid_levels; ask_levels] -> (bid_levels, ask_levels)
       | _ -> ([], [])  (* Invalid format, return empty *)
     in
-    (* Replace bids *)
-    let new_bids = List.fold bids ~init:Bid_price_map.empty ~f:(fun acc level ->
+    (* Build level lists *)
+    let bid_levels = List.filter_map bids ~f:(fun level ->
       let price = Float.of_string level.Ws.Message.px in
       let volume = Float.of_string level.sz in
-      if Float.(volume > 0.) then
-        Map.set acc ~key:price ~data:(Price_level.create ~price ~volume)
-      else
-        acc
+      if Float.(volume > 0.) then Some (`Bid, price, volume) else None
     ) in
-    (* Replace asks *)
-    let new_asks = List.fold asks ~init:Ask_price_map.empty ~f:(fun acc level ->
+    let ask_levels = List.filter_map asks ~f:(fun level ->
       let price = Float.of_string level.Ws.Message.px in
       let volume = Float.of_string level.sz in
-      if Float.(volume > 0.) then
-        Map.set acc ~key:price ~data:(Price_level.create ~price ~volume)
-      else
-        acc
+      if Float.(volume > 0.) then Some (`Ask, price, volume) else None
     ) in
-    { t with
-      bids = new_bids;
-      asks = new_asks;
-      last_update_time = book.time;
-      epoch = t.epoch + 1;
-      update_time = Time_float_unix.now ();
-    }
+    let all_levels = bid_levels @ ask_levels in
+    let new_book = create ~symbol:(symbol t) in
+    set_many new_book all_levels ~metadata:new_metadata
 
   (** Apply REST API l2_book response *)
   let apply_rest_l2_book t (book : Rest.Types.l2_book) =
+    let new_metadata = { last_update_time = book.time } in
     let bids, asks = match book.levels with
       | [bid_levels; ask_levels] -> (bid_levels, ask_levels)
       | _ -> ([], [])
     in
-    let new_bids = List.fold bids ~init:Bid_price_map.empty ~f:(fun acc level ->
+    let bid_levels = List.filter_map bids ~f:(fun level ->
       let price = Float.of_string level.Rest.Types.px in
       let volume = Float.of_string level.sz in
-      if Float.(volume > 0.) then
-        Map.set acc ~key:price ~data:(Price_level.create ~price ~volume)
-      else
-        acc
+      if Float.(volume > 0.) then Some (`Bid, price, volume) else None
     ) in
-    let new_asks = List.fold asks ~init:Ask_price_map.empty ~f:(fun acc level ->
+    let ask_levels = List.filter_map asks ~f:(fun level ->
       let price = Float.of_string level.Rest.Types.px in
       let volume = Float.of_string level.sz in
-      if Float.(volume > 0.) then
-        Map.set acc ~key:price ~data:(Price_level.create ~price ~volume)
-      else
-        acc
+      if Float.(volume > 0.) then Some (`Ask, price, volume) else None
     ) in
-    { t with
-      bids = new_bids;
-      asks = new_asks;
-      last_update_time = book.time;
-      epoch = t.epoch + 1;
-      update_time = Time_float_unix.now ();
-    }
+    let all_levels = bid_levels @ ask_levels in
+    let new_book = create ~symbol:(symbol t) in
+    set_many new_book all_levels ~metadata:new_metadata
 
   (** Create live order book pipe from Hyperliquid WebSocket *)
   let pipe ~symbol ?url () : (t, string) Result.t Pipe.Reader.t Deferred.t =
@@ -159,21 +110,10 @@ module Book = struct
       );
 
       return book_reader
-
-  let symbol t = t.symbol
-  let epoch t = t.epoch
 end
 
 (** Multi-symbol order books *)
 module Books = struct
-  type t = Book.t Fluxum.Types.Symbol.Map.t [@@deriving sexp]
+  include Book_base.Books
   type book = Book.t
-
-  let empty = Fluxum.Types.Symbol.Map.empty
-  let symbols t = Map.keys t
-  let book t symbol = Map.find t symbol
-  let book_exn t symbol = Map.find_exn t symbol
-
-  let set_book t (book : book) =
-    Map.set t ~key:(Book.symbol book) ~data:book
 end
