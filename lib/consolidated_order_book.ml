@@ -322,6 +322,15 @@ module Book = struct
     Map.min_elt t.asks
     |> Option.value_map ~default:Attributed_level.empty ~f:snd
 
+  (** Get spread between best bid and ask *)
+  let spread t =
+    let best_bid = best_bid t in
+    let best_ask = best_ask t in
+    if Float.(best_bid.price > 0. && best_ask.price > 0.) then
+      Some (best_ask.price -. best_bid.price)
+    else
+      None
+
   (** Get top N bids *)
   let best_n_bids t ~n () =
     Map.to_alist t.bids

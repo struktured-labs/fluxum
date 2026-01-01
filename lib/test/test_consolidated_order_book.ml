@@ -70,7 +70,7 @@ end)
 let%test_module "Book - Single Exchange Updates" = (module struct
   let%test "update from gemini book" =
     let consolidated = Book.empty "BTC/USD" in
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.5 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -97,7 +97,7 @@ let%test_module "Book - Single Exchange Updates" = (module struct
 
   let%test "sequential updates increment epoch" =
     let consolidated = Book.empty "BTC/USD" in
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -117,7 +117,7 @@ let%test_module "Book - Multi-Exchange Aggregation" = (module struct
     let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: bid at 50000 *)
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -135,7 +135,7 @@ let%test_module "Book - Multi-Exchange Aggregation" = (module struct
     let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: ask at 51000 *)
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Ask ~price:51000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -153,7 +153,7 @@ let%test_module "Book - Multi-Exchange Aggregation" = (module struct
     let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: bid at 50000 with 1.0 BTC *)
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -173,7 +173,7 @@ let%test_module "Book - Multi-Exchange Aggregation" = (module struct
   let%test "exchange attribution tracking" =
     let consolidated = Book.empty "BTC/USD" in
 
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -189,7 +189,7 @@ let%test_module "Book - Multi-Exchange Aggregation" = (module struct
   let%test "multiple exchanges at same price" =
     let consolidated = Book.empty "BTC/USD" in
 
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -213,7 +213,7 @@ let%test_module "Book - Spread Calculations" = (module struct
     let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: bid at 50000 *)
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -231,7 +231,7 @@ let%test_module "Book - Spread Calculations" = (module struct
   let%test "tight spread detection" =
     let consolidated = Book.empty "BTC/USD" in
 
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -249,7 +249,7 @@ let%test_module "Book - Spread Calculations" = (module struct
     let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: worse bid/ask *)
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:49990. ~size:1.0 in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -278,7 +278,7 @@ let%test_module "Book - Deep Books" = (module struct
   let%test "multiple price levels from single exchange" =
     let consolidated = Book.empty "BTC/USD" in
 
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -294,7 +294,7 @@ let%test_module "Book - Deep Books" = (module struct
     let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: 50000, 49998 *)
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -315,7 +315,7 @@ let%test_module "Book - Deep Books" = (module struct
   let%test "level removal on zero volume" =
     let consolidated = Book.empty "BTC/USD" in
 
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -333,7 +333,7 @@ let%test_module "Arbitrage Detection" = (module struct
   let%test "no arbitrage when properly ordered" =
     let consolidated = Book.empty "BTC/USD" in
 
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:1.0 in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
@@ -348,7 +348,7 @@ let%test_module "Arbitrage Detection" = (module struct
     let consolidated = Book.empty "BTC/USD" in
 
     (* Gemini: high ask at 51000 *)
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Ask ~price:51000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -368,7 +368,7 @@ let%test_module "Edge Cases and Stress Tests" = (module struct
   let%test "very close prices" =
     let consolidated = Book.empty "BTC/USD" in
 
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000.0001 ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -384,7 +384,7 @@ let%test_module "Edge Cases and Stress Tests" = (module struct
   let%test "large volume aggregation" =
     let consolidated = Book.empty "BTC/USD" in
 
-    let gemini_book = make_gemini_book `Btcusd in
+    let gemini_book = make_gemini_book "BTC/USD" in
     let gemini_book = Gemini.Order_book.Book.set gemini_book
                         ~side:`Bid ~price:50000. ~size:100_000.0 in
     let consolidated = Book.update_gemini consolidated gemini_book in
@@ -402,12 +402,12 @@ let%test_module "Edge Cases and Stress Tests" = (module struct
   let%test "exchange override - later update wins for same source" =
     let consolidated = Book.empty "BTC/USD" in
 
-    let gemini_book1 = make_gemini_book `Btcusd in
+    let gemini_book1 = make_gemini_book "BTC/USD" in
     let gemini_book1 = Gemini.Order_book.Book.set gemini_book1
                          ~side:`Bid ~price:50000. ~size:1.0 in
     let consolidated = Book.update_gemini consolidated gemini_book1 in
 
-    let gemini_book2 = make_gemini_book `Btcusd in
+    let gemini_book2 = make_gemini_book "BTC/USD" in
     let gemini_book2 = Gemini.Order_book.Book.set gemini_book2
                          ~side:`Bid ~price:50000. ~size:5.0 in
     let consolidated = Book.update_gemini consolidated gemini_book2 in
