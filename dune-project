@@ -29,7 +29,7 @@
   (curl (>= 0.9.0))
   csvfields
   (ppx_csv_conv (>= v0.16.0))
-  (ppx_make (>= v0.16.0))
+  ppx_make
   (async_websocket (>= v0.16.0))
   ctypes
   ctypes-foreign
