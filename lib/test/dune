@@ -1,8 +1,7 @@
-;; Tests temporarily disabled
-;; (library
-;;  (name fluxum_test)
-;;  (modules test_order_book_incremental)
-;;  (libraries core async fluxum)
-;;  (inline_tests)
-;;  (preprocess (pps ppx_jane ppx_inline_test))
-;;  (flags :standard -open Core -open Async))
+(library
+ (name fluxum_test)
+ (modules test_order_book_incremental test_consolidated_order_book)
+ (libraries core async fluxum consolidated_order_book gemini kraken binance)
+ (inline_tests)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))

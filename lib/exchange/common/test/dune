@@ -1,0 +1,7 @@
+(library
+ (name exchange_common_test)
+ (modules test_order_book_base)
+ (libraries core async exchange_common)
+ (inline_tests)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
