@@ -5,7 +5,7 @@
     -open Core
     -open Async
   )
-  (preprocess (pps ppx_jane ppx_deriving_yojson ppx_make))
+  (preprocess (pps ppx_jane ppx_deriving_yojson))
   (synopsis "Gemini REST Client for OCaml")
   (library_flags -linkall)
   (libraries
