@@ -92,3 +92,11 @@
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async)
 )
+
+
+(executable
+ (name dydx_orderbook)
+ (modules dydx_orderbook)
+ (libraries core async dydx exchange_common)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))
