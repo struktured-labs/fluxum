@@ -28,6 +28,10 @@ jobs:
         opam-depext: false
         opam-disable-sandboxing: true
 
+    - name: Initialize git submodules
+      run: |
+        git submodule update --init --recursive
+
     - name: Install opam dependencies
       run: |
         opam pin add -y fluxum .
@@ -81,6 +85,10 @@ jobs:
         ocaml-compiler: 5.2.0
         opam-depext: false
         opam-disable-sandboxing: true
+
+    - name: Initialize git submodules
+      run: |
+        git submodule update --init --recursive
 
     - name: Install dependencies
       run: |
