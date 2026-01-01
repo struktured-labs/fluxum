@@ -6,7 +6,31 @@ module Venue = struct
     | Kraken
     | Mexc
     | Coinbase
+    | Binance
+    | Hyperliquid
+    | Bitrue
+    | Dydx  (** dYdX v4 - DeFi perpetuals *)
+    | Gmx   (** GMX - DeFi perpetuals (planned) *)
+    | Aave  (** Aave - DeFi lending (planned) *)
+    | Compound  (** Compound - DeFi lending (planned) *)
   [@@deriving sexp, compare, equal]
+
+  let to_string = function
+    | Gemini -> "Gemini"
+    | Kraken -> "Kraken"
+    | Mexc -> "MEXC"
+    | Coinbase -> "Coinbase"
+    | Binance -> "Binance"
+    | Hyperliquid -> "Hyperliquid"
+    | Bitrue -> "Bitrue"
+    | Dydx -> "dYdX"
+    | Gmx -> "GMX"
+    | Aave -> "Aave"
+    | Compound -> "Compound"
+
+  let is_defi = function
+    | Dydx | Gmx | Aave | Compound -> true
+    | Gemini | Kraken | Mexc | Coinbase | Binance | Hyperliquid | Bitrue -> false
 end
 
 module Symbol = struct
@@ -142,6 +166,84 @@ module Book_update = struct
     ; is_snapshot : bool
     }
   [@@deriving sexp, fields]
+end
+
+(** Order book types for DeFi and exchange-agnostic order books *)
+module Order_book = struct
+  (** A single price level in the order book *)
+  module Price_level = struct
+    type t =
+      { price  : Price.t
+      ; volume : Qty.t
+      }
+    [@@deriving sexp, compare, equal, fields]
+
+    let create ~price ~volume = { price; volume }
+
+    let empty = { price = 0.; volume = 0. }
+  end
+
+  (** Order book snapshot with bids and asks *)
+  type t =
+    { venue      : Venue.t
+    ; symbol     : Symbol.t
+    ; bids       : Price_level.t list  (** Sorted descending by price *)
+    ; asks       : Price_level.t list  (** Sorted ascending by price *)
+    ; ts         : Time_float_unix.t option
+    ; epoch      : int  (** Update sequence number *)
+    }
+  [@@deriving sexp, fields]
+
+  let create ~venue ~symbol =
+    { venue
+    ; symbol
+    ; bids = []
+    ; asks = []
+    ; ts = None
+    ; epoch = 0
+    }
+
+  (** Get best bid (highest buy price) *)
+  let best_bid t =
+    match t.bids with
+    | [] -> Price_level.empty
+    | hd :: _ -> hd
+
+  (** Get best ask (lowest sell price) *)
+  let best_ask t =
+    match t.asks with
+    | [] -> Price_level.empty
+    | hd :: _ -> hd
+
+  (** Calculate mid price: (best_bid + best_ask) / 2 *)
+  let mid_price t =
+    let bid = best_bid t in
+    let ask = best_ask t in
+    if Float.(bid.price = 0. || ask.price = 0.) then 0.
+    else (bid.price +. ask.price) /. 2.
+
+  (** Calculate spread: best_ask - best_bid *)
+  let spread t =
+    let bid = best_bid t in
+    let ask = best_ask t in
+    if Float.(bid.price = 0. || ask.price = 0.) then 0.
+    else ask.price -. bid.price
+
+  (** Get top N bids *)
+  let best_n_bids t ~n =
+    List.take t.bids n
+
+  (** Get top N asks *)
+  let best_n_asks t ~n =
+    List.take t.asks n
+
+  (** Calculate total volume in top N levels of a side *)
+  let total_volume_n t ~side ~n =
+    let levels = match side with
+      | `Bid -> best_n_bids t ~n
+      | `Ask -> best_n_asks t ~n
+    in
+    List.fold levels ~init:0. ~f:(fun acc level -> acc +. level.volume)
 end
 
 module Error = struct
