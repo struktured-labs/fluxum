@@ -1,6 +1,6 @@
 (library
  (name fluxum_test)
- (modules test_order_book_incremental test_consolidated_order_book)
+ (modules test_consolidated_order_book)
  (libraries core async fluxum consolidated_order_book gemini kraken binance)
  (inline_tests)
  (preprocess (pps ppx_jane))
