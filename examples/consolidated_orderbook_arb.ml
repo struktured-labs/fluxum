@@ -98,7 +98,23 @@ type arb_opportunity = {
   sell_fee_pct: float;
   net_profit: float;
   net_profit_pct: float;
+  first_seen: Time_float_unix.t; [@warning "-69"]
+  last_seen: Time_float_unix.t;
 }
+
+(** Historical arbitrage record - tracks best ever seen *)
+type arb_history = {
+  mutable best_opportunity: arb_opportunity;
+  mutable occurrences: int;
+  mutable total_duration_sec: float;
+}
+
+(** Key for tracking arbitrage pairs *)
+type arb_pair_key = exchange * exchange
+
+(** Global history of all profitable arbitrage opportunities *)
+let arb_history_table : (arb_pair_key, arb_history) Hashtbl.Poly.t =
+  Hashtbl.Poly.create ()
 
 (** Get best bid/ask from individual exchange books *)
 let get_exchange_best_bid_ask (book: Consolidated_order_book.Book.t) exchange =
@@ -166,10 +182,39 @@ let get_exchange_best_bid_ask (book: Consolidated_order_book.Book.t) exchange =
        | bid :: _, ask :: _ -> Some (bid.price, bid.volume, ask.price, ask.volume)
        | _ -> None)
 
+(** Record arbitrage opportunity in history *)
+let record_arbitrage_history (opp: arb_opportunity) =
+  let key = (opp.buy_exchange, opp.sell_exchange) in
+  match Hashtbl.find arb_history_table key with
+  | Some history ->
+    (* Update existing history *)
+    history.occurrences <- history.occurrences + 1;
+    let time_diff = Time_float_unix.diff opp.last_seen history.best_opportunity.last_seen
+                    |> Time_float_unix.Span.to_sec in
+    history.total_duration_sec <- history.total_duration_sec +. time_diff;
+
+    (* Update if this is better than best seen *)
+    if Float.(opp.net_profit_pct > history.best_opportunity.net_profit_pct) then
+      history.best_opportunity <- opp
+    else
+      (* Update last_seen even if not the best *)
+      history.best_opportunity <- {
+        history.best_opportunity with
+        last_seen = opp.last_seen
+      }
+  | None ->
+    (* New arbitrage pair - create history *)
+    Hashtbl.set arb_history_table ~key ~data:{
+      best_opportunity = opp;
+      occurrences = 1;
+      total_duration_sec = 0.0;
+    }
+
 (** Detect arbitrage opportunities across all exchange pairs *)
 let detect_arbitrage ?(fees=default_fees) (book: Consolidated_order_book.Book.t) : arb_opportunity list =
   let exchanges = [Gemini; Kraken; Hyperliquid; Bitrue; Binance; Coinbase] in
   let opportunities = ref [] in
+  let now = Time_float_unix.now () in
 
   (* Check all exchange pairs *)
   List.iter exchanges ~f:(fun buy_ex ->
@@ -192,7 +237,7 @@ let detect_arbitrage ?(fees=default_fees) (book: Consolidated_order_book.Book.t)
             let net_profit_pct = profit_pct -. total_fee_pct in
             let net_profit = buy_ask *. net_profit_pct /. 100. in
 
-            opportunities := {
+            let opp = {
               buy_exchange = buy_ex;
               sell_exchange = sell_ex;
               buy_price = buy_ask;
@@ -205,7 +250,15 @@ let detect_arbitrage ?(fees=default_fees) (book: Consolidated_order_book.Book.t)
               sell_fee_pct;
               net_profit;
               net_profit_pct;
-            } :: !opportunities
+              first_seen = now;
+              last_seen = now;
+            } in
+
+            (* Only record if profitable after fees *)
+            if Float.(net_profit_pct > 0.0) then
+              record_arbitrage_history opp;
+
+            opportunities := opp :: !opportunities
         | _ -> ()
     )
   );
@@ -234,11 +287,19 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
   (* Detect arbitrage opportunities *)
   let arb_opps = detect_arbitrage book in
 
-  (* Print arbitrage alerts at the top *)
+  (* Get historical best opportunities sorted by net profit *)
+  let historical_arbs =
+    Hashtbl.to_alist arb_history_table
+    |> List.map ~f:(fun (_, history) -> history)
+    |> List.sort ~compare:(fun a b ->
+      Float.compare b.best_opportunity.net_profit_pct a.best_opportunity.net_profit_pct)
+  in
+
+  (* Print current arbitrage alerts at the top *)
   if not (List.is_empty arb_opps) then (
     printf "%s%s╔═══════════════════════════════════════════════════════════════════════╗%s\n"
       bold arb_bg reset;
-    printf "%s%s║  🚨 ARBITRAGE OPPORTUNITIES DETECTED 🚨                                ║%s\n"
+    printf "%s%s║  🚨 CURRENT ARBITRAGE OPPORTUNITIES 🚨                                 ║%s\n"
       bold arb_bg reset;
     printf "%s%s╚═══════════════════════════════════════════════════════════════════════╝%s\n\n"
       bold arb_bg reset;
@@ -251,7 +312,7 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
         else "\027[31m"                                                (* Red: unprofitable *)
       in
 
-      printf "%s[ARB #%d]%s Buy on %s%-9s%s @ %s$%.2f%s → Sell on %s%-9s%s @ %s$%.2f%s\n"
+      printf "%s[CURRENT #%d]%s Buy on %s%-9s%s @ %s$%.2f%s → Sell on %s%-9s%s @ %s$%.2f%s\n"
         arb_highlight (i+1) reset
         cyan (exchange_to_string opp.buy_exchange) reset
         green opp.buy_price reset
@@ -278,7 +339,66 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
     );
     printf "%s%s%s\n\n" reset (String.make 75 '-') reset;
   ) else (
-    printf "%s[No arbitrage opportunities detected]%s\n\n" blue reset;
+    printf "%s[No current arbitrage opportunities]%s\n\n" blue reset;
+  );
+
+  (* Print historical best arbitrage opportunities *)
+  if not (List.is_empty historical_arbs) then (
+    printf "%s%s╔═══════════════════════════════════════════════════════════════════════╗%s\n"
+      bold "\027[45m\027[37m" reset;  (* Magenta background, white text *)
+    printf "%s%s║  ⭐ HISTORICAL BEST ARBITRAGE OPPORTUNITIES (RETAINED FOREVER) ⭐      ║%s\n"
+      bold "\027[45m\027[37m" reset;
+    printf "%s%s╚═══════════════════════════════════════════════════════════════════════╝%s\n\n"
+      bold "\027[45m\027[37m" reset;
+
+    List.iteri historical_arbs ~f:(fun i history ->
+      let opp = history.best_opportunity in
+      let profit_color =
+        if Float.(opp.net_profit_pct >= 0.5) then "\027[1m\027[32m"
+        else if Float.(opp.net_profit_pct >= 0.2) then "\027[33m"
+        else "\027[37m"  (* Gray for weak opportunities *)
+      in
+
+      (* Calculate time since last seen *)
+      let now = Time_float_unix.now () in
+      let time_since_last = Time_float_unix.diff now opp.last_seen in
+      let hours = Time_float_unix.Span.to_hr time_since_last in
+      let mins = Time_float_unix.Span.to_min time_since_last in
+      let secs = Time_float_unix.Span.to_sec time_since_last in
+
+      let time_str =
+        if Float.(hours >= 1.0) then sprintf "%.1fh ago" hours
+        else if Float.(mins >= 1.0) then sprintf "%.0fm ago" mins
+        else sprintf "%.0fs ago" secs
+      in
+
+      printf "%s[BEST #%d]%s Buy on %s%-9s%s @ %s$%.2f%s → Sell on %s%-9s%s @ %s$%.2f%s\n"
+        "\027[35m" (i+1) reset  (* Magenta for historical *)
+        cyan (exchange_to_string opp.buy_exchange) reset
+        green opp.buy_price reset
+        magenta (exchange_to_string opp.sell_exchange) reset
+        green opp.sell_price reset;
+
+      printf "       %sPEAK Net Profit: $%.2f (%.3f%%)%s | Occurrences: %d | Last seen: %s\n"
+        profit_color opp.net_profit opp.net_profit_pct reset
+        history.occurrences time_str;
+
+      printf "       Buy volume: %.4f BTC | Sell volume: %.4f BTC\n"
+        opp.buy_volume opp.sell_volume;
+
+      (* Show if this opportunity is currently active *)
+      let is_current = List.exists arb_opps ~f:(fun curr ->
+        Poly.equal curr.buy_exchange opp.buy_exchange &&
+        Poly.equal curr.sell_exchange opp.sell_exchange
+      ) in
+      if is_current then
+        printf "       %s🔥 CURRENTLY ACTIVE!%s\n" "\027[1m\027[31m" reset;
+
+      printf "\n";
+    );
+    printf "%s%s%s\n\n" reset (String.make 75 '-') reset;
+    printf "%sTotal unique profitable arbitrage pairs ever seen: %d%s\n\n"
+      bold (Hashtbl.length arb_history_table) reset;
   );
 
   (* Print consolidated order book *)
