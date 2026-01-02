@@ -19,7 +19,7 @@ module type S = sig
 end
 
 (** Production configuration *)
-let production : (module S) =
+let production () : (module S) =
   (module struct
     let api_key = Sys.getenv_exn "BITRUE_API_KEY"
     let api_secret = Sys.getenv_exn "BITRUE_API_SECRET"
@@ -29,5 +29,5 @@ let production : (module S) =
   end)
 
 let of_string = function
-  | "production" -> production
+  | "production" -> production ()
   | env -> failwith (sprintf "Unknown Bitrue environment: %s" env)

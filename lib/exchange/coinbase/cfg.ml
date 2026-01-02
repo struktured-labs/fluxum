@@ -17,7 +17,7 @@ module type S = sig
 end
 
 (** Production configuration *)
-let production : (module S) =
+let production () : (module S) =
   (module struct
     let api_key = Sys.getenv_exn "COINBASE_API_KEY"
     let api_secret = Sys.getenv_exn "COINBASE_API_SECRET"
@@ -26,7 +26,7 @@ let production : (module S) =
   end)
 
 (** Sandbox/testnet configuration *)
-let sandbox : (module S) =
+let sandbox () : (module S) =
   (module struct
     let api_key = Sys.getenv_exn "COINBASE_SANDBOX_API_KEY"
     let api_secret = Sys.getenv_exn "COINBASE_SANDBOX_API_SECRET"
@@ -35,6 +35,6 @@ let sandbox : (module S) =
   end)
 
 let of_string = function
-  | "production" -> production
-  | "sandbox" -> sandbox
+  | "production" -> production ()
+  | "sandbox" -> sandbox ()
   | env -> failwith (sprintf "Unknown Coinbase environment: %s" env)
