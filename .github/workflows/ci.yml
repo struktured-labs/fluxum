@@ -5,6 +5,10 @@ on:
     branches: [ main, claude ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Run integration tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual triggering
 
 jobs:
   build-and-test:
@@ -67,7 +71,7 @@ jobs:
         dune build examples/consolidated_orderbook.exe
       timeout-minutes: 5
 
-  # Optional: Nightly integration tests with longer timeouts
+  # Nightly integration tests with comprehensive exchange coverage
   integration-nightly:
     runs-on: ubuntu-22.04
     if: github.event_name == 'schedule'
@@ -77,6 +81,11 @@ jobs:
       uses: actions/checkout@v3
       with:
         submodules: recursive
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config
 
     - name: Set up OCaml
       uses: ocaml/setup-ocaml@v2
@@ -89,10 +98,8 @@ jobs:
       run: |
         git submodule update --init --recursive
 
-    - name: Install dependencies
+    - name: Install opam dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config
         opam install . --deps-only --with-test
 
     - name: Build
@@ -100,16 +107,19 @@ jobs:
         eval $(opam env)
         dune build
 
-    - name: Long-running WebSocket stability tests
+    - name: Run integration test script
       run: |
         eval $(opam env)
-        # Run for 3 minutes to test connection stability
-        timeout 180 dune exec examples/hyperliquid_orderbook.exe || echo "Test completed or timed out"
-        timeout 180 dune exec examples/consolidated_orderbook.exe || echo "Test completed or timed out"
-      timeout-minutes: 10
-      # Uncomment to use secrets for authenticated tests:
-      # env:
-      #   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      #   GEMINI_API_SECRET: ${{ secrets.GEMINI_API_SECRET }}
-      #   KRAKEN_API_KEY: ${{ secrets.KRAKEN_API_KEY }}
-      #   KRAKEN_API_SECRET: ${{ secrets.KRAKEN_API_SECRET }}
+        bash scripts/integration_test.sh
+      timeout-minutes: 15
+      continue-on-error: false
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: integration-test-results
+        path: |
+          tmp/integration_test_*.log
+          tmp/integration_test_results.txt
+        retention-days: 7
