@@ -37,6 +37,15 @@ module Adapter = struct
 
     module Book = struct
       type update = V1.Depth.response
+      type snapshot = V1.Depth.response
+    end
+
+    module Ticker = struct
+      type t = V1.Ticker_24hr.ticker
+    end
+
+    module Public_trade = struct
+      type t = V1.Recent_trades.trade
     end
 
     module Symbol_info = struct
@@ -135,6 +144,43 @@ module Adapter = struct
     >>| function
     | `Ok info -> Ok info.symbols
     | #Rest.Error.t as e -> Error e
+
+  let get_ticker t ~symbol () =
+    V1.Ticker_24hr.request t.cfg { symbol = Some symbol }
+    >>| function
+    | `Ok ticker -> Ok ticker
+    | #Rest.Error.t as e -> Error e
+
+  let get_order_book t ~symbol ?limit () =
+    V1.Depth.request t.cfg { symbol; limit }
+    >>| function
+    | `Ok depth -> Ok depth
+    | #Rest.Error.t as e -> Error e
+
+  let get_recent_trades t ~symbol ?limit () =
+    V1.Recent_trades.request t.cfg { symbol; limit }
+    >>| function
+    | `Ok trades -> Ok trades
+    | #Rest.Error.t as e -> Error e
+
+  let cancel_all_orders t ?symbol () =
+    match symbol with
+    | Some sym ->
+      V1.Cancel_all_orders.request t.cfg { symbol = sym }
+      >>| (function
+        | `Ok orders -> Ok (List.length orders)
+        | #Rest.Error.t as e -> Error e)
+    | None ->
+      (* Cancel for first configured symbol if none provided *)
+      match t.symbols with
+      | sym :: _ ->
+        V1.Cancel_all_orders.request t.cfg { symbol = sym }
+        >>| (function
+          | `Ok orders -> Ok (List.length orders)
+          | #Rest.Error.t as e -> Error e)
+      | [] ->
+        Deferred.return
+          (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
 
   module Streams = struct
     let trades (_ : t) =
@@ -288,6 +334,57 @@ module Adapter = struct
       ; min_order_size = 0.0  (* MEXC doesn't provide this in exchange_info *)
       ; tick_size = None
       ; quote_increment = None
+      }
+
+    let ticker (t : Native.Ticker.t) : Types.Ticker.t =
+      { venue = Venue.t
+      ; symbol = t.symbol
+      ; last_price = Float.of_string t.lastPrice
+      ; bid_price = Float.of_string t.bidPrice
+      ; ask_price = Float.of_string t.askPrice
+      ; high_24h = Float.of_string t.highPrice
+      ; low_24h = Float.of_string t.lowPrice
+      ; volume_24h = Float.of_string t.volume
+      ; quote_volume = Some (Float.of_string t.quoteVolume)
+      ; price_change = Some (Float.of_string t.priceChange)
+      ; price_change_pct = Some (Float.of_string t.priceChangePercent)
+      ; ts = Some (Time_float_unix.of_span_since_epoch
+                    (Time_float_unix.Span.of_ms (Int64.to_float t.closeTime)))
+      }
+
+    let order_book (depth : Native.Book.snapshot) : Types.Order_book.t =
+      let bids = List.map depth.bids ~f:(fun (price, qty) ->
+        { Types.Order_book.Price_level.price = Float.of_string price
+        ; volume = Float.of_string qty
+        })
+      in
+      let asks = List.map depth.asks ~f:(fun (price, qty) ->
+        { Types.Order_book.Price_level.price = Float.of_string price
+        ; volume = Float.of_string qty
+        })
+      in
+      { venue = Venue.t
+      ; symbol = ""  (* Symbol not in depth response *)
+      ; bids
+      ; asks
+      ; ts = (match depth.timestamp with
+             | 0L -> None
+             | ts -> Some (Time_float_unix.of_span_since_epoch
+                            (Time_float_unix.Span.of_ms (Int64.to_float ts))))
+      ; epoch = Int64.to_int_trunc depth.lastUpdateId
+      }
+
+    let public_trade (t : Native.Public_trade.t) : Types.Public_trade.t =
+      { venue = Venue.t
+      ; symbol = ""  (* Symbol not in trade response *)
+      ; price = Float.of_string t.price
+      ; qty = Float.of_string t.qty
+      ; side = Some (match t.isBuyerMaker with
+                    | true -> Types.Side.Sell  (* Buyer is maker = sell order filled *)
+                    | false -> Types.Side.Buy) (* Seller is maker = buy order filled *)
+      ; trade_id = Option.map t.id ~f:Int64.to_string
+      ; ts = Some (Time_float_unix.of_span_since_epoch
+                    (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
       }
 
     let error (e : Native.Error.t) : Types.Error.t =

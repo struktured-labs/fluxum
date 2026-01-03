@@ -265,6 +265,48 @@ module Order_book = struct
     List.fold levels ~init:0. ~f:(fun acc level -> acc +. level.volume)
 end
 
+(** 24-hour ticker statistics for a trading pair *)
+module Ticker = struct
+  type t =
+    { venue          : Venue.t
+    ; symbol         : Symbol.t
+    ; last_price     : Price.t
+    ; bid_price      : Price.t
+    ; ask_price      : Price.t
+    ; high_24h       : Price.t
+    ; low_24h        : Price.t
+    ; volume_24h     : Qty.t          (** Base asset volume *)
+    ; quote_volume   : Qty.t option   (** Quote asset volume *)
+    ; price_change   : Price.t option (** 24h price change *)
+    ; price_change_pct : float option (** 24h price change percent *)
+    ; ts             : Time_float_unix.t option
+    }
+  [@@deriving sexp, fields]
+
+  let create ~venue ~symbol ~last_price ~bid_price ~ask_price
+      ~high_24h ~low_24h ~volume_24h ?quote_volume ?price_change
+      ?price_change_pct ?ts () =
+    { venue; symbol; last_price; bid_price; ask_price; high_24h; low_24h;
+      volume_24h; quote_volume; price_change; price_change_pct; ts }
+end
+
+(** Public trade (market trade, not user-specific) *)
+module Public_trade = struct
+  type t =
+    { venue    : Venue.t
+    ; symbol   : Symbol.t
+    ; price    : Price.t
+    ; qty      : Qty.t
+    ; side     : Side.t option  (** May not be available on all exchanges *)
+    ; trade_id : string option
+    ; ts       : Time_float_unix.t option
+    }
+  [@@deriving sexp, fields]
+
+  let create ~venue ~symbol ~price ~qty ?side ?trade_id ?ts () =
+    { venue; symbol; price; qty; side; trade_id; ts }
+end
+
 module Error = struct
   type t =
     | Transport of exn [@sexp.opaque]

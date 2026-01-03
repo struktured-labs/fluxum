@@ -42,6 +42,15 @@ module Adapter = struct
 
     module Book = struct
       type update = Ws.Public.Book_update.t
+      type snapshot = (string * V1.Depth.depth_data) list  (* pair -> depth data *)
+    end
+
+    module Ticker = struct
+      type t = string * V1.Ticker.Ticker_data.t  (* pair name, ticker data *)
+    end
+
+    module Public_trade = struct
+      type t = V1.Recent_trades.trade
     end
 
     module Symbol_info = struct
@@ -112,6 +121,40 @@ module Adapter = struct
     V1.Asset_pairs.post (module Cfg) { pair = None; info = None }
     >>| function
     | `Ok pairs -> Ok pairs
+    | (#Rest.Error.post as e) -> Error e
+
+  let get_ticker (t : t) ~symbol () =
+    let (module Cfg) = t.cfg in
+    V1.Ticker.get (module Cfg) { pair = symbol }
+    >>| function
+    | `Ok tickers ->
+      (match List.hd tickers with
+       | Some ticker -> Ok ticker
+       | None -> Error (`Bad_request "Ticker not found"))
+    | (#Rest.Error.post as e) -> Error e
+
+  let get_order_book (t : t) ~symbol ?limit () =
+    let (module Cfg) = t.cfg in
+    V1.Depth.get (module Cfg) { pair = symbol; count = limit }
+    >>| function
+    | `Ok depth -> Ok depth
+    | (#Rest.Error.post as e) -> Error e
+
+  let get_recent_trades (t : t) ~symbol ?limit () =
+    let (module Cfg) = t.cfg in
+    V1.Recent_trades.get (module Cfg) { pair = symbol; since = None; count = limit }
+    >>| function
+    | `Ok (trades, _last) ->
+      (* Flatten the pair -> trades list to just trades *)
+      let all_trades = List.concat_map trades ~f:snd in
+      Ok all_trades
+    | (#Rest.Error.post as e) -> Error e
+
+  let cancel_all_orders (t : t) ?symbol:_ () =
+    let (module Cfg) = t.cfg in
+    V1.Cancel_all.post (module Cfg) ()
+    >>| function
+    | `Ok { count } -> Ok count
     | (#Rest.Error.post as e) -> Error e
 
   module Streams = struct
@@ -250,6 +293,68 @@ module Adapter = struct
       ; min_order_size
       ; tick_size = None  (* Kraken uses pair_decimals instead *)
       ; quote_increment = None
+      }
+
+    let ticker ((pair, data) : Native.Ticker.t) : Types.Ticker.t =
+      let get_first lst = List.hd lst |> Option.value ~default:"0" |> Float.of_string in
+      let get_second lst = List.nth lst 1 |> Option.value ~default:"0" |> Float.of_string in
+      { venue = Venue.t
+      ; symbol = pair
+      ; last_price = get_first data.c  (* c[0] = last trade price *)
+      ; bid_price = get_first data.b   (* b[0] = best bid price *)
+      ; ask_price = get_first data.a   (* a[0] = best ask price *)
+      ; high_24h = get_second data.h   (* h[1] = 24hr high *)
+      ; low_24h = get_second data.l    (* l[1] = 24hr low *)
+      ; volume_24h = get_second data.v (* v[1] = 24hr volume *)
+      ; quote_volume = None
+      ; price_change = None
+      ; price_change_pct = None
+      ; ts = None
+      }
+
+    let order_book (depth_list : Native.Book.snapshot) : Types.Order_book.t =
+      (* Take first pair's depth data *)
+      match List.hd depth_list with
+      | Some (pair, depth) ->
+        let bids = List.map depth.bids ~f:(fun (price, vol, _ts) ->
+          { Types.Order_book.Price_level.price = Float.of_string price
+          ; volume = Float.of_string vol
+          })
+        in
+        let asks = List.map depth.asks ~f:(fun (price, vol, _ts) ->
+          { Types.Order_book.Price_level.price = Float.of_string price
+          ; volume = Float.of_string vol
+          })
+        in
+        { venue = Venue.t
+        ; symbol = pair
+        ; bids
+        ; asks
+        ; ts = None
+        ; epoch = 0
+        }
+      | None ->
+        { venue = Venue.t
+        ; symbol = ""
+        ; bids = []
+        ; asks = []
+        ; ts = None
+        ; epoch = 0
+        }
+
+    let public_trade (tr : Native.Public_trade.t) : Types.Public_trade.t =
+      let side = match tr.side with
+        | "b" -> Some Types.Side.Buy
+        | "s" -> Some Types.Side.Sell
+        | _ -> None
+      in
+      { venue = Venue.t
+      ; symbol = ""  (* Not included in trade data *)
+      ; price = Float.of_string tr.price
+      ; qty = Float.of_string tr.volume
+      ; side
+      ; trade_id = Some (Int.to_string tr.trade_id)
+      ; ts = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec tr.time))
       }
 
     let error (e : Native.Error.t) : Types.Error.t =

@@ -608,6 +608,303 @@ module Asset_pairs = struct
   include Rest.Make_with_params (T) (Params)
 end
 
+(* ============================================================ *)
+(* Public Market Data Endpoints *)
+(* ============================================================ *)
+
+(** Get ticker information - GET /0/public/Ticker *)
+module Ticker = struct
+  module Ticker_data = struct
+    (** Ticker data for a trading pair - arrays of [price, whole_lot_volume, lot_volume] *)
+    type t =
+      { a : string list  (** Ask [price, whole_lot_volume, lot_volume] *)
+      ; b : string list  (** Bid [price, whole_lot_volume, lot_volume] *)
+      ; c : string list  (** Last trade closed [price, lot_volume] *)
+      ; v : string list  (** Volume [today, last 24 hours] *)
+      ; p : string list  (** Volume weighted average price [today, last 24 hours] *)
+      ; t : int list     (** Number of trades [today, last 24 hours] *)
+      ; l : string list  (** Low [today, last 24 hours] *)
+      ; h : string list  (** High [today, last 24 hours] *)
+      ; o : string       (** Today's opening price *)
+      }
+    [@@deriving sexp]
+
+    let of_yojson = function
+      | `Assoc pairs ->
+        let get_list key =
+          List.Assoc.find pairs key ~equal:String.equal
+          |> Option.bind ~f:(function
+            | `List lst -> Some (List.filter_map lst ~f:(function `String s -> Some s | _ -> None))
+            | _ -> None)
+          |> Option.value ~default:[]
+        in
+        let get_int_list key =
+          List.Assoc.find pairs key ~equal:String.equal
+          |> Option.bind ~f:(function
+            | `List lst -> Some (List.filter_map lst ~f:(function `Int i -> Some i | _ -> None))
+            | _ -> None)
+          |> Option.value ~default:[]
+        in
+        let get_str key =
+          List.Assoc.find pairs key ~equal:String.equal
+          |> Option.bind ~f:(function `String s -> Some s | _ -> None)
+          |> Option.value ~default:""
+        in
+        Result.Ok
+          { a = get_list "a"
+          ; b = get_list "b"
+          ; c = get_list "c"
+          ; v = get_list "v"
+          ; p = get_list "p"
+          ; t = get_int_list "t"
+          ; l = get_list "l"
+          ; h = get_list "h"
+          ; o = get_str "o"
+          }
+      | _ -> Result.Error "Expected ticker data object"
+  end
+
+  module T = struct
+    let name = "ticker"
+    let endpoint = "Ticker"
+
+    type request = { pair : string } [@@deriving sexp]
+
+    let request_to_params { pair } = [ ("pair", pair) ]
+
+    type response = (string * Ticker_data.t) list [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `Assoc pairs ->
+        let parsed =
+          List.filter_map pairs ~f:(fun (name, json) ->
+            match Ticker_data.of_yojson json with
+            | Result.Ok data -> Some (name, data)
+            | Result.Error _ -> None)
+        in
+        Result.Ok parsed
+      | _ -> Result.Error "Expected ticker object"
+  end
+
+  include T
+  include Rest.Make_public_with_params (T) (struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let pair = string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
+        in
+        { pair }]
+  end)
+end
+
+(** Get order book depth - GET /0/public/Depth *)
+module Depth = struct
+  module T = struct
+    let name = "depth"
+    let endpoint = "Depth"
+
+    type request =
+      { pair : string
+      ; count : int option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_params { pair; count } =
+      let base = [ ("pair", pair) ] in
+      match count with
+      | Some n -> base @ [ ("count", Int.to_string n) ]
+      | None -> base
+
+    (** Level is [price, volume, timestamp] *)
+    type level = string * string * int [@@deriving sexp]
+
+    let level_of_yojson = function
+      | `List [ `String price; `String vol; `Int ts ] -> Ok (price, vol, ts)
+      | json -> Error (sprintf "Invalid level: %s" (Yojson.Safe.to_string json))
+
+    type depth_data =
+      { asks : level list
+      ; bids : level list
+      }
+    [@@deriving sexp]
+
+    let depth_data_of_yojson = function
+      | `Assoc pairs ->
+        let get_levels key =
+          List.Assoc.find pairs key ~equal:String.equal
+          |> Option.bind ~f:(function
+            | `List lst ->
+              Some (List.filter_map lst ~f:(fun json ->
+                match level_of_yojson json with
+                | Ok l -> Some l
+                | Error _ -> None))
+            | _ -> None)
+          |> Option.value ~default:[]
+        in
+        Result.Ok { asks = get_levels "asks"; bids = get_levels "bids" }
+      | _ -> Result.Error "Expected depth data object"
+
+    type response = (string * depth_data) list [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `Assoc pairs ->
+        let parsed =
+          List.filter_map pairs ~f:(fun (name, json) ->
+            match depth_data_of_yojson json with
+            | Result.Ok data -> Some (name, data)
+            | Result.Error _ -> None)
+        in
+        Result.Ok parsed
+      | _ -> Result.Error "Expected depth object"
+  end
+
+  include T
+  include Rest.Make_public_with_params (T) (struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let pair = string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
+        and count = int_flag_option ~field_name:"count" ~doc:"Number of levels (max 500)"
+        in
+        { pair; count }]
+  end)
+end
+
+(** Get recent trades - GET /0/public/Trades *)
+module Recent_trades = struct
+  module T = struct
+    let name = "recent-trades"
+    let endpoint = "Trades"
+
+    type request =
+      { pair : string
+      ; since : string option [@default None]
+      ; count : int option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_params { pair; since; count } =
+      let base = [ ("pair", pair) ] in
+      let add_opt key = function
+        | None -> Fun.id
+        | Some v -> List.cons (key, v)
+      in
+      base
+      |> add_opt "since" since
+      |> add_opt "count" (Option.map count ~f:Int.to_string)
+
+    (** Trade is [price, volume, time, side, type, misc, trade_id] *)
+    type trade =
+      { price : string
+      ; volume : string
+      ; time : float
+      ; side : string      (** "b" for buy, "s" for sell *)
+      ; order_type : string  (** "m" for market, "l" for limit *)
+      ; misc : string
+      ; trade_id : int
+      }
+    [@@deriving sexp]
+
+    let trade_of_yojson = function
+      | `List [ `String price; `String volume; `Float time; `String side;
+                `String order_type; `String misc; `Int trade_id ] ->
+        Ok { price; volume; time; side; order_type; misc; trade_id }
+      | `List [ `String price; `String volume; `Float time; `String side;
+                `String order_type; `String misc ] ->
+        (* Older format without trade_id *)
+        Ok { price; volume; time; side; order_type; misc; trade_id = 0 }
+      | json -> Error (sprintf "Invalid trade: %s" (Yojson.Safe.to_string json))
+
+    type trades_result =
+      { trades : trade list
+      ; last : string
+      }
+    [@@deriving sexp]
+
+    let trades_result_of_yojson pair_name = function
+      | `Assoc pairs ->
+        let trades =
+          List.Assoc.find pairs pair_name ~equal:String.equal
+          |> Option.bind ~f:(function
+            | `List lst ->
+              Some (List.filter_map lst ~f:(fun json ->
+                match trade_of_yojson json with
+                | Ok t -> Some t
+                | Error _ -> None))
+            | _ -> None)
+          |> Option.value ~default:[]
+        in
+        let last =
+          List.Assoc.find pairs "last" ~equal:String.equal
+          |> Option.bind ~f:(function `String s -> Some s | _ -> None)
+          |> Option.value ~default:""
+        in
+        Result.Ok { trades; last }
+      | _ -> Result.Error "Expected trades result object"
+
+    type response = (string * trade list) list * string [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `Assoc pairs ->
+        let last =
+          List.Assoc.find pairs "last" ~equal:String.equal
+          |> Option.bind ~f:(function `String s -> Some s | _ -> None)
+          |> Option.value ~default:""
+        in
+        let trades =
+          List.filter_map pairs ~f:(fun (name, json) ->
+            if String.equal name "last" then None
+            else
+              match json with
+              | `List lst ->
+                let parsed = List.filter_map lst ~f:(fun j ->
+                  match trade_of_yojson j with
+                  | Ok t -> Some t
+                  | Error _ -> None)
+                in
+                Some (name, parsed)
+              | _ -> None)
+        in
+        Result.Ok (trades, last)
+      | _ -> Result.Error "Expected trades object"
+  end
+
+  include T
+  include Rest.Make_public_with_params (T) (struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let pair = string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
+        and since = string_flag_option ~field_name:"since" ~doc:"Return trades since timestamp"
+        and count = int_flag_option ~field_name:"count" ~doc:"Number of trades to return"
+        in
+        { pair; since; count }]
+  end)
+end
+
+(** Cancel all orders - POST /0/private/CancelAll *)
+module Cancel_all = struct
+  module T = struct
+    let name = "cancel-all"
+    let endpoint = "CancelAll"
+
+    type request = unit [@@deriving sexp]
+
+    let request_to_params () = []
+
+    type response =
+      { count : int
+      }
+    [@@deriving sexp, of_yojson]
+  end
+
+  include T
+  include Rest.Make_no_arg (T)
+end
+
 (** Backwards compatibility wrappers (non-typed versions) *)
 
 (** Get account balances - returns raw JSON *)

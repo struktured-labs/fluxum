@@ -145,6 +145,39 @@ let print_symbol_info (info : Fluxum.Types.Symbol_info.t) =
     info.status
     info.min_order_size
 
+(* Helper to print Ticker.t *)
+let print_ticker (t : Fluxum.Types.Ticker.t) =
+  printf "  Symbol: %s\n" t.symbol;
+  printf "  Last: %.8f | Bid: %.8f | Ask: %.8f\n" t.last_price t.bid_price t.ask_price;
+  printf "  High 24h: %.8f | Low 24h: %.8f\n" t.high_24h t.low_24h;
+  printf "  Volume 24h: %.8f\n" t.volume_24h;
+  Option.iter t.price_change_pct ~f:(fun pct ->
+    printf "  Change 24h: %.2f%%\n" pct)
+
+(* Helper to print Order_book.t *)
+let print_order_book (book : Fluxum.Types.Order_book.t) =
+  printf "  Symbol: %s (epoch: %d)\n" book.symbol book.epoch;
+  printf "  Asks:\n";
+  List.take book.asks 5 |> List.iter ~f:(fun (level : Fluxum.Types.Order_book.Price_level.t) ->
+    printf "    %.8f @ %.8f\n" level.volume level.price);
+  let spread = Fluxum.Types.Order_book.spread book in
+  printf "  --- Spread: %.8f ---\n" spread;
+  printf "  Bids:\n";
+  List.take book.bids 5 |> List.iter ~f:(fun (level : Fluxum.Types.Order_book.Price_level.t) ->
+    printf "    %.8f @ %.8f\n" level.volume level.price)
+
+(* Helper to print Public_trade.t *)
+let print_public_trade (t : Fluxum.Types.Public_trade.t) =
+  let side_str = match t.side with
+    | Some s -> Fluxum.Types.Side.to_string s
+    | None -> "?"
+  in
+  printf "  %s | %s %.8f @ %.8f\n"
+    (Option.value t.trade_id ~default:"-")
+    side_str
+    t.qty
+    t.price
+
 (* Unified adapter helpers *)
 module Unified = struct
   (* Create Gemini adapter *)
@@ -273,6 +306,86 @@ module Unified = struct
     | _ ->
       Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
         { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = sprintf "Exchange %s not supported" exchange }))
+
+  (* Get ticker *)
+  let get_ticker ~exchange ~cfg_env ~symbol () =
+    match exchange with
+    | "kraken" ->
+      kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
+      Kraken.Fluxum_adapter.Adapter.get_ticker adapter ~symbol ()
+      >>| Result.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.ticker
+      >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
+    | "mexc" ->
+      mexc_adapter ~symbols:[symbol] >>= fun adapter ->
+      Mexc.Fluxum_adapter.Adapter.get_ticker adapter ~symbol ()
+      >>| Result.map ~f:Mexc.Fluxum_adapter.Adapter.Normalize.ticker
+      >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
+    | "gemini" ->
+      Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
+        { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = "Gemini ticker endpoint not implemented" }))
+    | _ ->
+      Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
+        { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = sprintf "Exchange %s not supported" exchange }))
+
+  (* Get order book *)
+  let get_order_book ~exchange ~cfg_env ~symbol ?limit () =
+    match exchange with
+    | "kraken" ->
+      kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
+      Kraken.Fluxum_adapter.Adapter.get_order_book adapter ~symbol ?limit ()
+      >>| Result.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.order_book
+      >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
+    | "mexc" ->
+      mexc_adapter ~symbols:[symbol] >>= fun adapter ->
+      Mexc.Fluxum_adapter.Adapter.get_order_book adapter ~symbol ?limit ()
+      >>| Result.map ~f:Mexc.Fluxum_adapter.Adapter.Normalize.order_book
+      >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
+    | "gemini" ->
+      Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
+        { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = "Gemini order book endpoint not implemented" }))
+    | _ ->
+      Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
+        { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = sprintf "Exchange %s not supported" exchange }))
+
+  (* Get recent trades *)
+  let get_recent_trades ~exchange ~cfg_env ~symbol ?limit () =
+    match exchange with
+    | "kraken" ->
+      kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
+      Kraken.Fluxum_adapter.Adapter.get_recent_trades adapter ~symbol ?limit ()
+      >>| Result.map ~f:(List.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.public_trade)
+      >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
+    | "mexc" ->
+      mexc_adapter ~symbols:[symbol] >>= fun adapter ->
+      Mexc.Fluxum_adapter.Adapter.get_recent_trades adapter ~symbol ?limit ()
+      >>| Result.map ~f:(List.map ~f:Mexc.Fluxum_adapter.Adapter.Normalize.public_trade)
+      >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
+    | "gemini" ->
+      Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
+        { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = "Gemini recent trades endpoint not implemented" }))
+    | _ ->
+      Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
+        { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = sprintf "Exchange %s not supported" exchange }))
+
+  (* Cancel all orders *)
+  let cancel_all_orders ~exchange ~cfg_env ?symbol () =
+    match exchange with
+    | "gemini" ->
+      gemini_adapter cfg_env >>= fun adapter ->
+      Gemini.Fluxum_adapter.Adapter.cancel_all_orders adapter ?symbol ()
+      >>| Result.map_error ~f:Gemini.Fluxum_adapter.Adapter.Normalize.error
+    | "kraken" ->
+      kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
+      Kraken.Fluxum_adapter.Adapter.cancel_all_orders adapter ?symbol ()
+      >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
+    | "mexc" ->
+      let symbols = match symbol with Some s -> [s] | None -> [] in
+      mexc_adapter ~symbols >>= fun adapter ->
+      Mexc.Fluxum_adapter.Adapter.cancel_all_orders adapter ?symbol ()
+      >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
+    | _ ->
+      Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
+        { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = sprintf "Exchange %s not supported" exchange }))
 end
 
 (* Generic API command that accepts --exchange flag *)
@@ -388,6 +501,93 @@ let api_command =
               eprintf "Error: %s\n" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t err));
               Deferred.unit)
           <*> exchange <*> cfg
+        )))
+    ; ("ticker", Command.async
+        ~summary:"Get 24hr ticker for a symbol"
+        (Command.Param.(
+          let exchange = flag "--exchange" (optional_with_default "kraken" string)
+              ~doc:"STRING exchange name (kraken, mexc)"
+          and symbol = flag "--symbol" (required string)
+              ~doc:"STRING trading pair (e.g., XETHZUSD for Kraken, BTCUSDT for MEXC)"
+          and cfg = flag "-cfg" (optional_with_default "production" string)
+              ~doc:"STRING environment (production)"
+          in
+          return (fun exchange symbol cfg () ->
+            Unified.get_ticker ~exchange ~cfg_env:cfg ~symbol () >>= function
+            | Ok ticker ->
+              printf "Ticker (%s - %s):\n" exchange symbol;
+              print_ticker ticker;
+              Deferred.unit
+            | Error err ->
+              eprintf "Error: %s\n" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t err));
+              Deferred.unit)
+          <*> exchange <*> symbol <*> cfg
+        )))
+    ; ("order-book", Command.async
+        ~summary:"Get order book depth for a symbol"
+        (Command.Param.(
+          let exchange = flag "--exchange" (optional_with_default "kraken" string)
+              ~doc:"STRING exchange name (kraken, mexc)"
+          and symbol = flag "--symbol" (required string)
+              ~doc:"STRING trading pair"
+          and limit = flag "--limit" (optional int)
+              ~doc:"INT number of levels"
+          and cfg = flag "-cfg" (optional_with_default "production" string)
+              ~doc:"STRING environment (production)"
+          in
+          return (fun exchange symbol limit cfg () ->
+            Unified.get_order_book ~exchange ~cfg_env:cfg ~symbol ?limit () >>= function
+            | Ok book ->
+              printf "Order Book (%s - %s):\n" exchange symbol;
+              print_order_book book;
+              Deferred.unit
+            | Error err ->
+              eprintf "Error: %s\n" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t err));
+              Deferred.unit)
+          <*> exchange <*> symbol <*> limit <*> cfg
+        )))
+    ; ("recent-trades", Command.async
+        ~summary:"Get recent public trades for a symbol"
+        (Command.Param.(
+          let exchange = flag "--exchange" (optional_with_default "kraken" string)
+              ~doc:"STRING exchange name (kraken, mexc)"
+          and symbol = flag "--symbol" (required string)
+              ~doc:"STRING trading pair"
+          and limit = flag "--limit" (optional int)
+              ~doc:"INT number of trades"
+          and cfg = flag "-cfg" (optional_with_default "production" string)
+              ~doc:"STRING environment (production)"
+          in
+          return (fun exchange symbol limit cfg () ->
+            Unified.get_recent_trades ~exchange ~cfg_env:cfg ~symbol ?limit () >>= function
+            | Ok trades ->
+              printf "Recent Trades (%s - %s): %d trades\n" exchange symbol (List.length trades);
+              List.take trades 10 |> List.iter ~f:print_public_trade;
+              Deferred.unit
+            | Error err ->
+              eprintf "Error: %s\n" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t err));
+              Deferred.unit)
+          <*> exchange <*> symbol <*> limit <*> cfg
+        )))
+    ; ("cancel-all", Command.async
+        ~summary:"Cancel all open orders"
+        (Command.Param.(
+          let exchange = flag "--exchange" (optional_with_default "kraken" string)
+              ~doc:"STRING exchange name (gemini, kraken, mexc)"
+          and symbol = flag "--symbol" (optional string)
+              ~doc:"STRING filter by trading pair (required for MEXC)"
+          and cfg = flag "-cfg" (optional_with_default "production" string)
+              ~doc:"STRING environment (production)"
+          in
+          return (fun exchange symbol cfg () ->
+            Unified.cancel_all_orders ~exchange ~cfg_env:cfg ?symbol () >>= function
+            | Ok count ->
+              printf "Cancelled %d orders on %s\n" count exchange;
+              Deferred.unit
+            | Error err ->
+              eprintf "Error: %s\n" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t err));
+              Deferred.unit)
+          <*> exchange <*> symbol <*> cfg
         )))
     (* Legacy commands for backwards compatibility *)
     ; ("order", Command.async

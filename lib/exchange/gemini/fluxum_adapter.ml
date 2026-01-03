@@ -42,6 +42,15 @@ module Adapter = struct
 
     module Book = struct
       type update = V1.Market_data.Update.t
+      type snapshot = unit  (* Not implemented for Gemini *)
+    end
+
+    module Ticker = struct
+      type t = unit  (* Not implemented for Gemini *)
+    end
+
+    module Public_trade = struct
+      type t = unit  (* Not implemented for Gemini *)
     end
 
     module Symbol_info = struct
@@ -112,6 +121,25 @@ module Adapter = struct
       | `Ok r -> Some r
       | #Rest.Error.get -> None)
     >>| fun results -> Ok results
+
+  let get_ticker (_ : t) ~symbol:_ () =
+    (* Gemini public ticker endpoint not implemented yet *)
+    Deferred.return (Error (`Bad_request "Gemini get_ticker not implemented"))
+
+  let get_order_book (_ : t) ~symbol:_ ?limit:_ () =
+    (* Gemini public order book endpoint not implemented yet *)
+    Deferred.return (Error (`Bad_request "Gemini get_order_book not implemented"))
+
+  let get_recent_trades (_ : t) ~symbol:_ ?limit:_ () =
+    (* Gemini public trades endpoint not implemented yet *)
+    Deferred.return (Error (`Bad_request "Gemini get_recent_trades not implemented"))
+
+  let cancel_all_orders (t : t) ?symbol:_ () =
+    let (module Cfg) = t.cfg in
+    V1.Order.Cancel.All.post (module Cfg) t.nonce ()
+    >>| function
+    | `Ok { details } -> Ok (List.length details.cancelled_orders)
+    | (#Rest.Error.post as e) -> Error e
 
   module Streams = struct
     let trades (t : t) =
@@ -311,6 +339,43 @@ module Adapter = struct
       ; min_order_size = Float.of_string (Common.Decimal_string.to_string s.min_order_size)
       ; tick_size = Some (Common.Decimal_number.to_float s.tick_size)
       ; quote_increment = Some (Common.Decimal_number.to_float s.quote_increment)
+      }
+
+    let ticker (_ : Native.Ticker.t) : Types.Ticker.t =
+      (* Not implemented - return empty ticker *)
+      { venue = Venue.t
+      ; symbol = ""
+      ; last_price = 0.
+      ; bid_price = 0.
+      ; ask_price = 0.
+      ; high_24h = 0.
+      ; low_24h = 0.
+      ; volume_24h = 0.
+      ; quote_volume = None
+      ; price_change = None
+      ; price_change_pct = None
+      ; ts = None
+      }
+
+    let order_book (_ : Native.Book.snapshot) : Types.Order_book.t =
+      (* Not implemented - return empty order book *)
+      { venue = Venue.t
+      ; symbol = ""
+      ; bids = []
+      ; asks = []
+      ; ts = None
+      ; epoch = 0
+      }
+
+    let public_trade (_ : Native.Public_trade.t) : Types.Public_trade.t =
+      (* Not implemented - return empty trade *)
+      { venue = Venue.t
+      ; symbol = ""
+      ; price = 0.
+      ; qty = 0.
+      ; side = None
+      ; trade_id = None
+      ; ts = None
       }
 
     let error (e : Native.Error.t) : Types.Error.t =

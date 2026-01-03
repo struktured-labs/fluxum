@@ -1,6 +1,9 @@
 open Core
 open Async
 
+(* Suppress unused warnings for command values - they are provided for CLI use *)
+[@@@warning "-32"]
+
 module Error = struct
   type http =
     [ `Bad_request of string
@@ -167,6 +170,115 @@ module Post (Operation : Operation.S) = struct
       failwiths ~here:[%here]
         (sprintf "Unexpected Kraken API status code (body=%S)" b)
         code Cohttp.Code.sexp_of_status_code
+end
+
+(** GET request for public (unauthenticated) endpoints *)
+module Get (Operation : Operation.S) = struct
+  let get (module Cfg : Cfg.S) (request : Operation.request) =
+    (* Build query parameters *)
+    let request_params = Operation.request_to_params request in
+
+    (* API path for public endpoints *)
+    let api_path = sprintf "/0/public/%s" Operation.endpoint in
+
+    (* Build URI with query params *)
+    let uri = Uri.make ~scheme:"https" ~host:"api.kraken.com" ~path:api_path () in
+    let uri = Uri.add_query_params' uri request_params in
+
+    Log.Global.debug "Kraken API GET: %s" (Uri.to_string uri);
+
+    Cohttp_async.Client.get uri >>= fun (response, body) ->
+    match Cohttp.Response.status response with
+    | `OK ->
+      Cohttp_async.Body.to_string body >>| fun s ->
+      Log.Global.debug "Response: %s" s;
+      (try
+        let json = Yojson.Safe.from_string s in
+        Response.parse json Operation.response_of_yojson
+      with e ->
+        `Json_parse_error
+          Error.{ message = Exn.to_string e; body = s })
+    | `Not_found ->
+      return `Not_found
+    | `Not_acceptable ->
+      Cohttp_async.Body.to_string body >>| fun b -> `Not_acceptable b
+    | `Bad_request ->
+      Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
+    | `Service_unavailable ->
+      Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
+    | `Unauthorized ->
+      Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
+    | `Too_many_requests ->
+      Cohttp_async.Body.to_string body >>| fun b -> `Too_many_requests b
+    | (code : Cohttp.Code.status_code) ->
+      Cohttp_async.Body.to_string body >>| fun b ->
+      failwiths ~here:[%here]
+        (sprintf "Unexpected Kraken API status code (body=%S)" b)
+        code Cohttp.Code.sexp_of_status_code
+end
+
+module Make_public (Operation : Operation.S) = struct
+  include Get (Operation)
+
+  let command =
+    let open Command.Let_syntax in
+    ( Operation.name,
+      Command.async
+        ~summary:(sprintf "Kraken %s public endpoint" Operation.endpoint)
+        [%map_open
+          let config = Cfg.param
+          and request = anon ("request" %: sexp) in
+          fun () ->
+            let request = Operation.request_of_sexp request in
+            Log.Global.info "Request: %s"
+              (Operation.sexp_of_request request |> Sexp.to_string);
+            let config = Cfg.or_default config in
+            get config request >>= function
+            | `Ok response ->
+              Log.Global.info "Response: %s"
+                (Sexp.to_string_hum (Operation.sexp_of_response response));
+              Log.Global.flushed ()
+            | #Error.post as post_error ->
+              failwiths ~here:[%here]
+                (sprintf "Kraken %s failed" Operation.endpoint)
+                post_error Error.sexp_of_post] )
+end
+
+module Make_public_with_params
+    (Operation : Operation.S)
+    (Params : sig
+       val params : Operation.request Command.Param.t
+     end) =
+struct
+  include Get (Operation)
+
+  let command =
+    let open Command.Let_syntax in
+    ( Operation.name,
+      Command.async
+        ~summary:(sprintf "Kraken %s public endpoint" Operation.endpoint)
+        [%map_open
+          let config = Cfg.param
+          and request = Params.params
+          and sexp_request = anon (maybe ("request-sexp" %: sexp)) in
+          fun () ->
+            let request =
+              match sexp_request with
+              | Some sexp -> Operation.request_of_sexp sexp
+              | None -> request
+            in
+            Log.Global.info "Request: %s"
+              (Operation.sexp_of_request request |> Sexp.to_string);
+            let config = Cfg.or_default config in
+            get config request >>= function
+            | `Ok response ->
+              Log.Global.info "Response: %s"
+                (Sexp.to_string_hum (Operation.sexp_of_response response));
+              Log.Global.flushed ()
+            | #Error.post as post_error ->
+              failwiths ~here:[%here]
+                (sprintf "Kraken %s failed" Operation.endpoint)
+                post_error Error.sexp_of_post] )
 end
 
 module Make (Operation : Operation.S) = struct

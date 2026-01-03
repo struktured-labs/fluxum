@@ -117,3 +117,35 @@ module Make_with_params : functor
 
   val command : string * Core.Command.t
 end
+
+(** GET request for public endpoints *)
+module Get : functor (Operation : Operation.S) -> sig
+  val get :
+    (module Cfg.S) ->
+    Operation.request ->
+    [ `Ok of Operation.response | Error.post ] Async.Deferred.t
+end
+
+(** Make a public REST endpoint with CLI command *)
+module Make_public : functor (Operation : Operation.S) -> sig
+  val get :
+    (module Cfg.S) ->
+    Operation.request ->
+    [ `Ok of Operation.response | Error.post ] Async.Deferred.t
+
+  val command : string * Core.Command.t
+end
+
+(** Make a public REST endpoint with natural CLI flags *)
+module Make_public_with_params : functor
+  (Operation : Operation.S)
+  (Params : sig
+     val params : Operation.request Core.Command.Param.t
+   end) -> sig
+  val get :
+    (module Cfg.S) ->
+    Operation.request ->
+    [ `Ok of Operation.response | Error.post ] Async.Deferred.t
+
+  val command : string * Core.Command.t
+end
