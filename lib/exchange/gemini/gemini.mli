@@ -23,6 +23,7 @@ module Order_book = Order_book
 module Session = Session
 module Ledger = Ledger
 module Pipe_ext = Pipe_ext
+module Fluxum_adapter = Fluxum_adapter
 
 (** Version v1 of the Gemini REST and web socket apis. *)
 module V1 : sig

@@ -12,6 +12,7 @@ module V1 = V1
 module Order_book = Order_book
 module Ledger = Ledger
 module Session = Session
+module Fluxum_adapter = Fluxum_adapter
 open V1
 
 let command : Command.t =

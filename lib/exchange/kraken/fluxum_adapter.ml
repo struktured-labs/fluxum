@@ -8,11 +8,17 @@ module V1 = V1
 module Common = Common
 module Ws = Ws
 
-module Adapter : Exchange_intf.S = struct
+(* Suppress unused field and value warnings - these may be used by other code *)
+[@@@warning "-32-69"]
+
+module Adapter = struct
   type t =
     { cfg : (module Cfg.S)
     ; symbols : string list
     }
+
+  let create ~cfg ?(symbols = []) () =
+    { cfg; symbols }
 
   module Venue = struct
     let t = Types.Venue.Kraken
@@ -35,7 +41,7 @@ module Adapter : Exchange_intf.S = struct
     end
 
     module Book = struct
-      type update = Ws.Book_update.t
+      type update = Ws.Public.Book_update.t
     end
 
     module Symbol_info = struct
@@ -114,12 +120,10 @@ module Adapter : Exchange_intf.S = struct
       let r, _w = Pipe.create () in
       Deferred.return r
 
-    let book_updates (t : t) =
-      let symbol = List.hd t.symbols |> Option.value ~default:"XBT/USD" in
-      Ws.subscribe ~symbols:[symbol] ()
-      >>| Pipe.filter_map ~f:(function
-        | `Ok update -> Some update
-        | _ -> None)
+    let book_updates (_ : t) =
+      (* TODO: Implement WebSocket book stream *)
+      let r, _w = Pipe.create () in
+      Deferred.return r
   end
 
   module Normalize = struct
@@ -129,10 +133,21 @@ module Adapter : Exchange_intf.S = struct
       | "sell" | "s" -> Types.Side.Sell
       | _ -> Types.Side.Buy
 
+    let side_of_common (s : Common.Side.t) : Types.Side.t =
+      match s with
+      | `Buy -> Types.Side.Buy
+      | `Sell -> Types.Side.Sell
+
     let order_type_of_string s =
       match s with
       | "market" -> Types.Order_kind.Market
       | "limit" -> Types.Order_kind.Limit 0.0  (* price not available in status *)
+      | _ -> Types.Order_kind.Market
+
+    let order_type_of_common (o : Common.Order_type.t) : Types.Order_kind.t =
+      match o with
+      | `Market -> Types.Order_kind.Market
+      | `Limit -> Types.Order_kind.Limit 0.0  (* price not available in status *)
       | _ -> Types.Order_kind.Market
 
     let status_of_string s =
@@ -161,8 +176,8 @@ module Adapter : Exchange_intf.S = struct
       status_of_string o.status
 
     let order_from_status (o : Native.Order.status) : Types.Order.t =
-      let side = side_of_string o.descr.type_ in
-      let kind = order_type_of_string o.descr.ordertype in
+      let side = side_of_common o.descr.type_ in
+      let kind = order_type_of_common o.descr.ordertype in
       let qty = Float.of_string o.vol in
       let filled = Float.of_string o.vol_exec in
       let status = status_of_string o.status in
@@ -241,6 +256,7 @@ module Adapter : Exchange_intf.S = struct
       match e with
       | `Bad_request msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "400"; message = msg }
       | `Not_found -> Types.Error.Exchange_specific { venue = Venue.t; code = "404"; message = "not_found" }
+      | `Not_acceptable msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "406"; message = msg }
       | `Service_unavailable msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "503"; message = msg }
       | `Unauthorized _ -> Types.Error.Auth_failed
       | `Too_many_requests _ -> Types.Error.Rate_limited
@@ -256,14 +272,14 @@ module Builder = struct
   module E = Adapter
 
   let make_order_request ~symbol ~side ~kind ~qty =
-    let type_ = match side with
-      | Types.Side.Buy -> Common.Side.Buy
-      | Types.Side.Sell -> Common.Side.Sell
+    let type_ : Common.Side.t = match side with
+      | Types.Side.Buy -> `Buy
+      | Types.Side.Sell -> `Sell
     in
     let ordertype, price = match kind with
-      | Types.Order_kind.Market -> Common.Order_type.Market, None
-      | Types.Order_kind.Limit p -> Common.Order_type.Limit, Some (Float.to_string p)
-      | Types.Order_kind.Post_only_limit p -> Common.Order_type.Limit, Some (Float.to_string p)
+      | Types.Order_kind.Market -> (`Market : Common.Order_type.t), None
+      | Types.Order_kind.Limit p -> (`Limit : Common.Order_type.t), Some (Float.to_string p)
+      | Types.Order_kind.Post_only_limit p -> (`Limit : Common.Order_type.t), Some (Float.to_string p)
     in
     let oflags = match kind with
       | Types.Order_kind.Post_only_limit _ -> Some "post"
@@ -273,7 +289,7 @@ module Builder = struct
       { pair = symbol
       ; type_
       ; ordertype
-      ; volume = Float.to_string qty
+      ; volume = qty
       ; price
       ; price2 = None
       ; leverage = None

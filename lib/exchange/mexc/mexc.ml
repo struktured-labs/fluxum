@@ -9,6 +9,7 @@ module Rest = Rest
 module V1 = V1
 module Order_book = Order_book
 module Ws = Ws
+module Fluxum_adapter = Fluxum_adapter
 
 let command : Command.t =
   Command.group

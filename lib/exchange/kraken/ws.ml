@@ -280,6 +280,18 @@ module Public = struct
     [@@deriving sexp, yojson]
   end
 
+  (** Unified book update for Fluxum adapter *)
+  module Book_update = struct
+    type t =
+      { side : [ `Bid | `Ask ]
+      ; levels : (float * float) list  (* price, qty *)
+      ; symbol : string
+      ; timestamp : Time_float_unix.t
+      ; is_snapshot : bool
+      }
+    [@@deriving sexp]
+  end
+
   type message =
     | Ticker of { data : Ticker_data.t; channel : string; pair : string }
     | Spread of { data : Spread_data.t; channel : string; pair : string }

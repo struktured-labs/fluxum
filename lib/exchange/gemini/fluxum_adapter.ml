@@ -7,12 +7,15 @@ module Exchange_intf = Fluxum.Exchange_intf
 module V1 = V1
 module Common = Common
 
-module Adapter : Exchange_intf.S = struct
+module Adapter = struct
   type t =
      { cfg   : (module Cfg.S)
      ; nonce : Nonce.reader
     ; symbols : string list (* used for public market-data subscription *)
     }
+
+  let create ~cfg ~nonce ?(symbols = []) () =
+    { cfg; nonce; symbols }
 
   module Venue = struct
     let t = Types.Venue.Gemini

@@ -12,6 +12,7 @@ module Order_book = Order_book
 module Ledger = Ledger
 module Session = Session
 module Unified_cmd = Unified_cmd
+module Fluxum_adapter = Fluxum_adapter
 
 let command : Command.t =
   Command.group ~summary:"Kraken Exchange Commands"

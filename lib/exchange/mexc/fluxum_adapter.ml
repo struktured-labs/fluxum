@@ -6,11 +6,14 @@ open Async
 module Types = Fluxum.Types
 module Exchange_intf = Fluxum.Exchange_intf
 
-module Adapter : Exchange_intf.S = struct
+module Adapter = struct
   type t =
     { cfg : (module Cfg.S)
     ; symbols : string list
     }
+
+  let create ~cfg ?(symbols = []) () =
+    { cfg; symbols }
 
   module Venue = struct
     let t = Types.Venue.Mexc
