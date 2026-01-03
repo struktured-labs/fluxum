@@ -37,11 +37,11 @@ print_status() {
     if [ "$status" = "PASS" ]; then
         echo -e "${GREEN}✓ PASS${NC}: $message"
         echo "✓ PASS: $message" >> "$RESULTS_FILE"
-        ((PASSED_TESTS++))
+        PASSED_TESTS=$((PASSED_TESTS + 1))
     elif [ "$status" = "FAIL" ]; then
         echo -e "${RED}✗ FAIL${NC}: $message"
         echo "✗ FAIL: $message" >> "$RESULTS_FILE"
-        ((FAILED_TESTS++))
+        FAILED_TESTS=$((FAILED_TESTS + 1))
     elif [ "$status" = "SKIP" ]; then
         echo -e "${YELLOW}⊘ SKIP${NC}: $message"
         echo "⊘ SKIP: $message" >> "$RESULTS_FILE"
@@ -50,7 +50,7 @@ print_status() {
         echo "ℹ INFO: $message" >> "$RESULTS_FILE"
     fi
 
-    ((TOTAL_TESTS++))
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
 }
 
 # Function to test an exchange orderbook
@@ -180,11 +180,11 @@ print_status "INFO" "Running multiple short connections..."
 success_count=0
 for i in {1..3}; do
     if timeout 15 dune exec examples/gemini_orderbook_curl.exe > "tmp/stability_test_$i.log" 2>&1; then
-        ((success_count++))
+        success_count=$((success_count + 1))
     else
         exit_code=$?
         if [ $exit_code -eq 124 ]; then
-            ((success_count++))  # Timeout is expected
+            success_count=$((success_count + 1))  # Timeout is expected
         fi
     fi
 done
