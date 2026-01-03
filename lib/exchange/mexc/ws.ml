@@ -34,15 +34,15 @@ module Stream = struct
   (** Convert stream to subscription channel name *)
   let to_channel = function
     | AggreDeals { symbol; frequency } ->
-      sprintf "spot@public.aggre.deals.v3.api@%s@%s"
+      sprintf "spot@public.aggre.deals.v3.api.pb@%s@%s"
         (frequency_to_string frequency)
         (String.uppercase symbol)
     | AggreDepths { symbol; frequency } ->
-      sprintf "spot@public.aggre.depth.v3.api@%s@%s"
+      sprintf "spot@public.aggre.depth.v3.api.pb@%s@%s"
         (frequency_to_string frequency)
         (String.uppercase symbol)
     | LimitDepths { symbol; levels } ->
-      sprintf "spot@public.limit.depth.v3.api@%s@%d"
+      sprintf "spot@public.limit.depth.v3.api.pb@%s@%d"
         (String.uppercase symbol)
         levels
     | BookTicker symbol ->
@@ -539,31 +539,64 @@ end
 (** WebSocket client *)
 type t = {
   uri : Uri.t;
-  messages : string Pipe.Reader.t;
+  ws : Websocket_curl.t;
+  message_pipe : string Pipe.Reader.t;
+  message_writer : string Pipe.Writer.t;
+  mutable active : bool;
 }
 
-(** Connect to MEXC WebSocket *)
+(** Connect to MEXC WebSocket using libcurl *)
 let connect ?(url = Endpoint.public_url) ~streams () : t Deferred.Or_error.t =
-  Deferred.Or_error.try_with (fun () ->
-    let uri = Uri.of_string url in
-    let headers = Cohttp.Header.init () in
-    Cohttp_async_websocket.Client.create ~headers uri
-    >>= fun conn_result ->
-    match conn_result with
-    | Error err ->
-      eprintf "MEXC WebSocket connection error: %s\n" (Error.to_string_hum err);
-      Error.raise err
-    | Ok (_response, ws) ->
-      let reader, writer = Websocket.pipes ws in
-      (* Subscribe to streams *)
-      let sub_msg = Subscribe.subscribe ~id:1 streams in
-      Pipe.write writer sub_msg
-      >>= fun () ->
-      return { uri; messages = reader }
-  )
+  let open Deferred.Let_syntax in
+  let uri = Uri.of_string url in
+
+  (* Connect using websocket_curl (libcurl-based, works with CloudFront) *)
+  let%bind ws_result = Websocket_curl.connect ~url in
+
+  match ws_result with
+  | Error err ->
+    eprintf "MEXC WebSocket connection error: %s\n" (Error.to_string_hum err);
+    return (Error err)
+  | Ok ws ->
+    let message_pipe_reader, message_pipe_writer = Pipe.create () in
+
+    let t = {
+      uri;
+      ws;
+      message_pipe = message_pipe_reader;
+      message_writer = message_pipe_writer;
+      active = true;
+    } in
+
+    (* Start background task to receive messages *)
+    don't_wait_for (
+      let rec receive_loop () =
+        if not t.active then (
+          Pipe.close t.message_writer;
+          return ()
+        ) else
+          let%bind msg_opt = Websocket_curl.receive ws in
+          match msg_opt with
+          | None ->
+            (* Connection closed *)
+            t.active <- false;
+            Pipe.close t.message_writer;
+            return ()
+          | Some payload ->
+            let%bind () = Pipe.write t.message_writer payload in
+            receive_loop ()
+      in
+      receive_loop ()
+    );
+
+    (* Subscribe to streams *)
+    let sub_msg = Subscribe.subscribe ~id:1 streams in
+    let%bind () = Websocket_curl.send ws sub_msg in
+
+    return (Ok t)
 
 (** Get message pipe *)
-let messages t = t.messages
+let messages t = t.message_pipe
 
 (** Apply depth update to order book *)
 let apply_depth_to_book (book : Order_book.Book.t) (depth : Message.aggre_depth) =
