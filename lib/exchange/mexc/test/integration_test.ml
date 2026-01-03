@@ -96,6 +96,89 @@ let test_exchange_info () =
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Mexc.Rest.Error.sexp_of_t err)))
 
 (* ============================================================ *)
+(* Unified Adapter Tests (Fluxum_adapter) *)
+(* ============================================================ *)
+
+let test_adapter_ticker () =
+  printf "\n[Adapter] get_ticker\n";
+  let cfg = Mexc.Cfg.production in
+  let adapter = Mexc.Fluxum_adapter.Adapter.create ~cfg ~symbols:["BTCUSDT"] () in
+  Mexc.Fluxum_adapter.Adapter.get_ticker adapter ~symbol:"BTCUSDT" () >>| function
+  | Ok ticker_native ->
+    let ticker = Mexc.Fluxum_adapter.Adapter.Normalize.ticker ticker_native in
+    pass (sprintf "Symbol: %s" ticker.symbol);
+    pass (sprintf "Last: %.2f | Bid: %.2f | Ask: %.2f"
+      ticker.last_price ticker.bid_price ticker.ask_price);
+    pass (sprintf "24h High: %.2f | Low: %.2f" ticker.high_24h ticker.low_24h);
+    pass (sprintf "24h Volume: %.2f" ticker.volume_24h);
+    Option.iter ticker.price_change_pct ~f:(fun pct ->
+      pass (sprintf "24h Change: %.2f%%" pct))
+  | Error err ->
+    let e = Mexc.Fluxum_adapter.Adapter.Normalize.error err in
+    fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))
+
+let test_adapter_order_book () =
+  printf "\n[Adapter] get_order_book\n";
+  let cfg = Mexc.Cfg.production in
+  let adapter = Mexc.Fluxum_adapter.Adapter.create ~cfg ~symbols:["BTCUSDT"] () in
+  Mexc.Fluxum_adapter.Adapter.get_order_book adapter ~symbol:"BTCUSDT" ~limit:5 () >>| function
+  | Ok book_native ->
+    let book = Mexc.Fluxum_adapter.Adapter.Normalize.order_book book_native in
+    pass (sprintf "Bids: %d | Asks: %d" (List.length book.bids) (List.length book.asks));
+    let spread = Fluxum.Types.Order_book.spread book in
+    pass (sprintf "Spread: %.4f" spread);
+    let mid = Fluxum.Types.Order_book.mid_price book in
+    pass (sprintf "Mid price: %.2f" mid);
+    (match List.hd book.bids with
+     | Some level -> pass (sprintf "Best bid: %.8f @ %.2f" level.volume level.price)
+     | None -> ());
+    (match List.hd book.asks with
+     | Some level -> pass (sprintf "Best ask: %.8f @ %.2f" level.volume level.price)
+     | None -> ())
+  | Error err ->
+    let e = Mexc.Fluxum_adapter.Adapter.Normalize.error err in
+    fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))
+
+let test_adapter_recent_trades () =
+  printf "\n[Adapter] get_recent_trades\n";
+  let cfg = Mexc.Cfg.production in
+  let adapter = Mexc.Fluxum_adapter.Adapter.create ~cfg ~symbols:["BTCUSDT"] () in
+  Mexc.Fluxum_adapter.Adapter.get_recent_trades adapter ~symbol:"BTCUSDT" ~limit:5 () >>| function
+  | Ok trades_native ->
+    let trades = List.map trades_native ~f:Mexc.Fluxum_adapter.Adapter.Normalize.public_trade in
+    pass (sprintf "Trades: %d" (List.length trades));
+    (match List.hd trades with
+     | Some trade ->
+       let side_str = match trade.side with
+         | Some s -> Fluxum.Types.Side.to_string s
+         | None -> "?"
+       in
+       pass (sprintf "Latest: %s %.8f @ %.2f" side_str trade.qty trade.price)
+     | None -> fail "No trades")
+  | Error err ->
+    let e = Mexc.Fluxum_adapter.Adapter.Normalize.error err in
+    fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))
+
+let test_adapter_symbols () =
+  printf "\n[Adapter] get_symbols\n";
+  let cfg = Mexc.Cfg.production in
+  let adapter = Mexc.Fluxum_adapter.Adapter.create ~cfg ~symbols:[] () in
+  Mexc.Fluxum_adapter.Adapter.get_symbols adapter () >>| function
+  | Ok symbols_native ->
+    let symbols = List.map symbols_native ~f:Mexc.Fluxum_adapter.Adapter.Normalize.symbol_info in
+    pass (sprintf "Total symbols: %d" (List.length symbols));
+    (* Find BTCUSDT *)
+    let btc = List.find symbols ~f:(fun s -> String.equal s.symbol "BTCUSDT") in
+    (match btc with
+     | Some info ->
+       pass (sprintf "Found: %s (%s/%s) status=%s"
+         info.symbol info.base_currency info.quote_currency info.status)
+     | None -> fail "BTCUSDT not found")
+  | Error err ->
+    let e = Mexc.Fluxum_adapter.Adapter.Normalize.error err in
+    fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))
+
+(* ============================================================ *)
 (* WebSocket Integration Tests *)
 (* ============================================================ *)
 
@@ -200,6 +283,12 @@ let run_tests () =
   test_recent_trades () >>= fun () ->
   test_ticker_24hr () >>= fun () ->
   test_exchange_info () >>= fun () ->
+
+  (* Unified adapter tests *)
+  test_adapter_ticker () >>= fun () ->
+  test_adapter_order_book () >>= fun () ->
+  test_adapter_recent_trades () >>= fun () ->
+  test_adapter_symbols () >>= fun () ->
 
   (* WebSocket test *)
   test_websocket_connection () >>= fun () ->
