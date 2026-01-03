@@ -79,7 +79,7 @@ dune exec examples/kraken_orderbook_debug.exe
 
 ---
 
-### Gemini Order Book (`gemini_orderbook_curl.ml`)
+### Gemini Order Book (`gemini_orderbook.ml`)
 
 Gemini real-time order book using libcurl WebSocket backend.
 
@@ -91,7 +91,7 @@ Gemini real-time order book using libcurl WebSocket backend.
 
 **Usage:**
 ```bash
-dune exec examples/gemini_orderbook_curl.exe -- --symbol btcusd
+dune exec examples/gemini_orderbook.exe -- --symbol btcusd
 ```
 
 **Options:**
@@ -409,7 +409,7 @@ The CI system runs these examples as integration tests:
 
 ```bash
 # CI test command (from .github/workflows/ci.yml)
-timeout 30 dune exec examples/gemini_orderbook_curl.exe || true
+timeout 30 dune exec examples/gemini_orderbook.exe || true
 timeout 30 dune exec examples/kraken_orderbook.exe || true
 timeout 30 dune exec examples/hyperliquid_orderbook.exe || true
 ```

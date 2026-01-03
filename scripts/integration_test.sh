@@ -147,7 +147,7 @@ echo ""
 
 # Test 1: Gemini WebSocket Order Book (requires API credentials)
 echo -e "${BLUE}[1/12]${NC} Testing Gemini WebSocket..."
-test_exchange_orderbook "Gemini" "examples/gemini_orderbook_curl.exe"
+test_exchange_orderbook "Gemini" "examples/gemini_orderbook.exe"
 
 # Test 2: Kraken WebSocket Order Book
 echo -e "${BLUE}[2/12]${NC} Testing Kraken WebSocket..."

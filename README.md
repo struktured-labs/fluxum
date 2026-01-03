@@ -281,7 +281,7 @@ Complete REST API support for:
 
 The `examples/` directory contains working examples:
 
-- **`gemini_orderbook_curl.ml`**: Gemini WebSocket order book streaming
+- **`gemini_orderbook.ml`**: Gemini WebSocket order book streaming
 - **`kraken_orderbook.ml`**: Kraken order book with depth display
 - **`binance_orderbook.ml`**: Binance order book streaming
 - **`hyperliquid_orderbook.ml`**: Hyperliquid L2 order book

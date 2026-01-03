@@ -257,7 +257,7 @@ The [examples/](../examples/) directory contains working examples for all featur
 ### Order Book Examples
 - `binance_orderbook.ml` - Binance order book streaming
 - `kraken_orderbook.ml` - Kraken order book with depth
-- `gemini_orderbook_curl.ml` - Gemini WebSocket
+- `gemini_orderbook.ml` - Gemini WebSocket
 - `hyperliquid_orderbook.ml` - Hyperliquid L2 book
 - `mexc_orderbook.ml` - MEXC order book
 - `bitrue_orderbook.ml` - Bitrue order book
