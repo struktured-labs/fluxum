@@ -145,41 +145,50 @@ echo "  $(date)"
 echo "=========================================="
 echo ""
 
-# Test 1: Gemini WebSocket Order Book
-echo -e "${BLUE}[1/10]${NC} Testing Gemini WebSocket..."
+# Test 1: Gemini WebSocket Order Book (requires API credentials)
+echo -e "${BLUE}[1/12]${NC} Testing Gemini WebSocket..."
 test_exchange_orderbook "Gemini" "examples/gemini_orderbook_curl.exe"
 
 # Test 2: Kraken WebSocket Order Book
-echo -e "${BLUE}[2/10]${NC} Testing Kraken WebSocket..."
+echo -e "${BLUE}[2/12]${NC} Testing Kraken WebSocket..."
 test_exchange_orderbook "Kraken" "examples/kraken_orderbook.exe"
 
 # Test 3: Hyperliquid WebSocket Order Book
-echo -e "${BLUE}[3/10]${NC} Testing Hyperliquid WebSocket..."
+echo -e "${BLUE}[3/12]${NC} Testing Hyperliquid WebSocket..."
 test_exchange_orderbook "Hyperliquid" "examples/hyperliquid_orderbook.exe"
 
-# Test 4: Consolidated Order Book (Multi-Exchange)
-echo -e "${BLUE}[4/10]${NC} Testing Consolidated Order Book..."
+# Test 4: Binance WebSocket Order Book
+echo -e "${BLUE}[4/12]${NC} Testing Binance WebSocket..."
+test_exchange_orderbook "Binance" "examples/binance_orderbook.exe"
+
+# Test 5: dYdX WebSocket Order Book
+echo -e "${BLUE}[5/12]${NC} Testing dYdX WebSocket..."
+test_exchange_orderbook "dYdX" "examples/dydx_orderbook.exe"
+
+# Test 6: Consolidated Order Book (Multi-Exchange)
+echo -e "${BLUE}[6/12]${NC} Testing Consolidated Order Book..."
 test_exchange_orderbook "Consolidated" "examples/consolidated_orderbook.exe"
 
-# Test 5: Binance REST API - Server Time
-echo -e "${BLUE}[5/10]${NC} Testing Binance REST API..."
+# Test 7: Binance REST API - Server Time
+echo -e "${BLUE}[7/12]${NC} Testing Binance REST API..."
 test_exchange_rest "binance" "server-time"
 
-# Test 6: Kraken REST API - Server Time
-echo -e "${BLUE}[6/10]${NC} Testing Kraken REST API..."
+# Test 8: Kraken REST API - Server Time
+echo -e "${BLUE}[8/12]${NC} Testing Kraken REST API..."
 test_exchange_rest "kraken" "server-time"
 
-# Test 7: Gemini REST API - Symbols
-echo -e "${BLUE}[7/10]${NC} Testing Gemini REST API..."
+# Test 9: Gemini REST API - Symbols
+echo -e "${BLUE}[9/12]${NC} Testing Gemini REST API..."
 test_exchange_rest "gemini" "symbols"
 
-# Test 8: Connection Stability - Reconnection Test
-echo -e "${BLUE}[8/10]${NC} Testing connection stability..."
+# Test 10: Connection Stability - Reconnection Test
+echo -e "${BLUE}[10/12]${NC} Testing connection stability..."
 print_status "INFO" "Running multiple short connections..."
 
 success_count=0
 for i in {1..3}; do
-    if timeout 15 dune exec examples/gemini_orderbook_curl.exe > "tmp/stability_test_$i.log" 2>&1; then
+    # Use Kraken which works in CI without credentials
+    if timeout 15 dune exec examples/kraken_orderbook.exe > "tmp/stability_test_$i.log" 2>&1; then
         success_count=$((success_count + 1))
     else
         exit_code=$?
@@ -195,9 +204,10 @@ else
     print_status "FAIL" "Connection stability: Only $success_count/3 connections successful"
 fi
 
-# Test 9: Data Quality - Check for valid price levels
-echo -e "${BLUE}[9/10]${NC} Testing data quality..."
-test_log="tmp/integration_test_Gemini.log"
+# Test 11: Data Quality - Check for valid price levels
+echo -e "${BLUE}[11/12]${NC} Testing data quality..."
+# Use Kraken log since it works in CI without credentials
+test_log="tmp/integration_test_Kraken.log"
 if [ -f "$test_log" ]; then
     # Check for realistic price ranges (BTC should be > 1000)
     if grep -E "([0-9]{5,}|[0-9]{4}\.[0-9]{2})" "$test_log" > /dev/null 2>&1; then
@@ -209,12 +219,12 @@ else
     print_status "SKIP" "Data quality: No test log available"
 fi
 
-# Test 10: Memory/Resource Test - Check for leaks
-echo -e "${BLUE}[10/10]${NC} Testing resource usage..."
+# Test 12: Memory/Resource Test - Check for leaks
+echo -e "${BLUE}[12/12]${NC} Testing resource usage..."
 print_status "INFO" "Monitoring resource usage during 30s test..."
 
-# Run a test and monitor
-timeout 30 dune exec examples/gemini_orderbook_curl.exe > tmp/resource_test.log 2>&1 &
+# Run a test and monitor (use Kraken which works in CI)
+timeout 30 dune exec examples/kraken_orderbook.exe > tmp/resource_test.log 2>&1 &
 TEST_PID=$!
 
 # Wait and check if process is still running (it should be)
