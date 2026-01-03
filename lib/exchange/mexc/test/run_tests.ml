@@ -395,19 +395,19 @@ let test_ws_stream_channels () =
   printf "\n[WebSocket] Stream channel names\n";
   let aggre_deals = Ws.Stream.AggreDeals { symbol = "BTCUSDT"; frequency = Ms100 } in
   ignore (assert_string_equal
-    "spot@public.aggre.deals.v3.api@100ms@BTCUSDT"
+    "spot@public.aggre.deals.v3.api.pb@100ms@BTCUSDT"
     (Ws.Stream.to_channel aggre_deals)
     "AggreDeals channel name");
 
   let aggre_depths = Ws.Stream.AggreDepths { symbol = "ethusdt"; frequency = Ms10 } in
   ignore (assert_string_equal
-    "spot@public.aggre.depth.v3.api@10ms@ETHUSDT"
+    "spot@public.aggre.depth.v3.api.pb@10ms@ETHUSDT"
     (Ws.Stream.to_channel aggre_depths)
     "AggreDepths channel name (lowercase converted to uppercase)");
 
   let limit_depths = Ws.Stream.LimitDepths { symbol = "BTCUSDT"; levels = 20 } in
   ignore (assert_string_equal
-    "spot@public.limit.depth.v3.api@BTCUSDT@20"
+    "spot@public.limit.depth.v3.api.pb@BTCUSDT@20"
     (Ws.Stream.to_channel limit_depths)
     "LimitDepths channel name");
 
