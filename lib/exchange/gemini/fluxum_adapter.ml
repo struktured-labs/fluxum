@@ -27,8 +27,10 @@ module Adapter : Exchange_intf.S = struct
     end
 
     module Trade = struct
-      (* Use private order events as trade source *)
-      type t = V1.Order_events.Order_event.t
+      (* WebSocket trades come from order events, REST trades from mytrades *)
+      type t =
+        | Ws of V1.Order_events.Order_event.t
+        | Rest of V1.Mytrades.trade
     end
 
     module Balance = struct
@@ -37,6 +39,10 @@ module Adapter : Exchange_intf.S = struct
 
     module Book = struct
       type update = V1.Market_data.Update.t
+    end
+
+    module Symbol_info = struct
+      type t = V1.Symbol_details.T.response
     end
 
     module Error = struct
@@ -63,7 +69,46 @@ module Adapter : Exchange_intf.S = struct
     V1.Balances.post (module Cfg) t.nonce ()
     >>| function
     | `Ok r -> Ok r
-      | (#Rest.Error.post as e) -> Error e
+    | (#Rest.Error.post as e) -> Error e
+
+  let get_order_status (t : t) (id : Native.Order.id) =
+    let (module Cfg) = t.cfg in
+    V1.Order.Status.post (module Cfg) t.nonce { order_id = id }
+    >>| function
+    | `Ok r -> Ok r
+    | (#Rest.Error.post as e) -> Error e
+
+  let get_open_orders (t : t) ?symbol:_ () =
+    let (module Cfg) = t.cfg in
+    V1.Orders.post (module Cfg) t.nonce ()
+    >>| function
+    | `Ok orders -> Ok orders
+    | (#Rest.Error.post as e) -> Error e
+
+  let get_order_history (_ : t) ?symbol:_ ?limit:_ () =
+    (* Gemini doesn't have a closed orders endpoint *)
+    Deferred.return (Error (`Bad_request "Gemini does not support order history endpoint"))
+
+  let get_my_trades (t : t) ~symbol ?limit () =
+    let (module Cfg) = t.cfg in
+    V1.Mytrades.post (module Cfg) t.nonce
+      { symbol = V1.Symbol.of_string symbol
+      ; limit_trades = limit
+      ; timestamp = None
+      }
+    >>| function
+    | `Ok trades -> Ok (List.map trades ~f:(fun t -> Native.Trade.Rest t))
+    | (#Rest.Error.post as e) -> Error e
+
+  let get_symbols (t : t) () =
+    let (module Cfg) = t.cfg in
+    (* Fetch details for all known symbols *)
+    Deferred.List.filter_map V1.Symbol.all ~how:`Parallel ~f:(fun sym ->
+      V1.Symbol_details.get (module Cfg) t.nonce ~uri_args:sym ()
+      >>| function
+      | `Ok r -> Some r
+      | #Rest.Error.get -> None)
+    >>| fun results -> Ok results
 
   module Streams = struct
     let trades (t : t) =
@@ -75,11 +120,11 @@ module Adapter : Exchange_intf.S = struct
       in
       client (module Cfg) ~nonce:t.nonce ~query ()
       >>| Pipe.filter_map ~f:(function
-        | `Ok (`Order_event ev) -> Some ev
-        | `Ok (`Order_events evs) -> List.hd evs
+        | `Ok (`Order_event ev) -> Some (Native.Trade.Ws ev)
+        | `Ok (`Order_events evs) -> Option.map (List.hd evs) ~f:(fun ev -> Native.Trade.Ws ev)
         | `Ok (`Heartbeat _) -> None
         | `Ok (`Subscription_ack _) -> None
-          | #Ws.Error.t -> None )
+        | #Ws.Error.t -> None)
       |> Deferred.map ~f:Fn.id
 
     let book_updates (t : t) =
@@ -160,32 +205,50 @@ module Adapter : Exchange_intf.S = struct
     let order_status (r : Native.Order.status) : Types.Order_status.t =
       (order_response r).status
 
-    let trade (ev : Native.Trade.t) : Types.Trade.t =
-      match ev.fill with
-      | None ->
+    let order_from_status (r : Native.Order.status) : Types.Order.t =
+      order_response r
+
+    let trade (t : Native.Trade.t) : Types.Trade.t =
+      match t with
+      | Ws ev ->
+        (match ev.fill with
+         | None ->
+           { venue = Venue.t
+           ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
+           ; side = side ev.side
+           ; price = Option.value_map ev.avg_execution_price ~default:0.0 ~f:(fun d ->
+               Float.of_string (Common.Decimal_string.to_string d))
+           ; qty = Option.value_map ev.executed_amount ~default:0.0 ~f:(fun d ->
+               Float.of_string (Common.Decimal_string.to_string d))
+           ; fee = None
+           ; trade_id = None
+           ; ts = time_of_ts_opt (Some ev.timestamp)
+           }
+         | Some f ->
+           let price = Float.of_string (Common.Decimal_string.to_string f.price) in
+           let qty = Float.of_string (Common.Decimal_string.to_string f.amount) in
+           let fee = Float.of_string (Common.Decimal_string.to_string f.fee) in
+           { venue = Venue.t
+           ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
+           ; side = side ev.side
+           ; price
+           ; qty
+           ; fee = Some fee
+           ; trade_id = Some (Common.Int_string.to_string f.trade_id)
+           ; ts = time_of_ts_opt (Some ev.timestamp)
+           })
+      | Rest tr ->
+        let price = Float.of_string (Common.Decimal_string.to_string tr.price) in
+        let qty = Float.of_string (Common.Decimal_string.to_string tr.amount) in
+        let fee = Float.of_string (Common.Decimal_string.to_string tr.fee_amount) in
         { venue = Venue.t
-        ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
-        ; side = side ev.side
-        ; price = Option.value_map ev.avg_execution_price ~default:0.0 ~f:(fun d ->
-            Float.of_string (Common.Decimal_string.to_string d))
-        ; qty = Option.value_map ev.executed_amount ~default:0.0 ~f:(fun d ->
-            Float.of_string (Common.Decimal_string.to_string d))
-        ; fee = None
-        ; trade_id = None
-        ; ts = time_of_ts_opt (Some ev.timestamp)
-        }
-      | Some f ->
-        let price = Float.of_string (Common.Decimal_string.to_string f.price) in
-        let qty = Float.of_string (Common.Decimal_string.to_string f.amount) in
-        let fee = Float.of_string (Common.Decimal_string.to_string f.fee) in
-        { venue = Venue.t
-        ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
-        ; side = side ev.side
+        ; symbol = Common.Symbol.Enum_or_string.to_string tr.symbol
+        ; side = side tr.type_
         ; price
         ; qty
         ; fee = Some fee
-        ; trade_id = Some (Common.Int_string.to_string f.trade_id)
-        ; ts = time_of_ts_opt (Some ev.timestamp)
+        ; trade_id = Some (Common.Int_number.to_string tr.tid)
+        ; ts = Some tr.timestampms
         }
 
     let balance (b : Native.Balance.t) : Types.Balance.t =
@@ -235,6 +298,17 @@ module Adapter : Exchange_intf.S = struct
         ; ts
         ; is_snapshot = false
         }
+
+    let symbol_info (s : Native.Symbol_info.t) : Types.Symbol_info.t =
+      { venue = Venue.t
+      ; symbol = Common.Symbol.Enum_or_string.to_string s.symbol
+      ; base_currency = Common.Currency.Enum_or_string.to_string s.base_currency
+      ; quote_currency = Common.Currency.Enum_or_string.to_string s.quote_currency
+      ; status = s.status
+      ; min_order_size = Float.of_string (Common.Decimal_string.to_string s.min_order_size)
+      ; tick_size = Some (Common.Decimal_number.to_float s.tick_size)
+      ; quote_increment = Some (Common.Decimal_number.to_float s.quote_increment)
+      }
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

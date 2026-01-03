@@ -21,7 +21,7 @@ module Adapter : Exchange_intf.S = struct
       type id = string
       type request = V1.New_order.request
       type response = V1.New_order.response
-      type status = V1.Query_order.response
+      type status = V1.Open_orders.order  (* Same structure as Query_order.response *)
     end
 
     module Trade = struct
@@ -34,6 +34,10 @@ module Adapter : Exchange_intf.S = struct
 
     module Book = struct
       type update = V1.Depth.response
+    end
+
+    module Symbol_info = struct
+      type t = V1.Exchange_info.symbol_info
     end
 
     module Error = struct
@@ -65,6 +69,68 @@ module Adapter : Exchange_intf.S = struct
   let balances t =
     V1.Account.request t.cfg () >>| function
     | `Ok resp -> Ok resp.balances
+    | #Rest.Error.t as e -> Error e
+
+  let get_order_status t (order_id : Native.Order.id) =
+    match t.symbols with
+    | symbol :: _ ->
+      V1.Query_order.request t.cfg
+        { symbol; orderId = Some order_id; origClientOrderId = None }
+      >>| (function
+        | `Ok resp ->
+          (* Convert Query_order.response to Open_orders.order (same structure) *)
+          let order : V1.Open_orders.order =
+            { symbol = resp.symbol
+            ; orderId = resp.orderId
+            ; orderListId = resp.orderListId
+            ; clientOrderId = resp.clientOrderId
+            ; price = resp.price
+            ; origQty = resp.origQty
+            ; executedQty = resp.executedQty
+            ; cummulativeQuoteQty = resp.cummulativeQuoteQty
+            ; status = resp.status
+            ; timeInForce = resp.timeInForce
+            ; type_ = resp.type_
+            ; side = resp.side
+            ; stopPrice = resp.stopPrice
+            ; time = resp.time
+            ; updateTime = resp.updateTime
+            ; isWorking = resp.isWorking
+            ; origQuoteOrderQty = resp.origQuoteOrderQty
+            }
+          in
+          Ok order
+        | #Rest.Error.t as e -> Error e)
+    | [] ->
+      Deferred.return
+        (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
+
+  let get_open_orders t ?symbol () =
+    let symbol = match symbol with Some s -> s | None -> List.hd t.symbols |> Option.value ~default:"" in
+    V1.Open_orders.request t.cfg { symbol = Some symbol }
+    >>| function
+    | `Ok orders -> Ok orders
+    | #Rest.Error.t as e -> Error e
+
+  let get_order_history t ?symbol ?limit () =
+    let symbol = match symbol with Some s -> s | None -> List.hd t.symbols |> Option.value ~default:"" in
+    V1.All_orders.request t.cfg
+      { symbol; orderId = None; startTime = None; endTime = None; limit }
+    >>| function
+    | `Ok orders -> Ok orders
+    | #Rest.Error.t as e -> Error e
+
+  let get_my_trades t ~symbol ?limit () =
+    V1.My_trades.request t.cfg
+      { symbol; orderId = None; startTime = None; endTime = None; fromId = None; limit }
+    >>| function
+    | `Ok trades -> Ok trades
+    | #Rest.Error.t as e -> Error e
+
+  let get_symbols t () =
+    V1.Exchange_info.request t.cfg { symbol = None }
+    >>| function
+    | `Ok info -> Ok info.symbols
     | #Rest.Error.t as e -> Error e
 
   module Streams = struct
@@ -125,6 +191,50 @@ module Adapter : Exchange_intf.S = struct
       | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
       | _ -> Types.Order_status.New
 
+    let order_from_status (status : Native.Order.status) : Types.Order.t =
+      let side =
+        match status.side with
+        | "BUY" -> Types.Side.Buy
+        | _ -> Types.Side.Sell
+      in
+      let kind =
+        match status.type_ with
+        | "LIMIT" -> Types.Order_kind.Limit (Float.of_string status.price)
+        | "MARKET" -> Types.Order_kind.Market
+        | _ -> Types.Order_kind.Market
+      in
+      let order_status =
+        match status.status with
+        | "FILLED" -> Types.Order_status.Filled
+        | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
+        | "CANCELED" -> Types.Order_status.Canceled
+        | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
+        | _ -> Types.Order_status.New
+      in
+      { venue = Venue.t
+      ; id = status.orderId
+      ; symbol = status.symbol
+      ; side
+      ; kind
+      ; qty = Float.of_string status.origQty
+      ; filled = Float.of_string status.executedQty
+      ; status = order_status
+      ; created_at =
+          (if Int64.(status.time > 0L)
+          then
+            Some
+              (Time_float_unix.of_span_since_epoch
+                 (Time_float_unix.Span.of_ms (Int64.to_float status.time)))
+          else None)
+      ; updated_at =
+          (if Int64.(status.updateTime > 0L)
+          then
+            Some
+              (Time_float_unix.of_span_since_epoch
+                 (Time_float_unix.Span.of_ms (Int64.to_float status.updateTime)))
+          else None)
+      }
+
     let trade (t : Native.Trade.t) : Types.Trade.t =
       let side = if t.isBuyer then Types.Side.Buy else Types.Side.Sell in
       { venue = Venue.t
@@ -164,6 +274,17 @@ module Adapter : Exchange_intf.S = struct
       ; levels
       ; ts = None
       ; is_snapshot = true
+      }
+
+    let symbol_info (s : Native.Symbol_info.t) : Types.Symbol_info.t =
+      { venue = Venue.t
+      ; symbol = s.symbol
+      ; base_currency = s.baseAsset
+      ; quote_currency = s.quoteAsset
+      ; status = s.status
+      ; min_order_size = 0.0  (* MEXC doesn't provide this in exchange_info *)
+      ; tick_size = None
+      ; quote_increment = None
       }
 
     let error (e : Native.Error.t) : Types.Error.t =

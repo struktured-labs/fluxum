@@ -22,6 +22,9 @@ module type BUILDER = sig
     -> E.Native.Order.request
 end
 
+(* Suppress unused warnings - these functions will be used by CLI *)
+[@@@warning "-32-34"]
+
 module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) = struct
   type t = E.t
 
@@ -49,6 +52,10 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) = struc
       type update = E.Native.Book.update
     end
 
+    module Symbol_info = struct
+      type t = E.Native.Symbol_info.t
+    end
+
     module Error = struct
       type t = E.Native.Error.t
     end
@@ -71,6 +78,31 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) = struc
   let balances t =
     E.balances t
     >>| Result.map ~f:(List.map ~f:E.Normalize.balance)
+    >>| Result.map_error ~f:map_error
+
+  let get_order_status t id =
+    E.get_order_status t id
+    >>| Result.map ~f:E.Normalize.order_status
+    >>| Result.map_error ~f:map_error
+
+  let get_open_orders t ?symbol () =
+    E.get_open_orders t ?symbol ()
+    >>| Result.map ~f:(List.map ~f:E.Normalize.order_from_status)
+    >>| Result.map_error ~f:map_error
+
+  let get_order_history t ?symbol ?limit () =
+    E.get_order_history t ?symbol ?limit ()
+    >>| Result.map ~f:(List.map ~f:E.Normalize.order_from_status)
+    >>| Result.map_error ~f:map_error
+
+  let get_my_trades t ~symbol ?limit () =
+    E.get_my_trades t ~symbol ?limit ()
+    >>| Result.map ~f:(List.map ~f:E.Normalize.trade)
+    >>| Result.map_error ~f:map_error
+
+  let get_symbols t =
+    E.get_symbols t ()
+    >>| Result.map ~f:(List.map ~f:E.Normalize.symbol_info)
     >>| Result.map_error ~f:map_error
 
   module Streams = struct

@@ -398,6 +398,216 @@ module Closed_orders = struct
   include Rest.Make_with_params (T) (Params)
 end
 
+(** Get trade history - TradesHistory *)
+module Trades_history = struct
+  module Trade = struct
+    type t =
+      { ordertxid : string
+      ; pair : string
+      ; time : float
+      ; type_ : string [@key "type"]
+      ; ordertype : string
+      ; price : string
+      ; cost : string
+      ; fee : string
+      ; vol : string
+      ; margin : string
+      ; misc : string
+      }
+    [@@deriving sexp]
+
+    let of_yojson = function
+      | `Assoc pairs ->
+        let get key = List.Assoc.find pairs key ~equal:String.equal in
+        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
+        let get_float key = match get key with Some (`Float f) -> f | _ -> 0.0 in
+        Result.Ok
+          { ordertxid = get_str "ordertxid"
+          ; pair = get_str "pair"
+          ; time = get_float "time"
+          ; type_ = get_str "type"
+          ; ordertype = get_str "ordertype"
+          ; price = get_str "price"
+          ; cost = get_str "cost"
+          ; fee = get_str "fee"
+          ; vol = get_str "vol"
+          ; margin = get_str "margin"
+          ; misc = get_str "misc"
+          }
+      | _ -> Result.Error "Expected trade object"
+  end
+
+  module T = struct
+    let name = "trades-history"
+    let endpoint = "TradesHistory"
+
+    type request =
+      { type_ : string option [@default None]
+      ; trades : bool [@default false]
+      ; start : int option [@default None]
+      ; end_ : int option [@default None]
+      ; ofs : int option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_params { type_; trades; start; end_; ofs } =
+      let base = [ ("trades", match trades with true -> "true" | false -> "false") ] in
+      let add_opt key = function
+        | None -> Fun.id
+        | Some v -> List.cons (key, Int.to_string v)
+      in
+      let add_opt_str key = function
+        | None -> Fun.id
+        | Some v -> List.cons (key, v)
+      in
+      base
+      |> add_opt_str "type" type_
+      |> add_opt "start" start
+      |> add_opt "end" end_
+      |> add_opt "ofs" ofs
+
+    type trades_result =
+      { trades : (string * Trade.t) list
+      ; count : int
+      }
+    [@@deriving sexp]
+
+    let trades_result_of_yojson = function
+      | `Assoc pairs ->
+        let trades =
+          List.find_map pairs ~f:(function
+            | ("trades", `Assoc trade_list) ->
+              Some
+                (List.filter_map trade_list ~f:(fun (id, json) ->
+                  match Trade.of_yojson json with
+                  | Result.Ok trade -> Some (id, trade)
+                  | Result.Error _ -> None))
+            | _ -> None)
+          |> Option.value ~default:[]
+        in
+        let count =
+          List.find_map pairs ~f:(function
+            | ("count", `Int n) -> Some n
+            | _ -> None)
+          |> Option.value ~default:0
+        in
+        Result.Ok { trades; count }
+      | _ -> Result.Error "Expected trades object"
+
+    type response = trades_result [@@deriving sexp, of_yojson]
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let type_ = string_flag_option ~field_name:"type"
+          ~doc:"Trade type filter (all, any, closed, no position)"
+        and trades = bool_flag ~field_name:"trades" ~default:false
+          ~doc:"Include related trade IDs"
+        and start = int_flag_option ~field_name:"start"
+          ~doc:"Starting timestamp"
+        and end_ = int_flag_option ~field_name:"end"
+          ~doc:"Ending timestamp"
+        and ofs = int_flag_option ~field_name:"ofs"
+          ~doc:"Result offset"
+        in
+        { type_; trades; start; end_; ofs }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
+(** Get tradeable asset pairs - AssetPairs *)
+module Asset_pairs = struct
+  module Pair_info = struct
+    type t =
+      { altname : string
+      ; wsname : string option [@default None]
+      ; base : string
+      ; quote : string
+      ; pair_decimals : int
+      ; lot_decimals : int
+      ; lot_multiplier : int
+      ; ordermin : string option [@default None]
+      ; status : string [@default "online"]
+      }
+    [@@deriving sexp]
+
+    let of_yojson = function
+      | `Assoc pairs ->
+        let get key = List.Assoc.find pairs key ~equal:String.equal in
+        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
+        let get_str_opt key = match get key with Some (`String s) -> Some s | _ -> None in
+        let get_int key = match get key with Some (`Int i) -> i | _ -> 0 in
+        Result.Ok
+          { altname = get_str "altname"
+          ; wsname = get_str_opt "wsname"
+          ; base = get_str "base"
+          ; quote = get_str "quote"
+          ; pair_decimals = get_int "pair_decimals"
+          ; lot_decimals = get_int "lot_decimals"
+          ; lot_multiplier = get_int "lot_multiplier"
+          ; ordermin = get_str_opt "ordermin"
+          ; status = (match get_str_opt "status" with Some s -> s | None -> "online")
+          }
+      | _ -> Result.Error "Expected pair info object"
+  end
+
+  module T = struct
+    let name = "asset-pairs"
+    let endpoint = "AssetPairs"
+
+    type request =
+      { pair : string option [@default None]
+      ; info : string option [@default None]  (* "info", "leverage", "fees", "margin" *)
+      }
+    [@@deriving sexp]
+
+    let request_to_params { pair; info } =
+      let add_opt key = function
+        | None -> Fun.id
+        | Some v -> List.cons (key, v)
+      in
+      []
+      |> add_opt "pair" pair
+      |> add_opt "info" info
+
+    type response = (string * Pair_info.t) list [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `Assoc pairs ->
+        let parsed =
+          List.filter_map pairs ~f:(fun (name, json) ->
+            match Pair_info.of_yojson json with
+            | Result.Ok info -> Some (name, info)
+            | Result.Error _ -> None)
+        in
+        Result.Ok parsed
+      | _ -> Result.Error "Expected asset pairs object"
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let pair = string_flag_option ~field_name:"pair"
+          ~doc:"Specific pair to query (comma-separated for multiple)"
+        and info = string_flag_option ~field_name:"info"
+          ~doc:"Info level (info, leverage, fees, margin)"
+        in
+        { pair; info }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
 (** Backwards compatibility wrappers (non-typed versions) *)
 
 (** Get account balances - returns raw JSON *)

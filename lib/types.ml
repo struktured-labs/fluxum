@@ -146,6 +146,25 @@ module Balance = struct
   [@@deriving sexp, fields]
 end
 
+module Symbol_info = struct
+  type t =
+    { venue : Venue.t
+    ; symbol : Symbol.t
+    ; base_currency : Currency.t
+    ; quote_currency : Currency.t
+    ; status : string  (** e.g., "trading", "halt", "auction" *)
+    ; min_order_size : Qty.t
+    ; tick_size : Price.t option
+    ; quote_increment : Price.t option
+    }
+  [@@deriving sexp, fields]
+
+  let create ~venue ~symbol ~base_currency ~quote_currency ~status ~min_order_size
+      ?tick_size ?quote_increment () =
+    { venue; symbol; base_currency; quote_currency; status; min_order_size;
+      tick_size; quote_increment }
+end
+
 module Book_update = struct
   module Side = struct
     type t = Bid | Ask [@@deriving sexp, compare, equal]
