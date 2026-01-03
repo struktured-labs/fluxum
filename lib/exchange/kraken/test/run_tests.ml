@@ -4,6 +4,8 @@ open Core
 
 module Ledger = Kraken.Ledger
 module Order_book = Kraken.Order_book
+module Fluxum_adapter = Kraken.Fluxum_adapter
+module Types = Fluxum.Types
 
 (** Test result tracking *)
 let tests_run = ref 0
@@ -406,6 +408,72 @@ let test_order_book_multi_symbol () =
   ()
 *)
 
+(** ========== FLUXUM ADAPTER TESTS ========== *)
+
+let test_fluxum_adapter_side_conversion () =
+  printf "\n=== Fluxum Adapter: Side Conversion ===\n";
+
+  (* Test side conversion from string *)
+  let buy = Fluxum_adapter.Adapter.Normalize.side_of_string "buy" in
+  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
+    Types.Side.Buy buy "side_of_string 'buy' = Buy" in
+
+  let sell = Fluxum_adapter.Adapter.Normalize.side_of_string "sell" in
+  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
+    Types.Side.Sell sell "side_of_string 'sell' = Sell" in
+
+  let buy_b = Fluxum_adapter.Adapter.Normalize.side_of_string "b" in
+  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
+    Types.Side.Buy buy_b "side_of_string 'b' = Buy" in
+
+  let sell_s = Fluxum_adapter.Adapter.Normalize.side_of_string "s" in
+  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
+    Types.Side.Sell sell_s "side_of_string 's' = Sell" in
+
+  (* Test side conversion from Common.Side.t *)
+  let buy_common = Fluxum_adapter.Adapter.Normalize.side_of_common `Buy in
+  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
+    Types.Side.Buy buy_common "side_of_common Buy = Buy" in
+
+  let sell_common = Fluxum_adapter.Adapter.Normalize.side_of_common `Sell in
+  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
+    Types.Side.Sell sell_common "side_of_common Sell = Sell" in
+  ()
+
+let order_status_equal a b = Types.Order_status.compare a b = 0
+
+let test_fluxum_adapter_status_conversion () =
+  printf "\n=== Fluxum Adapter: Status Conversion ===\n";
+
+  let new_status = Fluxum_adapter.Adapter.Normalize.status_of_string "open" in
+  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
+    Types.Order_status.New new_status "status_of_string 'open' = New" in
+
+  let pending = Fluxum_adapter.Adapter.Normalize.status_of_string "pending" in
+  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
+    Types.Order_status.New pending "status_of_string 'pending' = New" in
+
+  let closed = Fluxum_adapter.Adapter.Normalize.status_of_string "closed" in
+  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
+    Types.Order_status.Filled closed "status_of_string 'closed' = Filled" in
+
+  let canceled = Fluxum_adapter.Adapter.Normalize.status_of_string "canceled" in
+  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
+    Types.Order_status.Canceled canceled "status_of_string 'canceled' = Canceled" in
+
+  let expired = Fluxum_adapter.Adapter.Normalize.status_of_string "expired" in
+  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
+    Types.Order_status.Canceled expired "status_of_string 'expired' = Canceled" in
+  ()
+
+let test_fluxum_adapter_venue () =
+  printf "\n=== Fluxum Adapter: Venue ===\n";
+
+  let venue = Fluxum_adapter.Adapter.Venue.t in
+  let _ = assert_equal ~equal:Types.Venue.equal ~sexp_of_t:Types.Venue.sexp_of_t
+    Types.Venue.Kraken venue "Adapter venue = Kraken" in
+  ()
+
 (** ========== TEST RUNNER ========== *)
 
 let () =
@@ -434,6 +502,10 @@ let () =
   (* test_order_book_quantity_conversions (); *)
   test_order_book_epoch ();
   (* test_order_book_multi_symbol (); *)
+
+  test_fluxum_adapter_side_conversion ();
+  test_fluxum_adapter_status_conversion ();
+  test_fluxum_adapter_venue ();
 
   (* Print summary *)
   printf "\n";
