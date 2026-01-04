@@ -58,3 +58,32 @@ let coinbase_ws_signature ~api_secret ~timestamp ~channel ~product_ids =
     |> String.concat ~sep:""
   in
   Ok hex_sig
+
+(** Generate Coinbase REST API authentication signature
+
+    Coinbase Advanced Trade REST API requires:
+    - timestamp (current Unix timestamp)
+    - signature = hex(HMAC-SHA256(timestamp + method + path + body, secret))
+    - api_key
+*)
+let coinbase_rest_signature ~api_secret ~timestamp ~method_ ~path ~body =
+  let open Result.Let_syntax in
+  let%bind api_secret_decoded = base64_decode api_secret in
+
+  (* Build the message: timestamp + method + path + body *)
+  let message = sprintf "%s%s%s%s" timestamp method_ path body in
+
+  (* Compute HMAC-SHA256 *)
+  let sig_binary = hmac_sha256 ~secret:api_secret_decoded ~message in
+
+  (* Convert to hex string *)
+  let hex_sig =
+    String.to_list sig_binary
+    |> List.map ~f:(fun c -> sprintf "%02x" (Char.to_int c))
+    |> String.concat ~sep:""
+  in
+  Ok hex_sig
+
+(** Get current timestamp as string *)
+let current_timestamp () =
+  Int.to_string (Float.to_int (Core_unix.gettimeofday ()))

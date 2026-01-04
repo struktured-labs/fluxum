@@ -244,3 +244,80 @@ let klines cfg ~symbol ~interval ?(limit = 500) () : (Types.klines, [> Error.t ]
     match Types.klines_of_yojson json with
     | Error e -> Error (`Json_parse e)
     | Ok klines -> Ok klines
+
+(* ============================================================ *)
+(* Authentication *)
+(* ============================================================ *)
+
+let hmac_sha256 ~secret ~message =
+  let key = Digestif.SHA256.hmac_string ~key:secret message in
+  Digestif.SHA256.to_hex key
+
+let current_timestamp () =
+  Int64.to_string (Int64.of_float (Unix.gettimeofday () *. 1000.0))
+
+let build_query_string params =
+  List.map params ~f:(fun (k, v) -> sprintf "%s=%s" k v)
+  |> String.concat ~sep:"&"
+
+(** Make authenticated GET request *)
+let get_authenticated ~cfg ~path ~params : (Yojson.Safe.t, [> Error.t ]) result Deferred.t =
+  let module Cfg = (val cfg : Cfg.S) in
+  let timestamp = current_timestamp () in
+  let params_with_ts = params @ [("timestamp", timestamp)] in
+  let query_string = build_query_string params_with_ts in
+  let signature = hmac_sha256 ~secret:Cfg.api_secret ~message:query_string in
+  let final_params = params_with_ts @ [("signature", signature)] in
+  let query_string_final = build_query_string final_params in
+  let uri = Uri.of_string (sprintf "%s%s?%s" Cfg.rest_url path query_string_final) in
+  let headers = Cohttp.Header.of_list
+    [ ("X-MBX-APIKEY", Cfg.api_key)
+    ; ("Content-Type", "application/json")
+    ]
+  in
+  Monitor.try_with (fun () ->
+    Cohttp_async.Client.get ~headers uri
+    >>= fun (_response, body) ->
+    Cohttp_async.Body.to_string body
+  )
+  >>| function
+  | Error exn ->
+    Error (`Http (0, Exn.to_string exn))
+  | Ok body_str ->
+    match Yojson.Safe.from_string body_str with
+    | exception _ -> Error (`Json_parse body_str)
+    | json -> Ok json
+
+(* ============================================================ *)
+(* Account Endpoints *)
+(* ============================================================ *)
+
+module Account = struct
+  type balance = {
+    asset: string;
+    free: string;
+    locked: string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type response = {
+    makerCommission: int; [@default 0]
+    takerCommission: int; [@default 0]
+    buyerCommission: int; [@default 0]
+    sellerCommission: int; [@default 0]
+    canTrade: bool; [@default true]
+    canWithdraw: bool; [@default true]
+    canDeposit: bool; [@default true]
+    updateTime: int64; [@default 0L]
+    accountType: string; [@default "SPOT"]
+    balances: balance list;
+  } [@@deriving yojson { strict = false }, sexp]
+end
+
+(** Get account information (balances) *)
+let account cfg : (Account.response, [> Error.t ]) result Deferred.t =
+  get_authenticated ~cfg ~path:"/api/v1/account" ~params:[] >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Account.response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok account -> Ok account

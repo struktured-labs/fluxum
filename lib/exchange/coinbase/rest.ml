@@ -167,3 +167,90 @@ let candles cfg ~product_id ~start ~end_ ~granularity
     match Types.candles_response_of_yojson json with
     | Error e -> Error (`Json_parse e)
     | Ok candles -> Ok candles
+
+(* ============================================================ *)
+(* Authenticated Endpoints *)
+(* ============================================================ *)
+
+(** Make authenticated GET request *)
+let get_authenticated ~cfg ~path : (Yojson.Safe.t, [> Error.t ]) result Deferred.t =
+  let module Cfg = (val cfg : Cfg.S) in
+  let timestamp = Signature.current_timestamp () in
+  match Signature.coinbase_rest_signature
+          ~api_secret:Cfg.api_secret
+          ~timestamp
+          ~method_:"GET"
+          ~path
+          ~body:""
+  with
+  | Error _ -> Deferred.return (Error (`Api_error "Failed to generate signature"))
+  | Ok signature ->
+    let uri = Uri.of_string (Cfg.rest_url ^ path) in
+    let headers = Cohttp.Header.of_list
+      [ ("CB-ACCESS-KEY", Cfg.api_key)
+      ; ("CB-ACCESS-SIGN", signature)
+      ; ("CB-ACCESS-TIMESTAMP", timestamp)
+      ; ("Content-Type", "application/json")
+      ]
+    in
+    Monitor.try_with (fun () ->
+      Cohttp_async.Client.get ~headers uri
+      >>= fun (_response, body) ->
+      Cohttp_async.Body.to_string body
+    )
+    >>| function
+    | Error exn ->
+      Error (`Http (0, Exn.to_string exn))
+    | Ok body_str ->
+      match Yojson.Safe.from_string body_str with
+      | exception _ -> Error (`Json_parse body_str)
+      | json -> Ok json
+
+(** Account balance *)
+module Account = struct
+  type balance = {
+    currency: string;
+    value: string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type available_balance = {
+    value: string;
+    currency: string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type hold_balance = {
+    value: string;
+    currency: string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type account = {
+    uuid: string;
+    name: string;
+    currency: string;
+    available_balance: available_balance;
+    default: bool; [@default false]
+    active: bool; [@default true]
+    created_at: string option; [@default None]
+    updated_at: string option; [@default None]
+    deleted_at: string option; [@default None]
+    type_: string option; [@default None] [@key "type"]
+    ready: bool; [@default true]
+    hold: hold_balance option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type response = {
+    accounts: account list;
+    has_next: bool; [@default false]
+    cursor: string option; [@default None]
+    size: int; [@default 0]
+  } [@@deriving yojson { strict = false }, sexp]
+end
+
+(** Get all accounts (balances) *)
+let accounts cfg : (Account.response, [> Error.t ]) result Deferred.t =
+  get_authenticated ~cfg ~path:"/api/v3/brokerage/accounts" >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Account.response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok accounts -> Ok accounts

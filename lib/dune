@@ -1,7 +1,7 @@
 (library
  (name fluxum)
  (public_name fluxum)
- (modules :standard \ websocket_curl curl_ext consolidated_order_book)
+ (modules :standard \ websocket_curl curl_ext consolidated_order_book consolidated_balance)
  (libraries core async csvfields yojson)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))
@@ -28,5 +28,12 @@
  (name consolidated_order_book)
  (modules consolidated_order_book)
  (libraries core async fluxum gemini kraken hyperliquid bitrue binance coinbase)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))
+
+(library
+ (name consolidated_balance)
+ (modules consolidated_balance)
+ (libraries core async fluxum gemini kraken mexc binance coinbase bitrue)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async))

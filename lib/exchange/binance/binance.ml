@@ -7,6 +7,7 @@ module Rest = Rest
 module V3 = V3
 module Ws = Ws
 module Order_book = Order_book
+module Fluxum_adapter = Fluxum_adapter
 
 let test_command =
   Command.basic

@@ -5,3 +5,10 @@
  (inline_tests)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async))
+
+(test
+ (name test_balance)
+ (modules test_balance)
+ (libraries core async fluxum binance mexc coinbase bitrue consolidated_balance)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))
