@@ -666,6 +666,132 @@ let api_command =
         )))
     ]
 
+(* Backtest command group *)
+let backtest_command =
+  Command.group ~summary:"Backtesting commands"
+    [ ("run", Command.async
+        ~summary:"Run a backtest with a strategy"
+        (Command.Param.(
+          map
+            (both
+              (both
+                (both
+                  (flag "-strategy" (required string)
+                     ~doc:"NAME Strategy to run (sma-crossover, momentum, buy-and-hold)")
+                  (flag "-symbol" (optional_with_default "BTCUSD" string)
+                     ~doc:"SYMBOL Trading symbol (default: BTCUSD)"))
+                (both
+                  (flag "-data" (optional string)
+                     ~doc:"FILE CSV file with OHLCV data (or use -synthetic)")
+                  (flag "-synthetic" no_arg
+                     ~doc:" Use synthetic test data")))
+              (both
+                (both
+                  (flag "-balance" (optional_with_default 10000. float)
+                     ~doc:"AMOUNT Initial balance (default: 10000)")
+                  (flag "-slippage" (optional_with_default 0.001 float)
+                     ~doc:"PCT Slippage percentage (default: 0.001)"))
+                (flag "-commission" (optional_with_default 0.001 float)
+                   ~doc:"PCT Commission percentage (default: 0.001)")))
+            ~f:(fun (((strategy, symbol), (data_file, use_synthetic)), ((initial_balance, slippage), commission)) () ->
+              (* Get strategy by name *)
+              let strategy_opt = Backtest_strategies.get strategy in
+              match strategy_opt with
+              | None ->
+                eprintf "Unknown strategy: %s\n" strategy;
+                eprintf "Available: sma-crossover, momentum, buy-and-hold\n";
+                Deferred.return ()
+              | Some strategy_module ->
+                (* Load or generate candle data *)
+                let%bind candles =
+                  match data_file, use_synthetic with
+                  | Some path, _ ->
+                    Backtest.Data_source.Csv.load_from_file ~symbol ~path
+                  | None, true ->
+                    (* Generate synthetic data for testing *)
+                    let start = Backtest.Data_source.parse_time "2024-01-01" in
+                    let end_ = Backtest.Data_source.parse_time "2024-06-01" in
+                    let interval = Backtest.Interval.hour_1 in
+                    Deferred.return (Backtest.Data_source.Synthetic.trending
+                      ~symbol ~start ~end_ ~interval
+                      ~initial_price:45000. ~trend_pct:0.0003 ~volatility:0.015 ())
+                  | None, false ->
+                    eprintf "Must specify -data FILE or -synthetic\n";
+                    Deferred.return []
+                in
+                match candles with
+                | [] -> Deferred.return ()
+                | _ ->
+                  (* Configure and run backtest *)
+                  let config = Backtest.Engine.Config.create
+                      ~initial_balance
+                      ~slippage_pct:slippage
+                      ~commission_pct:commission
+                      ()
+                  in
+                  let%bind result = Backtest.Engine.run_packed
+                      ~strategy:strategy_module
+                      ~config
+                      ~candles
+                      ()
+                  in
+                  (match result with
+                   | Ok r ->
+                     printf "\n";
+                     Backtest.Result.print_summary r;
+                     printf "\n"
+                   | Error e ->
+                     eprintf "Backtest error: %s\n" e);
+                  Deferred.return ()))))
+    ; ("list-strategies", Command.async
+        ~summary:"List available strategies"
+        (Command.Param.return (fun () ->
+           printf "Available strategies:\n";
+           List.iter (Backtest_strategies.list ()) ~f:(fun (name, desc) ->
+             printf "  %-20s %s\n" name desc);
+           Deferred.return ())))
+    ; ("test", Command.async
+        ~summary:"Run a quick test with synthetic data"
+        (Command.Param.return (fun () ->
+           let symbol = "BTCUSD" in
+           let start = Backtest.Data_source.parse_time "2024-01-01" in
+           let end_ = Backtest.Data_source.parse_time "2024-03-01" in
+           let interval = Backtest.Interval.hour_1 in
+           let candles = Backtest.Data_source.Synthetic.trending
+               ~symbol ~start ~end_ ~interval
+               ~initial_price:45000. ~trend_pct:0.0005 ~volatility:0.01 ()
+           in
+           printf "Generated %d candles\n\n" (List.length candles);
+
+           let config = Backtest.Engine.Config.create
+               ~initial_balance:10000.
+               ~slippage_pct:0.001
+               ~commission_pct:0.001
+               ()
+           in
+
+           (* Run each strategy sequentially *)
+           let rec run_strategies = function
+             | [] -> Deferred.return ()
+             | name :: rest ->
+               match Backtest_strategies.get name with
+               | None -> run_strategies rest
+               | Some strategy ->
+                 printf "=== %s ===\n" name;
+                 let%bind result = Backtest.Engine.run_packed ~strategy ~config ~candles () in
+                 (match result with
+                  | Ok r ->
+                    printf "Return: %.2f%%  Sharpe: %.2f  Trades: %d\n\n"
+                      (r.metrics.total_return *. 100.)
+                      r.metrics.sharpe_ratio
+                      (List.length r.trades)
+                  | Error e ->
+                    eprintf "Error: %s\n\n" e);
+                 run_strategies rest
+           in
+           run_strategies ["buy-and-hold"; "sma-crossover"; "momentum"])))
+    ]
+
 (* Main command structure *)
 let command =
   Command.group ~summary:"Fluxum - Multi-exchange trading API"
@@ -680,6 +806,7 @@ let command =
     ; ("jupiter", jupiter_command)
     ; ("1inch", oneinch_command)
     ; ("api", api_command)
+    ; ("backtest", backtest_command)
     ]
 
 let () = Command_unix.run command

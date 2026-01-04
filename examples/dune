@@ -100,3 +100,10 @@
  (libraries core async dydx exchange_common)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async))
+
+(executable
+ (name backtest_example)
+ (modules backtest_example)
+ (libraries core async backtest backtest_strategies)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))
