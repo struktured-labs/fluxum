@@ -9,9 +9,11 @@ module Venue = struct
     | Binance
     | Hyperliquid
     | Bitrue
-    | Dydx  (** dYdX v4 - DeFi perpetuals *)
-    | Gmx   (** GMX - DeFi perpetuals (planned) *)
-    | Aave  (** Aave - DeFi lending (planned) *)
+    | Dydx      (** dYdX v4 - DeFi perpetuals *)
+    | Jupiter   (** Jupiter - Solana DEX aggregator *)
+    | OneInch   (** 1inch - EVM DEX aggregator *)
+    | Gmx       (** GMX - DeFi perpetuals (planned) *)
+    | Aave      (** Aave - DeFi lending (planned) *)
     | Compound  (** Compound - DeFi lending (planned) *)
   [@@deriving sexp, compare, equal]
 
@@ -24,12 +26,14 @@ module Venue = struct
     | Hyperliquid -> "Hyperliquid"
     | Bitrue -> "Bitrue"
     | Dydx -> "dYdX"
+    | Jupiter -> "Jupiter"
+    | OneInch -> "1inch"
     | Gmx -> "GMX"
     | Aave -> "Aave"
     | Compound -> "Compound"
 
   let is_defi = function
-    | Dydx | Gmx | Aave | Compound -> true
+    | Dydx | Jupiter | OneInch | Gmx | Aave | Compound -> true
     | Gemini | Kraken | Mexc | Coinbase | Binance | Hyperliquid | Bitrue -> false
 end
 

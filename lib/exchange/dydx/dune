@@ -1,6 +1,6 @@
 (library
  (name dydx)
- (modules cfg common ws order_book dydx)
- (libraries core async yojson ppx_deriving_yojson.runtime exchange_common websocket_curl)
+ (modules cfg common rest ws order_book fluxum_adapter dydx)
+ (libraries core async cohttp-async yojson ppx_deriving_yojson.runtime exchange_common websocket_curl fluxum)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))

@@ -1,0 +1,7 @@
+; Integration tests - run manually with: dune exec ./lib/exchange/dydx/test/integration_test.exe
+(executable
+ (name integration_test)
+ (modules integration_test)
+ (libraries core async dydx fluxum)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))
