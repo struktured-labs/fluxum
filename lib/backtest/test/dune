@@ -1,0 +1,6 @@
+(test
+ (name run_tests)
+ (modules run_tests)
+ (libraries core async backtest backtest_strategies)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))
