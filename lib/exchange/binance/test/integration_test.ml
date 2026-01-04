@@ -1,7 +1,11 @@
-(** Binance Integration Tests - Public REST APIs (no auth required) *)
+(** Binance.US Integration Tests - Public REST APIs (no auth required)
+    Uses Binance.US (api.binance.us) since main Binance is geo-blocked in the US *)
 
 open Core
 open Async
+
+(* Use Binance.US configuration *)
+let cfg = Binance.Cfg.production_us
 
 let tests_run = ref 0
 let tests_passed = ref 0
@@ -23,7 +27,7 @@ let fail msg =
 
 let test_server_time () =
   printf "\n[REST] Server Time\n";
-  Binance.V3.Server_time.request Binance.Cfg.production () >>| function
+  Binance.V3.Server_time.request cfg () >>| function
   | `Ok resp ->
     if Int64.(resp.serverTime > 0L) then
       pass (sprintf "Server time: %Ld" resp.serverTime)
@@ -34,7 +38,7 @@ let test_server_time () =
 
 let test_exchange_info () =
   printf "\n[REST] Exchange Info\n";
-  Binance.V3.Exchange_info.request Binance.Cfg.production { symbol = Some "BTCUSDT" } >>| function
+  Binance.V3.Exchange_info.request cfg { symbol = Some "BTCUSDT" } >>| function
   | `Ok resp ->
     pass (sprintf "Timezone: %s" resp.timezone);
     pass (sprintf "Server time: %Ld" resp.serverTime);
@@ -48,7 +52,7 @@ let test_exchange_info () =
 
 let test_depth () =
   printf "\n[REST] Order Book Depth\n";
-  Binance.V3.Depth.request Binance.Cfg.production { symbol = "BTCUSDT"; limit = Some 5 } >>| function
+  Binance.V3.Depth.request cfg { symbol = "BTCUSDT"; limit = Some 5 } >>| function
   | `Ok resp ->
     let bid_count = List.length resp.bids in
     let ask_count = List.length resp.asks in
@@ -68,7 +72,7 @@ let test_depth () =
 
 let test_ticker_24hr () =
   printf "\n[REST] 24hr Ticker\n";
-  Binance.V3.Ticker_24hr.request Binance.Cfg.production { symbol = "ETHUSDT" } >>| function
+  Binance.V3.Ticker_24hr.request cfg { symbol = "ETHUSDT" } >>| function
   | `Ok resp ->
     pass (sprintf "Symbol: %s" resp.symbol);
     pass (sprintf "Last price: %s" resp.lastPrice);
@@ -81,7 +85,7 @@ let test_ticker_24hr () =
 
 let test_recent_trades () =
   printf "\n[REST] Recent Trades\n";
-  Binance.V3.Recent_trades.request Binance.Cfg.production { symbol = "BTCUSDT"; limit = Some 5 } >>| function
+  Binance.V3.Recent_trades.request cfg { symbol = "BTCUSDT"; limit = Some 5 } >>| function
   | `Ok trades ->
     let count = List.length trades in
     if count > 0 then begin
@@ -103,7 +107,8 @@ let test_recent_trades () =
 
 let run_tests () =
   printf "===========================================\n";
-  printf "Binance Integration Tests (Public APIs)\n";
+  printf "Binance.US Integration Tests (Public APIs)\n";
+  printf "Using: api.binance.us\n";
   printf "===========================================\n";
 
   (* REST API tests *)

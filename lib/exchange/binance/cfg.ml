@@ -17,6 +17,15 @@ let production : (module S) =
     let ws_url = "wss://stream.binance.com:443"
   end)
 
+(** Binance.US configuration - for US-based users *)
+let production_us : (module S) =
+  (module struct
+    let api_key = Sys.getenv "BINANCE_US_API_KEY" |> Option.value ~default:""
+    let api_secret = Sys.getenv "BINANCE_US_API_SECRET" |> Option.value ~default:""
+    let base_url = "api.binance.us"
+    let ws_url = "wss://stream.binance.us:9443"
+  end)
+
 let testnet : (module S) =
   (module struct
     let api_key = Sys.getenv "BINANCE_TESTNET_API_KEY" |> Option.value ~default:""
@@ -27,6 +36,7 @@ let testnet : (module S) =
 
 let of_string = function
   | "production" -> production
+  | "production_us" | "us" -> production_us
   | "testnet" -> testnet
   | env -> failwith (sprintf "Unknown Binance environment: %s" env)
 
