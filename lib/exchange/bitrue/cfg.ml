@@ -28,6 +28,15 @@ let production () : (module S) =
     let ws_user_url = Endpoint.ws_user
   end)
 
+(** Production configuration module (for public endpoints - no auth required) *)
+module Production : S = struct
+  let api_key = Option.value ~default:"" (Sys.getenv "BITRUE_API_KEY")
+  let api_secret = Option.value ~default:"" (Sys.getenv "BITRUE_API_SECRET")
+  let rest_url = Endpoint.rest_url
+  let ws_market_url = Endpoint.ws_market
+  let ws_user_url = Endpoint.ws_user
+end
+
 let of_string = function
   | "production" -> production ()
   | env -> failwith (sprintf "Unknown Bitrue environment: %s" env)

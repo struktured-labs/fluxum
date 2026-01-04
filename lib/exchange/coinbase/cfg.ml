@@ -25,6 +25,14 @@ let production () : (module S) =
     let ws_url = Endpoint.ws_url
   end)
 
+(** Production configuration module (for public endpoints - no auth required) *)
+module Production : S = struct
+  let api_key = Option.value ~default:"" (Sys.getenv "COINBASE_API_KEY")
+  let api_secret = Option.value ~default:"" (Sys.getenv "COINBASE_API_SECRET")
+  let rest_url = Endpoint.rest_url
+  let ws_url = Endpoint.ws_url
+end
+
 (** Sandbox/testnet configuration *)
 let sandbox () : (module S) =
   (module struct
