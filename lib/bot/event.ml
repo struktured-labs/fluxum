@@ -36,7 +36,6 @@ module Event_id = struct
     sprintf "%s-%d" timestamp id
 
   let to_string t = t
-  let of_string s = s
 end
 
 (** Venue identifier - matches Types.Venue but with bin_io *)

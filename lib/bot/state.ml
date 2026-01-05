@@ -10,6 +10,18 @@ open Core
 (** Re-export Event.Time for convenience *)
 module Time = Event.Time
 
+(** Convert Event.Venue to Entry.Venue *)
+let event_venue_to_entry_venue (venue : Event.Venue.t) : Unified_ledger.Entry.Venue.t =
+  match Event.Venue.to_fluxum_venue venue with
+  | Some v -> Unified_ledger.Entry.Venue.of_fluxum_venue v
+  | None ->
+    match venue with
+    | Event.Venue.Gemini -> Unified_ledger.Entry.Venue.Gemini
+    | Kraken -> Kraken | Mexc -> Mexc | Coinbase -> Coinbase
+    | Binance -> Binance | Hyperliquid -> Hyperliquid | Bitrue -> Bitrue
+    | Dydx -> Dydx | Jupiter -> Jupiter | OneInch -> OneInch
+    | Other s -> Other s
+
 (** Connection state per venue *)
 module Connection = struct
   type status =
@@ -231,23 +243,7 @@ let apply_event t (envelope : Event.envelope) =
           (Map.set t.active_orders ~key:order_id ~data:order, order.symbol, order.side)
     in
     (* Update ledger *)
-    let venue_entry = match Event.Venue.to_fluxum_venue venue with
-      | Some v -> Unified_ledger.Entry.Venue.of_fluxum_venue v
-      | None ->
-        (* Convert Event.Venue directly to Entry.Venue *)
-        match venue with
-        | Event.Venue.Gemini -> Unified_ledger.Entry.Venue.Gemini
-        | Kraken -> Unified_ledger.Entry.Venue.Kraken
-        | Mexc -> Unified_ledger.Entry.Venue.Mexc
-        | Coinbase -> Unified_ledger.Entry.Venue.Coinbase
-        | Binance -> Unified_ledger.Entry.Venue.Binance
-        | Hyperliquid -> Unified_ledger.Entry.Venue.Hyperliquid
-        | Bitrue -> Unified_ledger.Entry.Venue.Bitrue
-        | Dydx -> Unified_ledger.Entry.Venue.Dydx
-        | Jupiter -> Unified_ledger.Entry.Venue.Jupiter
-        | OneInch -> Unified_ledger.Entry.Venue.OneInch
-        | Other s -> Unified_ledger.Entry.Venue.Other s
-    in
+    let venue_entry = event_venue_to_entry_venue venue in
     let fluxum_side = Event.Side.to_fluxum_side side in
     let ledger, _ = Unified_ledger.Ledger.apply_fill t.ledger
       ~symbol ~venue:venue_entry ~price:fill_price ~qty:fill_qty ~side:fluxum_side ~fee
@@ -267,23 +263,7 @@ let apply_event t (envelope : Event.envelope) =
         } in
         (Map.set t.active_orders ~key:order_id ~data:order, order.symbol, order.side)
     in
-    let venue_entry = match Event.Venue.to_fluxum_venue venue with
-      | Some v -> Unified_ledger.Entry.Venue.of_fluxum_venue v
-      | None ->
-        (* Convert Event.Venue directly to Entry.Venue *)
-        match venue with
-        | Event.Venue.Gemini -> Unified_ledger.Entry.Venue.Gemini
-        | Kraken -> Unified_ledger.Entry.Venue.Kraken
-        | Mexc -> Unified_ledger.Entry.Venue.Mexc
-        | Coinbase -> Unified_ledger.Entry.Venue.Coinbase
-        | Binance -> Unified_ledger.Entry.Venue.Binance
-        | Hyperliquid -> Unified_ledger.Entry.Venue.Hyperliquid
-        | Bitrue -> Unified_ledger.Entry.Venue.Bitrue
-        | Dydx -> Unified_ledger.Entry.Venue.Dydx
-        | Jupiter -> Unified_ledger.Entry.Venue.Jupiter
-        | OneInch -> Unified_ledger.Entry.Venue.OneInch
-        | Other s -> Unified_ledger.Entry.Venue.Other s
-    in
+    let venue_entry = event_venue_to_entry_venue venue in
     let fluxum_side = Event.Side.to_fluxum_side side in
     let ledger, _ = Unified_ledger.Ledger.apply_fill t.ledger
       ~symbol ~venue:venue_entry ~price:fill_price ~qty:fill_qty ~side:fluxum_side ~fee

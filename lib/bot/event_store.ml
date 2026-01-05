@@ -241,19 +241,6 @@ module Reader = struct
     );
     return pipe_reader
 
-  let read_range t ~start ~end_ =
-    let%bind all = read_all t in
-    let filtered =
-      List.filter all ~f:(fun env ->
-        Time_ns.(env.Event.timestamp >= start && env.Event.timestamp <= end_)
-      )
-    in
-    return filtered
-
-  let tail t =
-    (* For tailing, we'd need inotify - simplified version just reads existing *)
-    stream t
-
   let close t =
     match t.reader with
     | None -> return ()

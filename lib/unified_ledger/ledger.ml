@@ -205,8 +205,3 @@ let report t =
   );
   Buffer.add_string buf "====================================\n";
   Buffer.contents buf
-
-(** Create pipe for streaming ledger updates *)
-let updates_pipe _t =
-  let reader, writer = Pipe.create () in
-  (reader, writer)

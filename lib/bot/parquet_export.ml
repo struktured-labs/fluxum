@@ -314,49 +314,6 @@ let export ~events ~config =
     export_csv ~events ~output_path:(output_path ^ ".csv")
       ~include_header:config.include_header
 
-(** Streaming export with config *)
-let streaming_export ~events ~config =
-  let output_path = config.Config.output_path in
-  match config.format with
-  | Csv ->
-    streaming_export_csv ~events ~output_path ~include_header:config.include_header
-  | Json_lines ->
-    streaming_export_jsonl ~events ~output_path
-  | Arrow_ipc ->
-    streaming_export_csv ~events ~output_path:(output_path ^ ".csv")
-      ~include_header:config.include_header
-
-(** Convert event store to export format *)
-let convert_store ~input_path ~output_path ~format =
-  let%bind reader = Event_store.Reader.open_ ~path:input_path in
-  let%bind events = Event_store.Reader.read_all reader in
-  let%bind () = Event_store.Reader.close reader in
-  let config = { Config.default with output_path; format } in
-  export ~events ~config
-
-(** Export specific event types *)
-let export_filtered ~events ~output_path ~filter =
-  let filtered = List.filter events ~f:filter in
-  export_csv ~events:filtered ~output_path ~include_header:true
-
-(** Export only order events *)
-let export_orders ~events ~output_path =
-  export_filtered ~events ~output_path ~filter:(fun env ->
-    match env.Event.event with
-    | Event.Order _ -> true
-    | _ -> false
-  )
-
-(** Export only trade events *)
-let export_trades ~events ~output_path =
-  export_filtered ~events ~output_path ~filter:(fun env ->
-    match env.Event.event with
-    | Event.Market (Trade _) -> true
-    | Event.Order (Order_filled _) -> true
-    | Event.Order (Order_partially_filled _) -> true
-    | _ -> false
-  )
-
 (** Python helper script for loading exported data *)
 let python_helper_script = {|
 # Python script for loading Fluxum event exports
