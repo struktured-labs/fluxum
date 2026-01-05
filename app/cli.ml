@@ -792,6 +792,214 @@ let backtest_command =
            run_strategies ["buy-and-hold"; "sma-crossover"; "momentum"])))
     ]
 
+(* Bot command group *)
+let bot_command =
+  Command.group ~summary:"Trading bot framework commands"
+    [ ("start", Command.async
+        ~summary:"Start a trading bot with a strategy"
+        (Command.Param.(
+          let bot_id = flag "--bot-id" (optional_with_default "fluxum-bot" string)
+              ~doc:"STRING Bot identifier"
+          and symbols = flag "--symbols" (optional_with_default "BTCUSD" string)
+              ~doc:"STRING Comma-separated symbols (default: BTCUSD)"
+          and venue = flag "--venue" (optional_with_default "gemini" string)
+              ~doc:"STRING Exchange venue (default: gemini)"
+          and event_path = flag "--events" (optional_with_default "./events" string)
+              ~doc:"PATH Event store path (default: ./events)"
+          and dashboard = flag "--dashboard" no_arg
+              ~doc:" Enable TUI dashboard"
+          in
+          return (fun bot_id symbols venue event_path dashboard () ->
+            let symbols = String.split symbols ~on:',' in
+            let venue = match String.lowercase venue with
+              | "gemini" -> Bot.Event.Venue.Gemini
+              | "kraken" -> Bot.Event.Venue.Kraken
+              | "mexc" -> Bot.Event.Venue.Mexc
+              | "binance" -> Bot.Event.Venue.Binance
+              | "coinbase" -> Bot.Event.Venue.Coinbase
+              | "hyperliquid" -> Bot.Event.Venue.Hyperliquid
+              | "bitrue" -> Bot.Event.Venue.Bitrue
+              | "dydx" -> Bot.Event.Venue.Dydx
+              | other -> Bot.Event.Venue.Other other
+            in
+            let config = Bot.Engine.Config.{
+              default with
+              bot_id;
+              symbols;
+              venues = [venue];
+              event_store_path = event_path;
+              enable_dashboard = dashboard;
+            } in
+            printf "Starting bot '%s' with symbols: %s\n" bot_id (String.concat ~sep:", " symbols);
+            printf "Event store: %s\n" event_path;
+            let%bind engine = Bot.Engine.create config in
+
+            (* Set up noop strategy for now *)
+            let strategy = Bot.Engine.Strategy_wrapper.wrap
+              (module Bot.Strategy_intf.Noop) ()
+            in
+            Bot.Engine.set_strategy engine strategy;
+
+            (* Start the engine *)
+            let%bind result = Bot.Engine.start engine in
+            (match result with
+            | Ok () ->
+              printf "Bot started successfully!\n";
+              (match dashboard with
+              | true ->
+                let dash = Bot.Dashboard.create Bot.Dashboard.Config.default in
+                Bot.Dashboard.run_with_engine dash engine
+              | false ->
+                (* Keep running until Ctrl-C *)
+                printf "Press Ctrl+C to stop...\n";
+                Deferred.never ())
+            | Error e ->
+              eprintf "Failed to start: %s\n" (Error.to_string_hum e);
+              Deferred.unit))
+          <*> bot_id <*> symbols <*> venue <*> event_path <*> dashboard
+        )))
+    ; ("status", Command.async
+        ~summary:"Show status of a bot from event store"
+        (Command.Param.(
+          let bot_id = flag "--bot-id" (required string)
+              ~doc:"STRING Bot identifier"
+          and event_path = flag "--events" (optional_with_default "./events" string)
+              ~doc:"PATH Event store path (default: ./events)"
+          in
+          return (fun bot_id event_path () ->
+            printf "Replaying events for bot '%s'...\n" bot_id;
+            let%bind state = Bot.Engine.replay ~base_path:event_path ~bot_id in
+            let summary = Bot.State.summary state in
+            printf "%s\n" summary;
+            printf "\n%s" (Bot.Dashboard.text_summary state);
+            Deferred.unit)
+          <*> bot_id <*> event_path
+        )))
+    ; ("replay", Command.async
+        ~summary:"Replay events to reconstruct state"
+        (Command.Param.(
+          let bot_id = flag "--bot-id" (required string)
+              ~doc:"STRING Bot identifier"
+          and event_path = flag "--events" (optional_with_default "./events" string)
+              ~doc:"PATH Event store path (default: ./events)"
+          and output = flag "--output" (optional string)
+              ~doc:"FILE Output state to file"
+          in
+          return (fun bot_id event_path output () ->
+            printf "Replaying events for bot '%s' from %s...\n" bot_id event_path;
+            let%bind state = Bot.Engine.replay ~base_path:event_path ~bot_id in
+            let summary = Bot.State.summary state in
+            printf "\nFinal state:\n%s\n" summary;
+            (match output with
+            | Some path ->
+              let contents = Bot.Dashboard.text_summary state in
+              let%bind () = Writer.save path ~contents in
+              printf "State saved to %s\n" path;
+              Deferred.unit
+            | None ->
+              Deferred.unit))
+          <*> bot_id <*> event_path <*> output
+        )))
+    ; ("export", Command.async
+        ~summary:"Export events to CSV/JSON for Python analysis"
+        (Command.Param.(
+          let bot_id = flag "--bot-id" (required string)
+              ~doc:"STRING Bot identifier"
+          and event_path = flag "--events" (optional_with_default "./events" string)
+              ~doc:"PATH Event store path (default: ./events)"
+          and output = flag "--output" (required string)
+              ~doc:"FILE Output file path"
+          and format = flag "--format" (optional_with_default "csv" string)
+              ~doc:"FORMAT Output format: csv, jsonl (default: csv)"
+          in
+          return (fun bot_id event_path output format () ->
+            printf "Exporting events for bot '%s'...\n" bot_id;
+            let%bind files = Bot.Event_store.list_event_files ~base_path:event_path ~bot_id in
+            (match files with
+            | [] ->
+              eprintf "No event files found for bot '%s' in %s\n" bot_id event_path;
+              Deferred.unit
+            | _ ->
+              printf "Found %d event files\n" (List.length files);
+              let%bind all_events =
+                Deferred.List.concat_map files ~how:`Sequential ~f:(fun path ->
+                  let%bind reader = Bot.Event_store.Reader.open_ ~path in
+                  let%bind events = Bot.Event_store.Reader.read_all reader in
+                  let%bind () = Bot.Event_store.Reader.close reader in
+                  Deferred.return events)
+              in
+              printf "Total events: %d\n" (List.length all_events);
+              let format = match String.lowercase format with
+                | "jsonl" | "json" -> Bot.Parquet_export.Config.Json_lines
+                | _ -> Bot.Parquet_export.Config.Csv
+              in
+              let config = Bot.Parquet_export.Config.{ default with output_path = output; format } in
+              let%bind () = Bot.Parquet_export.export ~events:all_events ~config in
+              printf "Exported to %s\n" output;
+              (* Also export summary stats *)
+              let stats = Bot.Parquet_export.Stats.of_events all_events in
+              printf "\n%s" (Bot.Parquet_export.Stats.to_string stats);
+              Deferred.unit))
+          <*> bot_id <*> event_path <*> output <*> format
+        )))
+    ; ("stats", Command.async
+        ~summary:"Show statistics for event store"
+        (Command.Param.(
+          let bot_id = flag "--bot-id" (required string)
+              ~doc:"STRING Bot identifier"
+          and event_path = flag "--events" (optional_with_default "./events" string)
+              ~doc:"PATH Event store path (default: ./events)"
+          in
+          return (fun bot_id event_path () ->
+            printf "Getting stats for bot '%s'...\n\n" bot_id;
+            let%bind stats = Bot.Event_store.Stats.for_bot ~base_path:event_path ~bot_id in
+            printf "Bot ID: %s\n" stats.bot_id;
+            printf "Total Events: %d\n" stats.total_events;
+            printf "Total Size: %d bytes (%.2f MB)\n"
+              stats.total_bytes
+              (Float.of_int stats.total_bytes /. 1_000_000.);
+            (match stats.time_range with
+            | Some (first, last) ->
+              printf "Time Range: %s to %s\n"
+                (Bot.Event.Time.to_string first)
+                (Bot.Event.Time.to_string last)
+            | None -> ());
+            printf "\nFiles:\n";
+            List.iter stats.files ~f:(fun f ->
+              printf "  %s: %d events, %d bytes\n" f.path f.event_count f.size_bytes);
+            Deferred.unit)
+          <*> bot_id <*> event_path
+        )))
+    ; ("dashboard", Command.async
+        ~summary:"Show dashboard for a running or completed bot"
+        (Command.Param.(
+          let bot_id = flag "--bot-id" (required string)
+              ~doc:"STRING Bot identifier"
+          and event_path = flag "--events" (optional_with_default "./events" string)
+              ~doc:"PATH Event store path (default: ./events)"
+          in
+          return (fun bot_id event_path () ->
+            let%bind state = Bot.Engine.replay ~base_path:event_path ~bot_id in
+            let dash = Bot.Dashboard.create Bot.Dashboard.Config.default in
+            let output = Bot.Dashboard.render_once dash state in
+            print_string output;
+            Deferred.unit)
+          <*> bot_id <*> event_path
+        )))
+    ; ("python-helper", Command.async
+        ~summary:"Generate Python helper script for loading exported data"
+        (Command.Param.(
+          let output_dir = flag "--output" (optional_with_default "." string)
+              ~doc:"DIR Output directory (default: .)"
+          in
+          return (fun output_dir () ->
+            let%bind () = Bot.Parquet_export.write_python_helper ~output_dir in
+            printf "Python helper script written to %s/load_events.py\n" output_dir;
+            Deferred.unit)
+          <*> output_dir
+        )))
+    ]
+
 (* Main command structure *)
 let command =
   Command.group ~summary:"Fluxum - Multi-exchange trading API"
@@ -807,6 +1015,7 @@ let command =
     ; ("1inch", oneinch_command)
     ; ("api", api_command)
     ; ("backtest", backtest_command)
+    ; ("bot", bot_command)
     ]
 
 let () = Command_unix.run command

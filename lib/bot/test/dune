@@ -1,0 +1,5 @@
+(library
+ (name test_bot)
+ (inline_tests)
+ (libraries bot core async)
+ (preprocess (pps ppx_jane ppx_expect)))

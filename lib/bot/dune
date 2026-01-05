@@ -1,0 +1,6 @@
+(library
+ (name bot)
+ (public_name fluxum.bot)
+ (libraries core async bin_prot fluxum unified_ledger)
+ (preprocess (pps ppx_jane ppx_bin_prot))
+ (flags :standard -open Core -open Async))

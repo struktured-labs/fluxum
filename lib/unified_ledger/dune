@@ -1,0 +1,6 @@
+(library
+ (name unified_ledger)
+ (public_name fluxum.unified_ledger)
+ (libraries core async bin_prot fluxum)
+ (preprocess (pps ppx_jane ppx_bin_prot))
+ (flags :standard -open Core -open Async))
