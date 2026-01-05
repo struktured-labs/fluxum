@@ -94,6 +94,7 @@ See [Architecture Guide](guides/ARCHITECTURE.md) for details.
 
 - **[Architecture](guides/ARCHITECTURE.md)** - System architecture and design patterns
 - **[Order Book](guides/ORDER_BOOK.md)** - Complete order book usage guide
+- **[Bot Framework](guides/BOT_FRAMEWORK.md)** - Trading bot infrastructure with event sourcing
 - **[WebSocket](guides/WEBSOCKET.md)** - WebSocket streaming guide (TODO)
 - **[Authentication](guides/AUTHENTICATION.md)** - API authentication guide (TODO)
 - **[Testing](guides/TESTING.md)** - Testing guide (TODO)
@@ -104,6 +105,18 @@ See [Architecture Guide](guides/ARCHITECTURE.md) for details.
 - **Arbitrage Detection** - Cross-exchange opportunities (TODO)
 - **Custom Analytics** - Building custom indicators (TODO)
 - **Performance Tuning** - Optimization tips (TODO)
+
+### Bot Framework
+
+The bot framework provides a complete infrastructure for building trading bots:
+
+- **Event Sourcing** - All state changes captured as events for replay/audit
+- **Strategy Interface** - Clean separation between strategy logic and infrastructure
+- **P&L Tracking** - Unified ledger for position and profit tracking
+- **Python Export** - Export events to CSV/JSON for pandas analysis
+- **TUI Dashboard** - Real-time monitoring interface
+
+See the [Bot Framework Guide](guides/BOT_FRAMEWORK.md) for details.
 
 ## Exchange-Specific Documentation
 
