@@ -25,10 +25,9 @@ module Subscribe = struct
           ~doc:"Use private channel (for own-orders)"
         in
         return (fun channel pairs interval depth is_private () ->
-          if is_private then
-            printf "Private channel subscription would connect to: %s\n" Ws.Endpoint.private_url
-          else
-            printf "Public channel subscription would connect to: %s\n" Ws.Endpoint.public_url;
+          (match is_private with
+           | true -> printf "Private channel subscription would connect to: %s\n" Ws.Endpoint.private_url
+           | false -> printf "Public channel subscription would connect to: %s\n" Ws.Endpoint.public_url);
           
           printf "Channel: %s\n" channel;
           (match pairs with
@@ -114,17 +113,20 @@ module Stream = struct
           (* Print the subscription payload that would be sent *)
           let is_v2 = String.is_substring url ~substring:"/v2" in
           let normalize_symbol s =
-            if String.mem s '/' then s
-            else
+            match String.mem s '/' with
+            | true -> s
+            | false ->
               let len = String.length s in
-              if len > 3 then
+              match len > 3 with
+              | true ->
                 let base = String.sub s ~pos:0 ~len:(len - 3) in
                 let quote = String.sub s ~pos:(len - 3) ~len:3 in
                 base ^ "/" ^ quote
-              else s
+              | false -> s
           in
           let subscription_payload =
-            if is_v2 then
+            match is_v2 with
+            | true ->
               let symbols = List.map pair_list ~f:normalize_symbol in
               let params =
                 `Assoc [
@@ -138,7 +140,7 @@ module Stream = struct
                 ("method", `String "subscribe");
                 ("params", params)
               ])
-            else
+            | false ->
               match channel with
               | "ticker" -> Ws.Public.subscribe_ticker pair_list
               | "spread" -> Ws.Public.subscribe_spread pair_list
@@ -166,8 +168,9 @@ module Stream = struct
             Pipe.iter message_stream ~f:(fun msg ->
               incr message_count;
               printf "[%d] %s\n" !message_count msg;
-              if !message_count >= limit then
-                Pipe.close_read message_stream;
+              (match !message_count >= limit with
+               | true -> Pipe.close_read message_stream
+               | false -> ());
               Deferred.unit)
             >>= fun () ->
             Market_data.close client

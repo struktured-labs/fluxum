@@ -15,7 +15,7 @@ let fail msg =
   printf "  X FAIL: %s\n" msg
 
 let test_assert name condition =
-  if condition then pass name else fail name
+  match condition with true -> pass name | false -> fail name
 
 (* ============================================================ *)
 (* Configuration Tests *)
@@ -468,4 +468,4 @@ let () =
   printf "Failed:       %d X\n" !tests_failed;
   printf "===========================================\n";
 
-  if !tests_failed > 0 then exit 1
+  (match !tests_failed > 0 with true -> exit 1 | false -> ())

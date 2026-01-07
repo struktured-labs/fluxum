@@ -150,10 +150,9 @@ let parse_message (msg : string) : Message.t =
 let connect ?(url = Endpoint.spot_stream) ~streams () : t Deferred.Or_error.t =
   let stream_names = List.map streams ~f:Stream.to_stream_name in
   let uri =
-    if List.length stream_names = 1 then
-      Uri.of_string (sprintf "%s/ws/%s" url (List.hd_exn stream_names))
-    else
-      Uri.of_string (sprintf "%s/stream?streams=%s" url (String.concat ~sep:"/" stream_names))
+    match List.length stream_names = 1 with
+    | true -> Uri.of_string (sprintf "%s/ws/%s" url (List.hd_exn stream_names))
+    | false -> Uri.of_string (sprintf "%s/stream?streams=%s" url (String.concat ~sep:"/" stream_names))
   in
 
   Deferred.Or_error.try_with (fun () ->

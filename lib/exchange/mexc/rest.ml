@@ -122,7 +122,8 @@ module Request (Operation : Operation.S) = struct
 
     (* Add timestamp and signature for authenticated endpoints *)
     let params, headers =
-      if Operation.requires_auth then
+      match Operation.requires_auth with
+      | true ->
         let timestamp = Signature.generate_timestamp () in
         let params_with_ts = base_params @ [ ("timestamp", timestamp) ] in
         let signature =
@@ -136,7 +137,7 @@ module Request (Operation : Operation.S) = struct
             ]
         in
         (final_params, headers)
-      else
+      | false ->
         let headers =
           Cohttp.Header.of_list [ ("Content-Type", "application/json") ]
         in

@@ -14,11 +14,10 @@ let hmac_sha512 ~secret ~message =
      where K' is key padded to block size *)
   let block_size = 128 in (* SHA512 block size is 128 bytes *)
   
-  let secret_key = 
-    if String.length secret > block_size then
-      Digestif.SHA512.digest_string secret |> Digestif.SHA512.to_raw_string
-    else
-      secret ^ String.make (block_size - String.length secret) '\x00'
+  let secret_key =
+    match String.length secret > block_size with
+    | true -> Digestif.SHA512.digest_string secret |> Digestif.SHA512.to_raw_string
+    | false -> secret ^ String.make (block_size - String.length secret) '\x00'
   in
   
   let ipad = String.init block_size ~f:(fun i ->

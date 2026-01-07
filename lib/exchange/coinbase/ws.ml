@@ -278,12 +278,12 @@ let connect ?(url = Endpoint.advanced_trade) ?(streams = []) () : t Deferred.Or_
     let reader, writer = Websocket.pipes ws in
 
     (* Subscribe to requested streams *)
-    (if not (List.is_empty streams) then
-      let msg = Stream.to_subscribe_message streams in
-      let msg_str = Yojson.Safe.to_string msg in
-      Pipe.write_if_open writer msg_str
-    else
-      Deferred.unit)
+    (match List.is_empty streams with
+     | true -> Deferred.unit
+     | false ->
+       let msg = Stream.to_subscribe_message streams in
+       let msg_str = Yojson.Safe.to_string msg in
+       Pipe.write_if_open writer msg_str)
     >>| fun () ->
     { uri; reader; writer }
   )

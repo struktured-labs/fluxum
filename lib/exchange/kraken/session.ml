@@ -181,11 +181,11 @@ module Events = struct
               match book_result with
               | Ok book ->
                 let spot = (Order_book.Book.best_bid book).price in
-                if Float.(spot > 0.) then begin
-                  entry_ref := Ledger.Entry.update_spot !entry_ref spot;
-                  Pipe.write ledger_writer !entry_ref
-                end else
-                  Deferred.unit
+                (match Float.(spot > 0.) with
+                 | true ->
+                   entry_ref := Ledger.Entry.update_spot !entry_ref spot;
+                   Pipe.write ledger_writer !entry_ref
+                 | false -> Deferred.unit)
               | Error _ -> Deferred.unit
             )
           );

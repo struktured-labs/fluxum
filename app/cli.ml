@@ -409,7 +409,7 @@ let api_command =
             | Ok orders ->
               printf "Open Orders (%s):\n" exchange;
               List.iter orders ~f:print_order;
-              if List.is_empty orders then printf "  (none)\n";
+              (match List.is_empty orders with true -> printf "  (none)\n" | false -> ());
               Deferred.unit
             | Error err ->
               eprintf "Error: %s\n" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t err));
@@ -433,7 +433,7 @@ let api_command =
             | Ok orders ->
               printf "Order History (%s):\n" exchange;
               List.iter orders ~f:print_order;
-              if List.is_empty orders then printf "  (none)\n";
+              (match List.is_empty orders with true -> printf "  (none)\n" | false -> ());
               Deferred.unit
             | Error err ->
               eprintf "Error: %s\n" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t err));
@@ -457,7 +457,7 @@ let api_command =
             | Ok trades ->
               printf "My Trades (%s - %s):\n" exchange symbol;
               List.iter trades ~f:print_trade;
-              if List.is_empty trades then printf "  (none)\n";
+              (match List.is_empty trades with true -> printf "  (none)\n" | false -> ());
               Deferred.unit
             | Error err ->
               eprintf "Error: %s\n" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t err));
@@ -496,9 +496,11 @@ let api_command =
             | Ok balances ->
               printf "Balances (%s):\n" exchange;
               List.iter balances ~f:(fun b ->
-                if Float.(b.total > 0.) then
+                match Float.(b.total > 0.) with
+                | true ->
                   printf "  %s: %.8f (available: %.8f, locked: %.8f)\n"
-                    b.currency b.total b.available b.locked);
+                    b.currency b.total b.available b.locked
+                | false -> ());
               Deferred.unit
             | Error err ->
               eprintf "Error: %s\n" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t err));

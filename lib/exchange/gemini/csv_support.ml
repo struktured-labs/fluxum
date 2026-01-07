@@ -37,10 +37,9 @@ module Optional = struct
       let to_string t = Option.value_map ~default:C.null t ~f:C.to_string
 
       let of_string s =
-        if String.equal C.null s then
-          None
-        else
-          Some (C.of_string s)
+        match String.equal C.null s with
+        | true -> None
+        | false -> Some (C.of_string s)
     end
 
     include T
@@ -193,10 +192,9 @@ let maybe_write_header out filename header =
   Option.iter
     ( try
         let stat = Core_unix.stat filename in
-        if Int64.(equal stat.st_size zero) then
-          Some header
-        else
-          None
+        match Int64.(equal stat.st_size zero) with
+        | true -> Some header
+        | false -> None
       with
     | Unix.Unix_error (Unix.Error.ENOENT, "stat", _f) -> Some header )
     ~f:(write_header out)

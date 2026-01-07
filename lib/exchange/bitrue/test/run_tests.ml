@@ -7,51 +7,51 @@ let tests_failed = ref 0
 
 let assert_string_equal expected actual msg =
   incr tests_run;
-  if not (String.equal expected actual) then begin
+  match String.equal expected actual with
+  | false ->
     incr tests_failed;
     printf "  ✗ FAIL: %s\n     Expected: %s, Got: %s\n" msg expected actual;
     false
-  end else begin
+  | true ->
     incr tests_passed;
     printf "  ✓ %s\n" msg;
     true
-  end
 
 let assert_float_equal ?(tolerance = 0.0001) expected actual msg =
   incr tests_run;
-  if Float.(abs (expected - actual) > tolerance) then begin
+  match Float.(abs (expected - actual) > tolerance) with
+  | true ->
     incr tests_failed;
     printf "  ✗ FAIL: %s\n     Expected: %.8f, Got: %.8f\n" msg expected actual;
     false
-  end else begin
+  | false ->
     incr tests_passed;
     printf "  ✓ %s\n" msg;
     true
-  end
 
 let assert_int64_equal expected actual msg =
   incr tests_run;
-  if not (Int64.equal expected actual) then begin
+  match Int64.equal expected actual with
+  | false ->
     incr tests_failed;
     printf "  ✗ FAIL: %s\n     Expected: %Ld, Got: %Ld\n" msg expected actual;
     false
-  end else begin
+  | true ->
     incr tests_passed;
     printf "  ✓ %s\n" msg;
     true
-  end
 
 let assert_true condition msg =
   incr tests_run;
-  if not condition then begin
+  match condition with
+  | false ->
     incr tests_failed;
     printf "  ✗ FAIL: %s\n" msg;
     false
-  end else begin
+  | true ->
     incr tests_passed;
     printf "  ✓ %s\n" msg;
     true
-  end
 
 (* Order Book Tests *)
 let test_order_book_empty () =
@@ -193,4 +193,4 @@ let () =
   printf "Success rate: %.1f%%\n" (Float.of_int !tests_passed /. Float.of_int !tests_run *. 100.0);
   printf "===========================================\n";
 
-  if !tests_failed > 0 then exit 1
+  (match !tests_failed > 0 with true -> exit 1 | false -> ())

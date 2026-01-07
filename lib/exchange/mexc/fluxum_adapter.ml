@@ -285,7 +285,7 @@ module Adapter = struct
       }
 
     let trade (t : Native.Trade.t) : Types.Trade.t =
-      let side = if t.isBuyer then Types.Side.Buy else Types.Side.Sell in
+      let side = match t.isBuyer with true -> Types.Side.Buy | false -> Types.Side.Sell in
       { venue = Venue.t
       ; symbol = t.symbol
       ; side

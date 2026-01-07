@@ -7,10 +7,9 @@ let hmac_sha256 ~secret ~message =
   let block_size = 64 in (* SHA256 block size is 64 bytes *)
 
   let secret_key =
-    if String.length secret > block_size then
-      Digestif.SHA256.digest_string secret |> Digestif.SHA256.to_raw_string
-    else
-      secret ^ String.make (block_size - String.length secret) '\x00'
+    match String.length secret > block_size with
+    | true -> Digestif.SHA256.digest_string secret |> Digestif.SHA256.to_raw_string
+    | false -> secret ^ String.make (block_size - String.length secret) '\x00'
   in
 
   let ipad = String.init block_size ~f:(fun i ->

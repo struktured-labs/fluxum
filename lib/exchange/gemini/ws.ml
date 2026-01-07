@@ -224,11 +224,9 @@ module Impl (Channel : CHANNEL) :
         |> Sexp.to_string_hum |> sprintf "%s\n"
       in
       let append_to_csv =
-        if no_csv then
-          fun _ ->
-        ()
-        else
-          fun response ->
+        match no_csv with
+        | true -> fun _ -> ()
+        | false -> fun response ->
         let events = Channel.events_of_response response in
         let all = Channel.Csv_of_event.write_all ?dir:csv_dir events in
         let tags =

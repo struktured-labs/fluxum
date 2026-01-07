@@ -855,8 +855,9 @@ module Recent_trades = struct
         in
         let trades =
           List.filter_map pairs ~f:(fun (name, json) ->
-            if String.equal name "last" then None
-            else
+            match String.equal name "last" with
+            | true -> None
+            | false ->
               match json with
               | `List lst ->
                 let parsed = List.filter_map lst ~f:(fun j ->

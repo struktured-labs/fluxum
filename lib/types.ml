@@ -242,15 +242,17 @@ module Order_book = struct
   let mid_price t =
     let bid = best_bid t in
     let ask = best_ask t in
-    if Float.(bid.price = 0. || ask.price = 0.) then 0.
-    else (bid.price +. ask.price) /. 2.
+    match Float.(bid.price = 0. || ask.price = 0.) with
+    | true -> 0.
+    | false -> (bid.price +. ask.price) /. 2.
 
   (** Calculate spread: best_ask - best_bid *)
   let spread t =
     let bid = best_bid t in
     let ask = best_ask t in
-    if Float.(bid.price = 0. || ask.price = 0.) then 0.
-    else ask.price -. bid.price
+    match Float.(bid.price = 0. || ask.price = 0.) with
+    | true -> 0.
+    | false -> ask.price -. bid.price
 
   (** Get top N bids *)
   let best_n_bids t ~n =

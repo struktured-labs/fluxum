@@ -14,30 +14,30 @@ let tests_failed = ref 0
 
 let assert_float_equal ?(tolerance = 0.0001) expected actual msg =
   incr tests_run;
-  if Float.(abs (expected - actual) > tolerance) then begin
+  match Float.(abs (expected - actual) > tolerance) with
+  | true ->
     incr tests_failed;
     printf "  ✗ FAIL: %s\n     Expected: %.8f, Got: %.8f\n" msg expected actual;
     false
-  end else begin
+  | false ->
     incr tests_passed;
     printf "  ✓ %s\n" msg;
     true
-  end
 
 let assert_equal ~equal ~sexp_of_t expected actual msg =
   incr tests_run;
-  if not (equal expected actual) then begin
+  match equal expected actual with
+  | false ->
     incr tests_failed;
     printf "  ✗ FAIL: %s\n     Expected: %s\n     Got: %s\n"
       msg
       (Sexp.to_string (sexp_of_t expected))
       (Sexp.to_string (sexp_of_t actual));
     false
-  end else begin
+  | true ->
     incr tests_passed;
     printf "  ✓ %s\n" msg;
     true
-  end
 
 (** ========== LEDGER TESTS ========== *)
 
@@ -518,10 +518,10 @@ let () =
   printf "╚════════════════════════════════════════════════════════╝\n";
   printf "\n";
 
-  if !tests_failed > 0 then begin
-    printf "❌ TEST SUITE FAILED\n\n";
-    exit 1
-  end else begin
-    printf "✅ ALL TESTS PASSED!\n\n";
-    exit 0
-  end
+  (match !tests_failed > 0 with
+   | true ->
+     printf "❌ TEST SUITE FAILED\n\n";
+     exit 1
+   | false ->
+     printf "✅ ALL TESTS PASSED!\n\n";
+     exit 0)

@@ -36,12 +36,12 @@ let connect ~url =
         let conn = Curl.init () in
         (* Convert wss:// to https:// for CONNECT_ONLY mode *)
         let connect_url =
-          if String.is_prefix url ~prefix:"wss://" then
-            "https://" ^ String.drop_prefix url 6
-          else if String.is_prefix url ~prefix:"ws://" then
-            "http://" ^ String.drop_prefix url 5
-          else
-            url
+          match String.is_prefix url ~prefix:"wss://" with
+          | true -> "https://" ^ String.drop_prefix url 6
+          | false ->
+            match String.is_prefix url ~prefix:"ws://" with
+            | true -> "http://" ^ String.drop_prefix url 5
+            | false -> url
         in
         Curl.set_url conn connect_url;
         Curl.set_connectonly conn true;

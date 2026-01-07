@@ -324,11 +324,12 @@ module Make (C : Cfg.S) = struct
         Writer.open_file ~append:true path >>= fun w ->
         let header_written = ref (not (header_needed path exists)) in
         Hashtbl.set writer_cache ~key:path ~data:(w, header_written);
-        ( if not !header_written then (
-            Writer.write_line w header;
-            header_written := true;
-            Writer.flushed w )
-          else Deferred.unit )
+        (match !header_written with
+         | true -> Deferred.unit
+         | false ->
+           Writer.write_line w header;
+           header_written := true;
+           Writer.flushed w)
         >>| fun () -> (w, header_written)
 
   let write_state_csv ?(path = ".gemini_session_state.csv") (t : t) : unit Deferred.t =

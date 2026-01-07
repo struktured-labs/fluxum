@@ -20,15 +20,9 @@ let combine ?consumer ?(num_values = default_num_values)
       match behavior with
       | `Priority -> (p1, p2)
       | `Alternate ->
-        if lst then
-          (p1, p2)
-        else
-          (p2, p1)
+        (match lst with true -> (p1, p2) | false -> (p2, p1))
       | `Random ->
-        if Random.bool () then
-          (p1, p2)
-        else
-          (p2, p1)
+        (match Random.bool () with true -> (p1, p2) | false -> (p2, p1))
     in
     Log.Global.debug "read_exactly start";
     Pipe.read_now' ~max_queue_length:num_values ?consumer p1 |> function

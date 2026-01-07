@@ -194,14 +194,14 @@ let record_arbitrage_history (opp: arb_opportunity) =
     history.total_duration_sec <- history.total_duration_sec +. time_diff;
 
     (* Update if this is better than best seen *)
-    if Float.(opp.net_profit_pct > history.best_opportunity.net_profit_pct) then
-      history.best_opportunity <- opp
-    else
-      (* Update last_seen even if not the best *)
-      history.best_opportunity <- {
-        history.best_opportunity with
-        last_seen = opp.last_seen
-      }
+    (match Float.(opp.net_profit_pct > history.best_opportunity.net_profit_pct) with
+     | true -> history.best_opportunity <- opp
+     | false ->
+       (* Update last_seen even if not the best *)
+       history.best_opportunity <- {
+         history.best_opportunity with
+         last_seen = opp.last_seen
+       })
   | None ->
     (* New arbitrage pair - create history *)
     Hashtbl.set arb_history_table ~key ~data:{
@@ -219,12 +219,16 @@ let detect_arbitrage ?(fees=default_fees) (book: Consolidated_order_book.Book.t)
   (* Check all exchange pairs *)
   List.iter exchanges ~f:(fun buy_ex ->
     List.iter exchanges ~f:(fun sell_ex ->
-      if not (Poly.equal buy_ex sell_ex) then
+      match Poly.equal buy_ex sell_ex with
+      | true -> ()
+      | false ->
         match get_exchange_best_bid_ask book buy_ex,
               get_exchange_best_bid_ask book sell_ex with
         | Some (_, _, buy_ask, buy_ask_vol), Some (sell_bid, sell_bid_vol, _, _) ->
           (* Arbitrage exists if we can buy cheaper on buy_ex than sell on sell_ex *)
-          if Float.(sell_bid > buy_ask) then
+          (match Float.(sell_bid > buy_ask) with
+           | false -> ()
+           | true ->
             let profit = sell_bid -. buy_ask in
             let profit_pct = 100. *. profit /. buy_ask in
 
@@ -255,10 +259,11 @@ let detect_arbitrage ?(fees=default_fees) (book: Consolidated_order_book.Book.t)
             } in
 
             (* Only record if profitable after fees *)
-            if Float.(net_profit_pct > 0.0) then
-              record_arbitrage_history opp;
+            (match Float.(net_profit_pct > 0.0) with
+             | true -> record_arbitrage_history opp
+             | false -> ());
 
-            opportunities := opp :: !opportunities
+            opportunities := opp :: !opportunities)
         | _ -> ()
     )
   );
@@ -296,7 +301,9 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
   in
 
   (* Print current arbitrage alerts at the top *)
-  if not (List.is_empty arb_opps) then (
+  (match List.is_empty arb_opps with
+   | true -> ()
+   | false ->
     printf "%s%s╔═══════════════════════════════════════════════════════════════════════╗%s\n"
       bold arb_bg reset;
     printf "%s%s║  🚨 CURRENT ARBITRAGE OPPORTUNITIES 🚨                                 ║%s\n"
@@ -307,9 +314,12 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
     List.iteri arb_opps ~f:(fun i opp ->
       (* Color code based on net profitability *)
       let profit_color =
-        if Float.(opp.net_profit_pct >= 0.5) then "\027[1m\027[32m"  (* Bold green: very profitable *)
-        else if Float.(opp.net_profit_pct >= 0.2) then "\027[33m"    (* Yellow: marginally profitable *)
-        else "\027[31m"                                                (* Red: unprofitable *)
+        match Float.(opp.net_profit_pct >= 0.5) with
+        | true -> "\027[1m\027[32m"  (* Bold green: very profitable *)
+        | false ->
+          match Float.(opp.net_profit_pct >= 0.2) with
+          | true -> "\027[33m"    (* Yellow: marginally profitable *)
+          | false -> "\027[31m"   (* Red: unprofitable *)
       in
 
       printf "%s[CURRENT #%d]%s Buy on %s%-9s%s @ %s$%.2f%s → Sell on %s%-9s%s @ %s$%.2f%s\n"
@@ -326,24 +336,27 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
       printf "       %sNet Profit: $%.2f (%.3f%%)%s"
         profit_color opp.net_profit opp.net_profit_pct reset;
 
-      if Float.(opp.net_profit_pct >= 0.5) then
-        printf " ✓ PROFITABLE"
-      else if Float.(opp.net_profit_pct >= 0.2) then
-        printf " ⚠ MARGINAL"
-      else
-        printf " ✗ UNPROFITABLE";
+      (match Float.(opp.net_profit_pct >= 0.5) with
+       | true -> printf " ✓ PROFITABLE"
+       | false ->
+         match Float.(opp.net_profit_pct >= 0.2) with
+         | true -> printf " ⚠ MARGINAL"
+         | false -> printf " ✗ UNPROFITABLE");
 
       printf "\n";
       printf "       Buy volume: %.4f BTC | Sell volume: %.4f BTC | Max size: %.4f BTC\n\n"
         opp.buy_volume opp.sell_volume (Float.min opp.buy_volume opp.sell_volume);
     );
-    printf "%s%s%s\n\n" reset (String.make 75 '-') reset;
-  ) else (
-    printf "%s[No current arbitrage opportunities]%s\n\n" blue reset;
-  );
+    printf "%s%s%s\n\n" reset (String.make 75 '-') reset);
+
+  (match List.is_empty arb_opps with
+   | false -> ()
+   | true -> printf "%s[No current arbitrage opportunities]%s\n\n" blue reset);
 
   (* Print historical best arbitrage opportunities *)
-  if not (List.is_empty historical_arbs) then (
+  (match List.is_empty historical_arbs with
+   | true -> ()
+   | false ->
     printf "%s%s╔═══════════════════════════════════════════════════════════════════════╗%s\n"
       bold "\027[45m\027[37m" reset;  (* Magenta background, white text *)
     printf "%s%s║  ⭐ HISTORICAL BEST ARBITRAGE OPPORTUNITIES (RETAINED FOREVER) ⭐      ║%s\n"
@@ -354,9 +367,12 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
     List.iteri historical_arbs ~f:(fun i history ->
       let opp = history.best_opportunity in
       let profit_color =
-        if Float.(opp.net_profit_pct >= 0.5) then "\027[1m\027[32m"
-        else if Float.(opp.net_profit_pct >= 0.2) then "\027[33m"
-        else "\027[37m"  (* Gray for weak opportunities *)
+        match Float.(opp.net_profit_pct >= 0.5) with
+        | true -> "\027[1m\027[32m"
+        | false ->
+          match Float.(opp.net_profit_pct >= 0.2) with
+          | true -> "\027[33m"
+          | false -> "\027[37m"  (* Gray for weak opportunities *)
       in
 
       (* Calculate time since last seen *)
@@ -367,9 +383,12 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
       let secs = Time_float_unix.Span.to_sec time_since_last in
 
       let time_str =
-        if Float.(hours >= 1.0) then sprintf "%.1fh ago" hours
-        else if Float.(mins >= 1.0) then sprintf "%.0fm ago" mins
-        else sprintf "%.0fs ago" secs
+        match Float.(hours >= 1.0) with
+        | true -> sprintf "%.1fh ago" hours
+        | false ->
+          match Float.(mins >= 1.0) with
+          | true -> sprintf "%.0fm ago" mins
+          | false -> sprintf "%.0fs ago" secs
       in
 
       printf "%s[BEST #%d]%s Buy on %s%-9s%s @ %s$%.2f%s → Sell on %s%-9s%s @ %s$%.2f%s\n"
@@ -391,8 +410,9 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
         Poly.equal curr.buy_exchange opp.buy_exchange &&
         Poly.equal curr.sell_exchange opp.sell_exchange
       ) in
-      if is_current then
-        printf "       %s🔥 CURRENTLY ACTIVE!%s\n" "\027[1m\027[31m" reset;
+      (match is_current with
+       | true -> printf "       %s🔥 CURRENTLY ACTIVE!%s\n" "\027[1m\027[31m" reset
+       | false -> ());
 
       printf "\n";
     );
@@ -405,10 +425,10 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
   printf "=== %s Consolidated Order Book (Epoch: %d) ===\n" book.symbol book.epoch;
   printf "Updated: %s\n" (Time_float_unix.to_string book.update_time);
   printf "Sources: ";
-  if Option.is_some book.gemini_book then printf "[Gemini] ";
-  if Option.is_some book.kraken_book then printf "[Kraken] ";
-  if Option.is_some book.hyperliquid_book then printf "[Hyperliquid] ";
-  if Option.is_some book.bitrue_book then printf "[Bitrue] ";
+  (match Option.is_some book.gemini_book with true -> printf "[Gemini] " | false -> ());
+  (match Option.is_some book.kraken_book with true -> printf "[Kraken] " | false -> ());
+  (match Option.is_some book.hyperliquid_book with true -> printf "[Hyperliquid] " | false -> ());
+  (match Option.is_some book.bitrue_book with true -> printf "[Bitrue] " | false -> ());
   printf "\n\n";
 
   (* Print asks (highest to lowest for display) *)
@@ -427,9 +447,9 @@ let pretty_print_with_arb ?(max_depth = 10) (book: Consolidated_order_book.Book.
   let best_bid = Consolidated_order_book.Book.best_bid book in
   let best_ask = Consolidated_order_book.Book.best_ask book in
   let spread = best_ask.price -. best_bid.price in
-  let spread_pct = if Float.(best_bid.price > 0.) then
-    100. *. spread /. best_bid.price
-  else 0. in
+  let spread_pct = match Float.(best_bid.price > 0.) with
+    | true -> 100. *. spread /. best_bid.price
+    | false -> 0. in
   printf "\n--- Spread: $%.2f (%.4f%%) ---\n\n" spread spread_pct;
 
   (* Print bids *)
@@ -478,43 +498,43 @@ let test ~exchanges ~depth ~max_display =
 
   (* Conditionally connect to Gemini *)
   let%bind gemini_pipe =
-    if List.mem selected `Gemini ~equal:Poly.equal then (
+    match List.mem selected `Gemini ~equal:Poly.equal with
+    | true ->
       let module Gemini_cfg = Gemini.Cfg.Production () in
       let%bind pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in
       return (Pipe.map pipe ~f:(fun result -> Gemini_update result))
-    ) else (
+    | false ->
       return (create_closed_pipe ())
-    )
   in
 
   (* Conditionally connect to Kraken *)
   let%bind kraken_pipe =
-    if List.mem selected `Kraken ~equal:Poly.equal then (
+    match List.mem selected `Kraken ~equal:Poly.equal with
+    | true ->
       let%bind pipe = Kraken.Order_book.Book.pipe ~symbol:"XBT/USD" ~depth () in
       return (Pipe.map pipe ~f:(fun result -> Kraken_update result))
-    ) else (
+    | false ->
       return (create_closed_pipe ())
-    )
   in
 
   (* Conditionally connect to Hyperliquid *)
   let%bind hyperliquid_pipe =
-    if List.mem selected `Hyperliquid ~equal:Poly.equal then (
+    match List.mem selected `Hyperliquid ~equal:Poly.equal with
+    | true ->
       let%bind pipe = Hyperliquid.Order_book.Book.pipe ~symbol:"BTC" () in
       return (Pipe.map pipe ~f:(fun result -> Hyperliquid_update result))
-    ) else (
+    | false ->
       return (create_closed_pipe ())
-    )
   in
 
   (* Conditionally connect to Bitrue *)
   let%bind bitrue_pipe_result =
-    if List.mem selected `Bitrue ~equal:Poly.equal then (
+    match List.mem selected `Bitrue ~equal:Poly.equal with
+    | true ->
       let bitrue_symbol = Fluxum.Types.Symbol.of_string "BTCUSDT" in
       Bitrue.Order_book.Book.pipe ~symbol:bitrue_symbol ()
-    ) else (
+    | false ->
       return (Ok (create_closed_pipe ()))
-    )
   in
   let bitrue_pipe = match bitrue_pipe_result with
     | Ok pipe -> Pipe.map pipe ~f:(fun result -> Bitrue_update result)
@@ -525,24 +545,24 @@ let test ~exchanges ~depth ~max_display =
 
   (* Conditionally connect to Binance *)
   let%bind binance_pipe =
-    if List.mem selected `Binance ~equal:Poly.equal then (
+    match List.mem selected `Binance ~equal:Poly.equal with
+    | true ->
       let binance_symbol = Fluxum.Types.Symbol.of_string "BTCUSDT" in
       let%bind pipe = Binance.Order_book.Book.pipe ~symbol:binance_symbol () in
       return (Pipe.map pipe ~f:(fun result -> Binance_update result))
-    ) else (
+    | false ->
       return (create_closed_pipe ())
-    )
   in
 
   (* Conditionally connect to Coinbase *)
   let%bind coinbase_pipe =
-    if List.mem selected `Coinbase ~equal:Poly.equal then (
+    match List.mem selected `Coinbase ~equal:Poly.equal with
+    | true ->
       let coinbase_symbol = Fluxum.Types.Symbol.of_string "BTC-USD" in
       let%bind pipe = Coinbase.Order_book.Book.pipe ~symbol:coinbase_symbol () in
       return (Pipe.map pipe ~f:(fun result -> Coinbase_update result))
-    ) else (
+    | false ->
       return (create_closed_pipe ())
-    )
   in
 
   printf "✓ Connected to selected exchanges\n\n%!";
@@ -568,10 +588,11 @@ let test ~exchanges ~depth ~max_display =
         | Gemini_update book_result ->
           (match book_result with
            | `Ok gemini_book ->
-             if !gemini_first_update then (
-               printf "[INFO] Gemini data connected!\n%!";
-               gemini_first_update := false
-             );
+             (match !gemini_first_update with
+              | true ->
+                printf "[INFO] Gemini data connected!\n%!";
+                gemini_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_gemini !consolidated gemini_book;
              return ()
            | `Channel_parse_error err ->
@@ -587,10 +608,11 @@ let test ~exchanges ~depth ~max_display =
              eprintf "Kraken error: %s\n%!" err;
              return ()
            | Ok kraken_book ->
-             if !kraken_first_update then (
-               printf "[INFO] Kraken data connected!\n%!";
-               kraken_first_update := false
-             );
+             (match !kraken_first_update with
+              | true ->
+                printf "[INFO] Kraken data connected!\n%!";
+                kraken_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_kraken !consolidated kraken_book;
              return ())
 
@@ -600,10 +622,11 @@ let test ~exchanges ~depth ~max_display =
              eprintf "Hyperliquid error: %s\n%!" err;
              return ()
            | Ok hyperliquid_book ->
-             if !hyperliquid_first_update then (
-               printf "[INFO] Hyperliquid data connected!\n%!";
-               hyperliquid_first_update := false
-             );
+             (match !hyperliquid_first_update with
+              | true ->
+                printf "[INFO] Hyperliquid data connected!\n%!";
+                hyperliquid_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_hyperliquid !consolidated hyperliquid_book;
              return ())
 
@@ -613,10 +636,11 @@ let test ~exchanges ~depth ~max_display =
              eprintf "Bitrue error: %s\n%!" err;
              return ()
            | Ok bitrue_book ->
-             if !bitrue_first_update then (
-               printf "[INFO] Bitrue data connected!\n%!";
-               bitrue_first_update := false
-             );
+             (match !bitrue_first_update with
+              | true ->
+                printf "[INFO] Bitrue data connected!\n%!";
+                bitrue_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_bitrue !consolidated bitrue_book;
              return ())
 
@@ -626,10 +650,11 @@ let test ~exchanges ~depth ~max_display =
              eprintf "Binance error: %s\n%!" err;
              return ()
            | Ok binance_book ->
-             if !binance_first_update then (
-               printf "[INFO] Binance data connected!\n%!";
-               binance_first_update := false
-             );
+             (match !binance_first_update with
+              | true ->
+                printf "[INFO] Binance data connected!\n%!";
+                binance_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_binance !consolidated binance_book;
              return ())
 
@@ -639,10 +664,11 @@ let test ~exchanges ~depth ~max_display =
              eprintf "Coinbase error: %s\n%!" err;
              return ()
            | Ok coinbase_book ->
-             if !coinbase_first_update then (
-               printf "[INFO] Coinbase data connected!\n%!";
-               coinbase_first_update := false
-             );
+             (match !coinbase_first_update with
+              | true ->
+                printf "[INFO] Coinbase data connected!\n%!";
+                coinbase_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_coinbase !consolidated coinbase_book;
              return ())
       in
@@ -658,10 +684,11 @@ let test ~exchanges ~depth ~max_display =
         Time_float_unix.Span.(time_since_print > of_sec 2.0)
       in
 
-      if should_print then (
-        last_print_time := now;
-        pretty_print_with_arb ~max_depth:max_display !consolidated ();
-      );
+      (match should_print with
+       | true ->
+         last_print_time := now;
+         pretty_print_with_arb ~max_depth:max_display !consolidated ();
+       | false -> ());
 
       return ()
     )

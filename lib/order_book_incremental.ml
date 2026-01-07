@@ -163,7 +163,8 @@ module Manager = struct
       | Some seq -> is_valid_sequence t ~seq
     in
 
-    if not sequence_valid then
+    match sequence_valid with
+    | false ->
       (* Sequence gap detected *)
       let gaps = t.sequence.gaps_detected + 1 in
       Log.Global.info_s [%message
@@ -173,7 +174,7 @@ module Manager = struct
         ~received:(effective_seq : int64 option)
       ];
       Error (`Sequence_gap (t.sequence, effective_seq))
-    else
+    | true ->
       (* Apply update *)
       let book' = apply_fn t.book (Update.levels update) in
       let update_type = Update.update_type update in
@@ -265,10 +266,9 @@ module Batch = struct
   (** Process updates with automatic flushing *)
   let process t ~update ~apply_fn =
     let should_flush = enqueue t update in
-    if should_flush then
-      flush t ~apply_fn
-    else
-      Ok t
+    match should_flush with
+    | true -> flush t ~apply_fn
+    | false -> Ok t
 end
 
 (** Checksum validation (exchange-specific implementations) *)
