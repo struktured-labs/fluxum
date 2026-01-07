@@ -182,9 +182,9 @@ module Adapter = struct
       match type_ with
       | `Exchange_limit ->
         let p = Float.of_string (Common.Decimal_string.to_string price) in
-        if List.exists options ~f:(fun o -> Poly.equal o `Maker_or_cancel) then
-          Types.Order_kind.Post_only_limit p
-        else Types.Order_kind.Limit p
+        (match List.exists options ~f:(fun o -> Poly.equal o `Maker_or_cancel) with
+         | true -> Types.Order_kind.Post_only_limit p
+         | false -> Types.Order_kind.Limit p)
       | _ -> Types.Order_kind.Market
 
     let side (s : Common.Side.t) : Types.Side.t =
@@ -199,27 +199,32 @@ module Adapter = struct
       let qty_orig = Float.of_string (Common.Decimal_string.to_string r.original_amount) in
       let qty_exec = Float.of_string (Common.Decimal_string.to_string r.executed_amount) in
       let qty_rem = Float.of_string (Common.Decimal_string.to_string r.remaining_amount) in
+      let reason_to_status = function
+        | Some `Invalid_quantity -> Types.Order_status.Rejected "invalid_quantity"
+        | Some `Insufficient_funds -> Types.Order_status.Rejected "insufficient_funds"
+        | Some `Self_cross_prevented -> Types.Order_status.Rejected "self_cross_prevented"
+        | Some `Immediate_or_cancel_would_post -> Types.Order_status.Rejected "ioc_would_post"
+        | None -> Types.Order_status.New
+      in
       let status : Types.Order_status.t =
-        if r.is_cancelled then Types.Order_status.Canceled
-        else if r.is_live then (
-          if Float.(qty_exec = 0.) then Types.Order_status.New
-          else if Float.(qty_exec > 0.) then Types.Order_status.Partially_filled
-          else if Float.(qty_rem = 0.) then Types.Order_status.Filled
-          else
-            (match r.reason with
-             | Some `Invalid_quantity -> Types.Order_status.Rejected "invalid_quantity"
-             | Some `Insufficient_funds -> Types.Order_status.Rejected "insufficient_funds"
-             | Some `Self_cross_prevented -> Types.Order_status.Rejected "self_cross_prevented"
-             | Some `Immediate_or_cancel_would_post -> Types.Order_status.Rejected "ioc_would_post"
-             | None -> Types.Order_status.New))
-        else if Float.(qty_rem = 0.) then Types.Order_status.Filled
-        else
-          (match r.reason with
-           | Some `Invalid_quantity -> Types.Order_status.Rejected "invalid_quantity"
-           | Some `Insufficient_funds -> Types.Order_status.Rejected "insufficient_funds"
-           | Some `Self_cross_prevented -> Types.Order_status.Rejected "self_cross_prevented"
-           | Some `Immediate_or_cancel_would_post -> Types.Order_status.Rejected "ioc_would_post"
-           | None -> Types.Order_status.New)
+        match r.is_cancelled with
+        | true -> Types.Order_status.Canceled
+        | false ->
+          match r.is_live with
+          | true ->
+            (match Float.(qty_exec = 0.) with
+             | true -> Types.Order_status.New
+             | false ->
+               match Float.(qty_exec > 0.) with
+               | true -> Types.Order_status.Partially_filled
+               | false ->
+                 match Float.(qty_rem = 0.) with
+                 | true -> Types.Order_status.Filled
+                 | false -> reason_to_status r.reason)
+          | false ->
+            match Float.(qty_rem = 0.) with
+            | true -> Types.Order_status.Filled
+            | false -> reason_to_status r.reason
       in
       { Types.Order.venue = Venue.t
       ; id = Common.Int_string.to_string r.order_id

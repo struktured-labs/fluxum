@@ -43,8 +43,9 @@ module Orderbook = struct
               printf "Book updated (epoch: %d)\n" (Order_book.Book.epoch book);
               printf "\n";
 
-              if limit > 0 && !update_count >= limit then
-                Pipe.close_read book_pipe;
+              (match limit > 0 && !update_count >= limit with
+               | true -> Pipe.close_read book_pipe
+               | false -> ());
 
               Deferred.unit
             | Error err ->
@@ -96,18 +97,19 @@ module Ledger = struct
               match book_result with
               | Ok book ->
                 let spot = (Order_book.Book.best_bid book).price in
-                if Float.(spot > 0.) then begin
-                  ledger_ref := Ledger.Entry.update_spot !ledger_ref spot;
+                (match Float.(spot > 0.) with
+                 | true ->
+                   ledger_ref := Ledger.Entry.update_spot !ledger_ref spot;
 
-                  (* Print updated ledger *)
-                  printf "\n=== Ledger Update - %s ===\n" symbol;
-                  printf "Spot: $%.2f\n" spot;
-                  printf "Position: %.8f\n" (!ledger_ref).position;
-                  printf "Notional: $%.2f\n" (!ledger_ref).notional;
-                  printf "Cost Basis: $%.2f\n" (!ledger_ref).cost_basis;
-                  printf "PnL: $%.2f\n" (!ledger_ref).pnl;
-                  printf "\n";
-                end;
+                   (* Print updated ledger *)
+                   printf "\n=== Ledger Update - %s ===\n" symbol;
+                   printf "Spot: $%.2f\n" spot;
+                   printf "Position: %.8f\n" (!ledger_ref).position;
+                   printf "Notional: $%.2f\n" (!ledger_ref).notional;
+                   printf "Cost Basis: $%.2f\n" (!ledger_ref).cost_basis;
+                   printf "PnL: $%.2f\n" (!ledger_ref).pnl;
+                   printf "\n";
+                 | false -> ());
                 Deferred.unit
               | Error _ -> Deferred.unit
             )
@@ -169,8 +171,9 @@ module Session = struct
                     symbol !count
                     (Order_book.Book.best_bid book).price
                     (Order_book.Book.best_ask book).price;
-                  if !count >= limit then
-                    Pipe.close_read book_pipe;
+                  (match !count >= limit with
+                   | true -> Pipe.close_read book_pipe
+                   | false -> ());
                   Deferred.unit
                 | Error err ->
                   eprintf "[%s] Order book error: %s\n" symbol err;
@@ -190,8 +193,9 @@ module Session = struct
                 incr count;
                 printf "[%s] Ledger update #%d - Spot: $%.2f, PnL: $%.2f\n"
                   symbol !count entry.spot entry.pnl;
-                if !count >= limit then
-                  Pipe.close_read ledger_pipe;
+                (match !count >= limit with
+                 | true -> Pipe.close_read ledger_pipe
+                 | false -> ());
                 Deferred.unit
               )
             | None ->

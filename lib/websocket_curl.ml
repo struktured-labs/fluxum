@@ -76,11 +76,13 @@ let connect ~url =
       In_thread.run (fun () ->
         let bytes = Bytes.of_string request in
         let rec send_all offset =
-          if offset >= Bytes.length bytes then ()
-          else
+          match offset >= Bytes.length bytes with
+          | true -> ()
+          | false ->
             let sent = Curl_ext.send curl bytes offset (Bytes.length bytes - offset) in
-            if sent = 0 then failwith "Connection closed while sending"
-            else send_all (offset + sent)
+            match sent = 0 with
+            | true -> failwith "Connection closed while sending"
+            | false -> send_all (offset + sent)
         in
         send_all 0
       )
@@ -95,16 +97,15 @@ let connect ~url =
         let recv_buf = Bytes.create 1024 in
         let rec read_until_headers () =
           let received = Curl_ext.recv curl recv_buf 0 (Bytes.length recv_buf) in
-          if received = 0 then failwith "Connection closed during upgrade"
-          else (
+          match received = 0 with
+          | true -> failwith "Connection closed during upgrade"
+          | false ->
             Buffer.add_subbytes buffer recv_buf ~pos:0 ~len:received;
             let content = Buffer.contents buffer in
             (* Check if we have complete headers (ends with \r\n\r\n) *)
-            if String.is_substring content ~substring:"\r\n\r\n" then
-              content
-            else
-              read_until_headers ()
-          )
+            match String.is_substring content ~substring:"\r\n\r\n" with
+            | true -> content
+            | false -> read_until_headers ()
         in
         let response = read_until_headers () in
         (* Parse headers *)
@@ -128,9 +129,10 @@ let connect ~url =
       | _ -> 0
   in
 
-  if status_code <> 101 then
+  match status_code <> 101 with
+  | true ->
     Deferred.Or_error.error_string (sprintf "WebSocket upgrade failed: HTTP %d" status_code)
-  else
+  | false ->
     (* Parse headers *)
     let headers = String.Table.create () in
     List.iter (List.tl_exn response_lines) ~f:(fun line ->
@@ -159,20 +161,22 @@ let encode_text_frame payload =
   Buffer.add_char header (Char.of_int_exn 0x81);
 
   (* Mask bit + length *)
-  if len < 126 then
-    Buffer.add_char header (Char.of_int_exn (0x80 lor len))
-  else if len < 65536 then (
-    Buffer.add_char header (Char.of_int_exn (0x80 lor 126));
-    Buffer.add_char header (Char.of_int_exn (len lsr 8));
-    Buffer.add_char header (Char.of_int_exn (len land 0xFF))
-  ) else (
-    Buffer.add_char header (Char.of_int_exn (0x80 lor 127));
-    for _ = 0 to 3 do Buffer.add_char header '\x00' done;
-    Buffer.add_char header (Char.of_int_exn ((len lsr 24) land 0xFF));
-    Buffer.add_char header (Char.of_int_exn ((len lsr 16) land 0xFF));
-    Buffer.add_char header (Char.of_int_exn ((len lsr 8) land 0xFF));
-    Buffer.add_char header (Char.of_int_exn (len land 0xFF))
-  );
+  (match len < 126 with
+   | true ->
+     Buffer.add_char header (Char.of_int_exn (0x80 lor len))
+   | false ->
+     match len < 65536 with
+     | true ->
+       Buffer.add_char header (Char.of_int_exn (0x80 lor 126));
+       Buffer.add_char header (Char.of_int_exn (len lsr 8));
+       Buffer.add_char header (Char.of_int_exn (len land 0xFF))
+     | false ->
+       Buffer.add_char header (Char.of_int_exn (0x80 lor 127));
+       for _ = 0 to 3 do Buffer.add_char header '\x00' done;
+       Buffer.add_char header (Char.of_int_exn ((len lsr 24) land 0xFF));
+       Buffer.add_char header (Char.of_int_exn ((len lsr 16) land 0xFF));
+       Buffer.add_char header (Char.of_int_exn ((len lsr 8) land 0xFF));
+       Buffer.add_char header (Char.of_int_exn (len land 0xFF)));
 
   (* Masking key *)
   let mask = Array.init 4 ~f:(fun _ -> Random.int 256) in
@@ -188,9 +192,9 @@ let encode_text_frame payload =
   Buffer.contents header
 
 let send t payload =
-  if t.closed then
-    Deferred.unit
-  else
+  match t.closed with
+  | true -> Deferred.unit
+  | false ->
     let send_with_timeout () =
       Deferred.any
         [ (Deferred.Or_error.try_with (fun () ->
@@ -198,11 +202,13 @@ let send t payload =
                let frame = encode_text_frame payload in
                let bytes = Bytes.of_string frame in
                let rec send_all offset =
-                 if offset >= Bytes.length bytes then ()
-                 else
+                 match offset >= Bytes.length bytes with
+                 | true -> ()
+                 | false ->
                    let sent = Curl_ext.send t.curl bytes offset (Bytes.length bytes - offset) in
-                   if sent = 0 then failwith "Connection closed"
-                   else send_all (offset + sent)
+                   match sent = 0 with
+                   | true -> failwith "Connection closed"
+                   | false -> send_all (offset + sent)
                in
                send_all 0
              )
@@ -217,19 +223,21 @@ let send t payload =
     | Error _ -> ()
 
 let receive t =
-  if t.closed then
-    return None
-  else
+  match t.closed with
+  | true -> return None
+  | false ->
     Deferred.Or_error.try_with (fun () ->
       In_thread.run (fun () ->
         (* Read frame header (at least 2 bytes) *)
         let header_buf = Bytes.create 14 in
         let rec recv_exact buf offset len =
-          if len = 0 then ()
-          else
+          match len = 0 with
+          | true -> ()
+          | false ->
             let received = Curl_ext.recv t.curl buf offset len in
-            if received = 0 then failwith "Connection closed"
-            else recv_exact buf (offset + received) (len - received)
+            match received = 0 with
+            | true -> failwith "Connection closed"
+            | false -> recv_exact buf (offset + received) (len - received)
         in
         recv_exact header_buf 0 2;
 
@@ -242,32 +250,33 @@ let receive t =
 
         (* Read extended payload length if needed *)
         let payload_len =
-          if payload_len_initial < 126 then
-            payload_len_initial
-          else if payload_len_initial = 126 then (
-            recv_exact header_buf 2 2;
-            (Bytes.get header_buf 2 |> Char.to_int) lsl 8
-            lor (Bytes.get header_buf 3 |> Char.to_int)
-          ) else (
-            recv_exact header_buf 2 8;
-            (* Use lower 32 bits *)
-            (Bytes.get header_buf 6 |> Char.to_int) lsl 24
-            lor (Bytes.get header_buf 7 |> Char.to_int) lsl 16
-            lor (Bytes.get header_buf 8 |> Char.to_int) lsl 8
-            lor (Bytes.get header_buf 9 |> Char.to_int)
-          )
+          match payload_len_initial < 126 with
+          | true -> payload_len_initial
+          | false ->
+            match payload_len_initial = 126 with
+            | true ->
+              recv_exact header_buf 2 2;
+              (Bytes.get header_buf 2 |> Char.to_int) lsl 8
+              lor (Bytes.get header_buf 3 |> Char.to_int)
+            | false ->
+              recv_exact header_buf 2 8;
+              (* Use lower 32 bits *)
+              (Bytes.get header_buf 6 |> Char.to_int) lsl 24
+              lor (Bytes.get header_buf 7 |> Char.to_int) lsl 16
+              lor (Bytes.get header_buf 8 |> Char.to_int) lsl 8
+              lor (Bytes.get header_buf 9 |> Char.to_int)
         in
 
-        if payload_len = 0 then ""
-        else (
+        match payload_len = 0 with
+        | true -> ""
+        | false ->
           (* Skip mask if present (server shouldn't mask) *)
-          if masked then recv_exact header_buf 0 4;
+          (match masked with true -> recv_exact header_buf 0 4 | false -> ());
 
           (* Read payload *)
           let payload_buf = Bytes.create payload_len in
           recv_exact payload_buf 0 payload_len;
           Bytes.to_string payload_buf
-        )
       )
     )
     >>| function
@@ -275,9 +284,9 @@ let receive t =
     | Error _ -> None
 
 let close t =
-  if not t.closed then (
+  match t.closed with
+  | true -> Deferred.unit
+  | false ->
     t.closed <- true;
     Curl.cleanup t.curl;
-    Deferred.unit
-  ) else
     Deferred.unit

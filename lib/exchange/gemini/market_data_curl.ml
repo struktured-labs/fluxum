@@ -49,11 +49,12 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
     don't_wait_for (
       let buffer = Buffer.create 4096 in
       let rec receive_loop () =
-        if not t.active then (
+        match t.active with
+        | false ->
           Log.Global.info "Gemini: Receive loop ending (inactive)";
           Pipe.close t.message_writer;
           return ()
-        ) else (
+        | true ->
           let%bind msg_opt = Websocket_curl.receive ws in
           match msg_opt with
           | None ->
@@ -64,27 +65,31 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
             return ()
           | Some payload ->
             receive_count := !receive_count + 1;
-            if !receive_count mod 50 = 0 then
-              Log.Global.info "Gemini: Received %d chunks so far" !receive_count;
+            (match !receive_count mod 50 = 0 with
+             | true -> Log.Global.info "Gemini: Received %d chunks so far" !receive_count
+             | false -> ());
             (* Append to buffer *)
             Buffer.add_string buffer payload;
 
             (* Extract complete JSON objects - try parsing incrementally *)
             let rec extract_complete_json () =
               let content = Buffer.contents buffer in
-              if String.length content = 0 then
-                return ()
-              else
+              match String.length content = 0 with
+              | true -> return ()
+              | false ->
                 (* Try to parse as JSON - if successful, we have a complete object *)
                 try
                   let _json = Yojson.Safe.from_string content in
                   (* Successfully parsed - entire buffer is one JSON object *)
                   parsed_count := !parsed_count + 1;
-                  if String.length content > 100000 then
-                    Log.Global.info "Gemini: Parsed large JSON (%d bytes, msg #%d), writing to pipe"
-                      (String.length content) !parsed_count
-                  else if !parsed_count mod 100 = 0 then
-                    Log.Global.info "Gemini: Parsed %d messages so far" !parsed_count;
+                  (match String.length content > 100000 with
+                   | true ->
+                     Log.Global.info "Gemini: Parsed large JSON (%d bytes, msg #%d), writing to pipe"
+                       (String.length content) !parsed_count
+                   | false ->
+                     match !parsed_count mod 100 = 0 with
+                     | true -> Log.Global.info "Gemini: Parsed %d messages so far" !parsed_count
+                     | false -> ());
                   let json_str = content in
                   Buffer.clear buffer;
                   let%bind () = Pipe.write t.message_writer json_str in
@@ -96,7 +101,6 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
             in
             let%bind () = extract_complete_json () in
             receive_loop ()
-        )
       in
       receive_loop ()
     );

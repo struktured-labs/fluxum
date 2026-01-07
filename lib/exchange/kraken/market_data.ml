@@ -47,10 +47,11 @@ let connect ~(subscriptions : subscription list) ?(url = Ws.Endpoint.public_url)
     (* Start background task to receive messages *)
     don't_wait_for (
       let rec receive_loop () =
-        if not t.active then (
+        match t.active with
+        | false ->
           Pipe.close t.message_writer;
           return ()
-        ) else
+        | true ->
           let%bind msg_opt = Websocket_curl.receive ws in
           match msg_opt with
           | None ->
@@ -79,10 +80,9 @@ let connect ~(subscriptions : subscription list) ?(url = Ws.Endpoint.public_url)
               Ws.Public.subscribe_book ~depth sub.pairs
           | _ -> ""
         in
-        if not (String.is_empty msg) then
-          Websocket_curl.send ws msg
-        else
-          Deferred.unit)
+        match String.is_empty msg with
+        | true -> Deferred.unit
+        | false -> Websocket_curl.send ws msg)
     in
 
     return (Ok t)
@@ -94,10 +94,9 @@ let messages t : string Pipe.Reader.t = t.message_pipe
 let subscribe t ~channel ~pairs : unit Deferred.t =
   let sub = { channel; pairs; interval = None; depth = None } in
   t.subscriptions := sub :: !(t.subscriptions);
-
-  if not t.active then
-    Deferred.unit
-  else
+  match t.active with
+  | false -> Deferred.unit
+  | true ->
     let msg = match channel with
       | "ticker" -> Ws.Public.subscribe_ticker pairs
       | "trade" -> Ws.Public.subscribe_trade pairs
@@ -105,20 +104,18 @@ let subscribe t ~channel ~pairs : unit Deferred.t =
       | "book" -> Ws.Public.subscribe_book ~depth:10 pairs
       | _ -> ""
     in
-    if String.is_empty msg then
-      Deferred.unit
-    else
-      Websocket_curl.send t.ws msg
+    match String.is_empty msg with
+    | true -> Deferred.unit
+    | false -> Websocket_curl.send t.ws msg
 
 (** Unsubscribe from a channel *)
 let unsubscribe t ~channel ~pairs : unit Deferred.t =
   t.subscriptions :=
     List.filter !(t.subscriptions) ~f:(fun sub ->
       not (String.equal sub.channel channel && List.equal String.equal sub.pairs pairs));
-
-  if not t.active then
-    Deferred.unit
-  else
+  match t.active with
+  | false -> Deferred.unit
+  | true ->
     let msg = Ws.Public.unsubscribe channel pairs in
     Websocket_curl.send t.ws msg
 

@@ -326,10 +326,9 @@ module Book = struct
   let spread t =
     let best_bid = best_bid t in
     let best_ask = best_ask t in
-    if Float.(best_bid.price > 0. && best_ask.price > 0.) then
-      Some (best_ask.price -. best_bid.price)
-    else
-      None
+    match Float.(best_bid.price > 0. && best_ask.price > 0.) with
+    | true -> Some (best_ask.price -. best_bid.price)
+    | false -> None
 
   (** Get top N bids *)
   let best_n_bids t ~n () =
@@ -367,12 +366,12 @@ module Book = struct
     printf "=== %s Consolidated Order Book (Epoch: %d) ===\n" t.symbol t.epoch;
     printf "Updated: %s\n" (Time_float_unix.to_string t.update_time);
     printf "Sources: ";
-    if Option.is_some t.gemini_book then printf "[Gemini] ";
-    if Option.is_some t.kraken_book then printf "[Kraken] ";
-    if Option.is_some t.hyperliquid_book then printf "[Hyperliquid] ";
-    if Option.is_some t.bitrue_book then printf "[Bitrue] ";
-    if Option.is_some t.binance_book then printf "[Binance] ";
-    if Option.is_some t.coinbase_book then printf "[Coinbase] ";
+    (match Option.is_some t.gemini_book with true -> printf "[Gemini] " | false -> ());
+    (match Option.is_some t.kraken_book with true -> printf "[Kraken] " | false -> ());
+    (match Option.is_some t.hyperliquid_book with true -> printf "[Hyperliquid] " | false -> ());
+    (match Option.is_some t.bitrue_book with true -> printf "[Bitrue] " | false -> ());
+    (match Option.is_some t.binance_book with true -> printf "[Binance] " | false -> ());
+    (match Option.is_some t.coinbase_book with true -> printf "[Coinbase] " | false -> ());
     printf "\n\n";
 
     (* Print asks (highest to lowest for display) *)
@@ -458,22 +457,24 @@ module Book = struct
     match side with
     | `Bid ->
       let best = best_bid t in
-      if Float.(best.price = 0.) then 0.
-      else
-        let min_price = best.price *. (1. -. percentage /. 100.) in
-        Map.fold t.bids ~init:0. ~f:(fun ~key:price ~data:level acc ->
-          if Float.(price >= min_price) then
-            acc +. level.volume
-          else acc)
+      (match Float.(best.price = 0.) with
+       | true -> 0.
+       | false ->
+         let min_price = best.price *. (1. -. percentage /. 100.) in
+         Map.fold t.bids ~init:0. ~f:(fun ~key:price ~data:level acc ->
+           match Float.(price >= min_price) with
+           | true -> acc +. level.volume
+           | false -> acc))
     | `Ask ->
       let best = best_ask t in
-      if Float.(best.price = 0.) then 0.
-      else
-        let max_price = best.price *. (1. +. percentage /. 100.) in
-        Map.fold t.asks ~init:0. ~f:(fun ~key:price ~data:level acc ->
-          if Float.(price <= max_price) then
-            acc +. level.volume
-          else acc)
+      (match Float.(best.price = 0.) with
+       | true -> 0.
+       | false ->
+         let max_price = best.price *. (1. +. percentage /. 100.) in
+         Map.fold t.asks ~init:0. ~f:(fun ~key:price ~data:level acc ->
+           match Float.(price <= max_price) with
+           | true -> acc +. level.volume
+           | false -> acc))
 end
 
 (** Arbitrage opportunity *)
@@ -543,7 +544,9 @@ module Arbitrage = struct
     (* Find opportunities: buy low (ask) on one exchange, sell high (bid) on another *)
     List.iter exchange_asks ~f:(fun (buy_ex, buy_price, buy_vol) ->
       List.iter exchange_bids ~f:(fun (sell_ex, sell_price, sell_vol) ->
-        if not (equal_exchange_source buy_ex sell_ex) && Float.(sell_price > buy_price) then
+        match not (equal_exchange_source buy_ex sell_ex) && Float.(sell_price > buy_price) with
+        | false -> ()
+        | true ->
           let profit_per_unit = sell_price -. buy_price in
           let profit_percentage = 100. *. profit_per_unit /. buy_price in
           let max_volume = Float.min buy_vol sell_vol in
@@ -565,14 +568,16 @@ module Arbitrage = struct
 
   (** Print arbitrage opportunities *)
   let print_opportunities opportunities =
-    if List.is_empty opportunities then
-      printf "\nNo arbitrage opportunities detected.\n\n"
-    else (
+    match List.is_empty opportunities with
+    | true -> printf "\nNo arbitrage opportunities detected.\n\n"
+    | false ->
       printf "\n╔════════════════════════════════════════════════════════╗\n";
       printf "║  Arbitrage Opportunities                               ║\n";
       printf "╠════════════════════════════════════════════════════════╣\n";
       List.iteri opportunities ~f:(fun i opp ->
-        if i < 3 then (  (* Show top 3 *)
+        match i < 3 with  (* Show top 3 *)
+        | false -> ()
+        | true ->
           printf "║  #%d: Buy %s @ $%.2f → Sell %s @ $%.2f\n"
             (i + 1)
             (Book.exchange_to_string opp.buy_exchange)
@@ -582,11 +587,9 @@ module Arbitrage = struct
           printf "║      Profit: $%.2f/unit (%.3f%%), Max vol: %.4f       \n"
             opp.profit_per_unit
             opp.profit_percentage
-            opp.max_volume;
-        )
+            opp.max_volume
       );
       printf "╚════════════════════════════════════════════════════════╝\n\n"
-    )
 end
 
 (** Analytics and metrics *)
@@ -629,12 +632,12 @@ module Analytics = struct
     let ask_depth_1pct = Book.liquidity_depth t ~side:`Ask ~percentage:1. in
 
     let num_exchanges =
-      (if Option.is_some t.Book.gemini_book then 1 else 0) +
-      (if Option.is_some t.kraken_book then 1 else 0) +
-      (if Option.is_some t.hyperliquid_book then 1 else 0) +
-      (if Option.is_some t.bitrue_book then 1 else 0) +
-      (if Option.is_some t.binance_book then 1 else 0) +
-      (if Option.is_some t.coinbase_book then 1 else 0)
+      (match Option.is_some t.Book.gemini_book with true -> 1 | false -> 0) +
+      (match Option.is_some t.kraken_book with true -> 1 | false -> 0) +
+      (match Option.is_some t.hyperliquid_book with true -> 1 | false -> 0) +
+      (match Option.is_some t.bitrue_book with true -> 1 | false -> 0) +
+      (match Option.is_some t.binance_book with true -> 1 | false -> 0) +
+      (match Option.is_some t.coinbase_book with true -> 1 | false -> 0)
     in
 
     {

@@ -372,18 +372,20 @@ module Public = struct
   module V2 = struct
     (** Normalize symbol for v2 API - converts XETHZUSD to ETH/USD format *)
     let normalize_symbol s =
-      if String.mem s '/' then s
-      else
+      match String.mem s '/' with
+      | true -> s
+      | false ->
         (* Remove leading X and convert to base/quote format *)
-        let s = if String.is_prefix s ~prefix:"X" && String.length s > 4
-                then String.drop_prefix s 1
-                else s in
+        let s = match String.is_prefix s ~prefix:"X" && String.length s > 4 with
+                | true -> String.drop_prefix s 1
+                | false -> s in
         let len = String.length s in
-        if len > 3 then
+        match len > 3 with
+        | true ->
           let base = String.sub s ~pos:0 ~len:(len - 3) in
           let quote = String.sub s ~pos:(len - 3) ~len:3 in
           base ^ "/" ^ quote
-        else s
+        | false -> s
 
     (** Generate v2 subscription message for ticker feed *)
     let subscribe_ticker ?(event_trigger="trades") ?(snapshot=true) pairs : string =
@@ -590,8 +592,9 @@ module Client = struct
 
   (** Add subscription tracking *)
   let add_subscription t sub =
-    if t.active then
-      t.subscriptions <- sub :: t.subscriptions
+    match t.active with
+    | true -> t.subscriptions <- sub :: t.subscriptions
+    | false -> ()
 
   (** Get active subscriptions *)
   let subscriptions t = t.subscriptions

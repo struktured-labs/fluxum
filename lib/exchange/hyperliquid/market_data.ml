@@ -41,11 +41,12 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.mainnet) () : (t, 
     let receive_count = ref 0 in
     don't_wait_for (
       let rec receive_loop () =
-        if not t.active then (
+        match t.active with
+        | false ->
           Log.Global.info "Hyperliquid: Receive loop ending (inactive)";
           Pipe.close t.message_writer;
           return ()
-        ) else
+        | true ->
           let%bind msg_opt = Websocket_curl.receive ws in
           match msg_opt with
           | None ->
@@ -56,8 +57,9 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.mainnet) () : (t, 
             return ()
           | Some payload ->
             receive_count := !receive_count + 1;
-            if !receive_count mod 50 = 0 then
-              Log.Global.info "Hyperliquid: Received %d messages so far" !receive_count;
+            (match !receive_count mod 50 = 0 with
+             | true -> Log.Global.info "Hyperliquid: Received %d messages so far" !receive_count
+             | false -> ());
             let%bind () = Pipe.write t.message_writer payload in
             receive_loop ()
       in
@@ -71,10 +73,11 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.mainnet) () : (t, 
     let ping_count = ref 0 in
     don't_wait_for (
       let rec ping_loop () =
-        if not t.active then (
+        match t.active with
+        | false ->
           Log.Global.info "Hyperliquid: Ping loop ending (inactive after %d pings)" !ping_count;
           return ()
-        ) else (
+        | true ->
           ping_count := !ping_count + 1;
           let start_time = Time_float_unix.now () in
           let%bind send_result = try_with (fun () -> Websocket_curl.send ws "{\"method\":\"ping\"}") in
@@ -83,17 +86,18 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.mainnet) () : (t, 
           let duration_ms = Time_float_unix.Span.to_ms duration in
           (match send_result with
           | Ok () ->
-            if Float.(duration_ms > 100.0) then
-              eprintf "Hyperliquid: Ping #%d took %.2f ms%s\n%!"
-                !ping_count duration_ms
-                (if Float.(duration_ms > 1000.0) then " (WARNING: >1s)" else "")
+            (match Float.(duration_ms > 100.0) with
+             | true ->
+               eprintf "Hyperliquid: Ping #%d took %.2f ms%s\n%!"
+                 !ping_count duration_ms
+                 (match Float.(duration_ms > 1000.0) with true -> " (WARNING: >1s)" | false -> "")
+             | false -> ())
           | Error exn ->
             eprintf "Hyperliquid: Ping #%d failed after %.2f ms: %s\n%!"
               !ping_count duration_ms (Exn.to_string exn)
           );
           let%bind () = after (Time_float.Span.of_sec 2.5) in
           ping_loop ()
-        )
       in
       ping_loop ()
     );
@@ -115,10 +119,9 @@ let messages t : string Pipe.Reader.t = t.message_pipe
 (** Subscribe to an additional stream *)
 let subscribe t (stream : Ws.Stream.t) : unit Deferred.t =
   t.streams := stream :: !(t.streams);
-
-  if not t.active then
-    Deferred.unit
-  else
+  match t.active with
+  | false -> Deferred.unit
+  | true ->
     let msg = Ws.Stream.to_subscribe_message stream in
     let msg_str = Yojson.Safe.to_string msg in
     Websocket_curl.send t.ws msg_str
@@ -126,20 +129,18 @@ let subscribe t (stream : Ws.Stream.t) : unit Deferred.t =
 (** Unsubscribe from a stream *)
 let unsubscribe t (stream : Ws.Stream.t) : unit Deferred.t =
   t.streams := List.filter !(t.streams) ~f:(fun s -> not (phys_equal s stream));
-
-  if not t.active then
-    Deferred.unit
-  else
+  match t.active with
+  | false -> Deferred.unit
+  | true ->
     let msg = Ws.Stream.to_unsubscribe_message stream in
     let msg_str = Yojson.Safe.to_string msg in
     Websocket_curl.send t.ws msg_str
 
 (** Send ping *)
 let ping t : unit Deferred.t =
-  if not t.active then
-    Deferred.unit
-  else
-    Websocket_curl.send t.ws "{\"method\":\"ping\"}"
+  match t.active with
+  | false -> Deferred.unit
+  | true -> Websocket_curl.send t.ws "{\"method\":\"ping\"}"
 
 (** Close the WebSocket connection *)
 let close t : unit Deferred.t =

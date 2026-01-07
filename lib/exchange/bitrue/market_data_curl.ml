@@ -45,11 +45,12 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.market) () : (t, s
     let pong_count = ref 0 in
     don't_wait_for (
       let rec receive_loop () =
-        if not t.active then (
+        match t.active with
+        | false ->
           Log.Global.info "Bitrue: Receive loop ending (inactive)";
           Pipe.close t.message_writer;
           return ()
-        ) else
+        | true ->
           let%bind msg_opt = Websocket_curl.receive ws in
           match msg_opt with
           | None ->
@@ -60,14 +61,16 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.market) () : (t, s
             return ()
           | Some payload ->
             receive_count := !receive_count + 1;
-            if !receive_count mod 50 = 0 then
-              Log.Global.info "Bitrue: Received %d messages so far" !receive_count;
+            (match !receive_count mod 50 = 0 with
+             | true -> Log.Global.info "Bitrue: Received %d messages so far" !receive_count
+             | false -> ());
 
             (* Decompress gzip-compressed messages *)
             let%bind decompressed_payload =
-              if String.length payload >= 2 &&
+              match String.length payload >= 2 &&
                  Char.(payload.[0] = '\x1F') &&
-                 Char.(payload.[1] = '\x8B') then
+                 Char.(payload.[1] = '\x8B') with
+              | true ->
                 (* Gzip-compressed message - decompress using gunzip in thread pool *)
                 In_thread.run (fun () ->
                   try
@@ -77,12 +80,12 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.market) () : (t, s
                     Out_channel.close oc;
                     let result = In_channel.input_all ic in
                     ignore (Core_unix.close_process (ic, oc));
-                    if String.length result > 0 then result else payload
+                    match String.length result > 0 with true -> result | false -> payload
                   with exn ->
                     Core.eprintf "Bitrue: Decompression failed: %s\n%!" (Exn.to_string exn);
                     payload
                 )
-              else
+              | false ->
                 return payload
             in
 
@@ -135,10 +138,9 @@ let messages t : string Pipe.Reader.t = t.message_pipe
 (** Subscribe to an additional stream *)
 let subscribe t (stream : Ws.Stream.t) : unit Deferred.t =
   t.streams := stream :: !(t.streams);
-
-  if not t.active then
-    Deferred.unit
-  else
+  match t.active with
+  | false -> Deferred.unit
+  | true ->
     let msg = Ws.Stream.to_subscribe_message stream in
     let msg_str = Yojson.Safe.to_string msg in
     Websocket_curl.send t.ws msg_str
@@ -146,10 +148,9 @@ let subscribe t (stream : Ws.Stream.t) : unit Deferred.t =
 (** Unsubscribe from a stream *)
 let unsubscribe t (stream : Ws.Stream.t) : unit Deferred.t =
   t.streams := List.filter !(t.streams) ~f:(fun s -> not (phys_equal s stream));
-
-  if not t.active then
-    Deferred.unit
-  else
+  match t.active with
+  | false -> Deferred.unit
+  | true ->
     let msg = Ws.Stream.to_unsubscribe_message stream in
     let msg_str = Yojson.Safe.to_string msg in
     Websocket_curl.send t.ws msg_str

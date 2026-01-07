@@ -63,12 +63,12 @@ module Book = struct
     let bid_levels = List.filter_map book.bids ~f:(fun level ->
       let price = Float.of_string level.price in
       let size = Float.of_string level.size in
-      if Float.(size > 0.) then Some (`Bid, price, size) else None
+      match Float.(size > 0.) with true -> Some (`Bid, price, size) | false -> None
     ) in
     let ask_levels = List.filter_map book.asks ~f:(fun level ->
       let price = Float.of_string level.price in
       let size = Float.of_string level.size in
-      if Float.(size > 0.) then Some (`Ask, price, size) else None
+      match Float.(size > 0.) with true -> Some (`Ask, price, size) | false -> None
     ) in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in

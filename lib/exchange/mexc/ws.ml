@@ -84,12 +84,12 @@ module Protobuf = struct
   let remaining d = String.length d.data - d.pos
 
   let read_byte d =
-    if d.pos >= String.length d.data then None
-    else begin
+    match d.pos >= String.length d.data with
+    | true -> None
+    | false ->
       let b = Char.to_int d.data.[d.pos] in
       d.pos <- d.pos + 1;
       Some b
-    end
 
   (** Read varint (up to 64 bits) *)
   let read_varint d =
@@ -99,9 +99,12 @@ module Protobuf = struct
       | Some b ->
         let b_val = Int64.of_int (b land 0x7f) in
         let value = Int64.(acc lor (shift_left b_val shift)) in
-        if b land 0x80 = 0 then Some value
-        else if shift >= 63 then None
-        else loop value (shift + 7)
+        match b land 0x80 = 0 with
+        | true -> Some value
+        | false ->
+          match shift >= 63 with
+          | true -> None
+          | false -> loop value (shift + 7)
     in
     loop 0L 0
 
@@ -122,12 +125,12 @@ module Protobuf = struct
     | None -> None
     | Some len ->
       let len = Int64.to_int_exn len in
-      if d.pos + len > String.length d.data then None
-      else begin
+      match d.pos + len > String.length d.data with
+      | true -> None
+      | false ->
         let s = String.sub d.data ~pos:d.pos ~len in
         d.pos <- d.pos + len;
         Some s
-      end
 
   (** Read string (length-delimited) *)
   let read_string = read_bytes
@@ -228,8 +231,8 @@ module Parse = struct
     let trade_type = ref 0 in
     let time = ref 0L in
     let rec loop () =
-      if remaining d <= 0 then ()
-      else match read_tag d with
+      match remaining d <= 0 with true -> () | false ->
+      match read_tag d with
         | None -> ()
         | Some (1, LengthDelim) ->
           (match read_string d with Some s -> price := s | None -> ());
@@ -256,8 +259,8 @@ module Parse = struct
     let price = ref "" in
     let quantity = ref "" in
     let rec loop () =
-      if remaining d <= 0 then ()
-      else match read_tag d with
+      match remaining d <= 0 with true -> () | false ->
+      match read_tag d with
         | None -> ()
         | Some (1, LengthDelim) ->
           (match read_string d with Some s -> price := s | None -> ());
@@ -278,8 +281,8 @@ module Parse = struct
     let deals = ref [] in
     let event_type = ref "" in
     let rec loop () =
-      if remaining d <= 0 then ()
-      else match read_tag d with
+      match remaining d <= 0 with true -> () | false ->
+      match read_tag d with
         | None -> ()
         | Some (1, LengthDelim) ->
           (match read_bytes d with
@@ -306,8 +309,8 @@ module Parse = struct
     let from_version = ref "" in
     let to_version = ref "" in
     let rec loop () =
-      if remaining d <= 0 then ()
-      else match read_tag d with
+      match remaining d <= 0 with true -> () | false ->
+      match read_tag d with
         | None -> ()
         | Some (1, LengthDelim) ->
           (match read_bytes d with
@@ -351,8 +354,8 @@ module Parse = struct
     let event_type = ref "" in
     let version = ref "" in
     let rec loop () =
-      if remaining d <= 0 then ()
-      else match read_tag d with
+      match remaining d <= 0 with true -> () | false ->
+      match read_tag d with
         | None -> ()
         | Some (1, LengthDelim) ->
           (match read_bytes d with
@@ -392,8 +395,8 @@ module Parse = struct
     let ask_price = ref "" in
     let ask_quantity = ref "" in
     let rec loop () =
-      if remaining d <= 0 then ()
-      else match read_tag d with
+      match remaining d <= 0 with true -> () | false ->
+      match read_tag d with
         | None -> ()
         | Some (1, LengthDelim) ->
           (match read_string d with Some s -> bid_price := s | None -> ());
@@ -428,8 +431,8 @@ module Parse = struct
     let send_time = ref None in
     let body = ref (Message.Unknown "") in
     let rec loop () =
-      if remaining d <= 0 then ()
-      else match read_tag d with
+      match remaining d <= 0 with true -> () | false ->
+      match read_tag d with
         | None -> ()
         | Some (1, LengthDelim) ->
           (match read_string d with Some s -> channel := s | None -> ());
@@ -484,8 +487,9 @@ end
 (** Parse incoming WebSocket message *)
 let parse_message (data : string) : Message.t =
   (* Check if it's a JSON message (subscription ack, pong, error) *)
-  if String.is_prefix data ~prefix:"{" then begin
-    try
+  match String.is_prefix data ~prefix:"{" with
+  | true ->
+    (try
       let json = Yojson.Safe.from_string data in
       match Yojson.Safe.Util.member "msg" json with
       | `String msg ->
@@ -499,15 +503,13 @@ let parse_message (data : string) : Message.t =
          | `Null -> Message.Raw data
          | _ -> Message.Pong)
       | _ -> Message.Raw data
-    with _ -> Message.Raw data
-  end
-  else begin
+    with _ -> Message.Raw data)
+  | false ->
     (* Binary protobuf message *)
-    try
+    (try
       Message.Data (Parse.parse_wrapper data)
     with _ ->
-      Message.Error (sprintf "Failed to parse protobuf message of length %d" (String.length data))
-  end
+      Message.Error (sprintf "Failed to parse protobuf message of length %d" (String.length data)))
 
 (** Subscription request messages (JSON) *)
 module Subscribe = struct
@@ -571,10 +573,11 @@ let connect ?(url = Endpoint.public_url) ~streams () : t Deferred.Or_error.t =
     (* Start background task to receive messages *)
     don't_wait_for (
       let rec receive_loop () =
-        if not t.active then (
+        match t.active with
+        | false ->
           Pipe.close t.message_writer;
           return ()
-        ) else
+        | true ->
           let%bind msg_opt = Websocket_curl.receive ws in
           match msg_opt with
           | None ->
@@ -628,7 +631,7 @@ let apply_limit_depth_to_book (book : Order_book.Book.t) (depth : Message.limit_
 
 (** Convert deal to normalized trade *)
 let deal_to_trade ~symbol:sym (deal : Message.deal_item) : Fluxum.Types.Trade.t =
-  let side = if deal.trade_type = 1 then Fluxum.Types.Side.Buy else Fluxum.Types.Side.Sell in
+  let side = match deal.trade_type = 1 with true -> Fluxum.Types.Side.Buy | false -> Fluxum.Types.Side.Sell in
   let ts = Time_float_unix.of_span_since_epoch
     (Time_float_unix.Span.of_ms (Int64.to_float deal.time)) in
   { Fluxum.Types.Trade.

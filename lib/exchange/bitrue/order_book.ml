@@ -46,12 +46,12 @@ module Book = struct
     let bid_levels = List.filter_map depth.tick.buys ~f:(fun (price_str, qty_str) ->
       let price = Float.of_string price_str in
       let volume = Float.of_string qty_str in
-      if Float.(volume > 0.) then Some (`Bid, price, volume) else None
+      match Float.(volume > 0.) with true -> Some (`Bid, price, volume) | false -> None
     ) in
     let ask_levels = List.filter_map depth.tick.asks ~f:(fun (price_str, qty_str) ->
       let price = Float.of_string price_str in
       let volume = Float.of_string qty_str in
-      if Float.(volume > 0.) then Some (`Ask, price, volume) else None
+      match Float.(volume > 0.) with true -> Some (`Ask, price, volume) | false -> None
     ) in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in
@@ -64,12 +64,12 @@ module Book = struct
     let bid_levels = List.filter_map book.bids ~f:(fun (price_str, qty_str) ->
       let price = Float.of_string price_str in
       let volume = Float.of_string qty_str in
-      if Float.(volume > 0.) then Some (`Bid, price, volume) else None
+      match Float.(volume > 0.) with true -> Some (`Bid, price, volume) | false -> None
     ) in
     let ask_levels = List.filter_map book.asks ~f:(fun (price_str, qty_str) ->
       let price = Float.of_string price_str in
       let volume = Float.of_string qty_str in
-      if Float.(volume > 0.) then Some (`Ask, price, volume) else None
+      match Float.(volume > 0.) with true -> Some (`Ask, price, volume) | false -> None
     ) in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in

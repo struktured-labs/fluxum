@@ -32,7 +32,7 @@ module Book = struct
   (** Update (add or remove) price level - used by tests *)
   let update t ~side ~price ~size =
     (* Get current size by looking at the alist, add new size, then set *)
-    let levels = if Poly.(side = `Bid) then bids_alist t else asks_alist t in
+    let levels = match Poly.(side = `Bid) with true -> bids_alist t | false -> asks_alist t in
     let current =
       match List.Assoc.find levels ~equal:Float.equal price with
       | Some level -> Price_level.volume level

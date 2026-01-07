@@ -298,9 +298,9 @@ let post ~cfg ~body : (Yojson.Safe.t, [> Error.t ]) result Deferred.t =
   | Ok (response, body_str) ->
     let status = Cohttp.Response.status response in
     let code = Cohttp.Code.code_of_status status in
-    if code >= 400 then
-      Error (`Http (code, body_str))
-    else
+    match code >= 400 with
+    | true -> Error (`Http (code, body_str))
+    | false ->
       match Yojson.Safe.from_string body_str with
       | exception _ -> Error (`Json_parse body_str)
       | json -> Ok json

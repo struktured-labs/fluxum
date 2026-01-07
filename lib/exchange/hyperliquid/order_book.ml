@@ -46,12 +46,12 @@ module Book = struct
     let bid_levels = List.filter_map bids ~f:(fun level ->
       let price = Float.of_string level.Ws.Message.px in
       let volume = Float.of_string level.sz in
-      if Float.(volume > 0.) then Some (`Bid, price, volume) else None
+      match Float.(volume > 0.) with true -> Some (`Bid, price, volume) | false -> None
     ) in
     let ask_levels = List.filter_map asks ~f:(fun level ->
       let price = Float.of_string level.Ws.Message.px in
       let volume = Float.of_string level.sz in
-      if Float.(volume > 0.) then Some (`Ask, price, volume) else None
+      match Float.(volume > 0.) with true -> Some (`Ask, price, volume) | false -> None
     ) in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in
@@ -67,12 +67,12 @@ module Book = struct
     let bid_levels = List.filter_map bids ~f:(fun level ->
       let price = Float.of_string level.Rest.Types.px in
       let volume = Float.of_string level.sz in
-      if Float.(volume > 0.) then Some (`Bid, price, volume) else None
+      match Float.(volume > 0.) with true -> Some (`Bid, price, volume) | false -> None
     ) in
     let ask_levels = List.filter_map asks ~f:(fun level ->
       let price = Float.of_string level.Rest.Types.px in
       let volume = Float.of_string level.sz in
-      if Float.(volume > 0.) then Some (`Ask, price, volume) else None
+      match Float.(volume > 0.) with true -> Some (`Ask, price, volume) | false -> None
     ) in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in

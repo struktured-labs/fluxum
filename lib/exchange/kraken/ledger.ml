@@ -163,16 +163,16 @@ module Entry = struct
       let avg_buy_price, avg_sell_price = match side with
         | Buy ->
           let new_avg_buy =
-            if Float.(total_buy_qty > 0.) then
-              (t.avg_buy_price *. t.total_buy_qty +. price *. qty) /. total_buy_qty
-            else 0.
+            match Float.(total_buy_qty > 0.) with
+            | true -> (t.avg_buy_price *. t.total_buy_qty +. price *. qty) /. total_buy_qty
+            | false -> 0.
           in
           (new_avg_buy, t.avg_sell_price)
         | Sell ->
           let new_avg_sell =
-            if Float.(total_sell_qty > 0.) then
-              (t.avg_sell_price *. t.total_sell_qty +. price *. qty) /. total_sell_qty
-            else 0.
+            match Float.(total_sell_qty > 0.) with
+            | true -> (t.avg_sell_price *. t.total_sell_qty +. price *. qty) /. total_sell_qty
+            | false -> 0.
           in
           (t.avg_buy_price, new_avg_sell)
       in
@@ -180,9 +180,9 @@ module Entry = struct
       (* Overall average price *)
       let avg_price =
         let total_qty = total_buy_qty +. total_sell_qty in
-        if Float.(total_qty > 0.) then
-          (avg_buy_price *. total_buy_qty +. avg_sell_price *. total_sell_qty) /. total_qty
-        else 0.
+        match Float.(total_qty > 0.) with
+        | true -> (avg_buy_price *. total_buy_qty +. avg_sell_price *. total_sell_qty) /. total_qty
+        | false -> 0.
       in
 
       (* Update buy/sell notionals *)
@@ -198,9 +198,9 @@ module Entry = struct
           t.cost_basis +. package_price +. fee_usd
         | Sell ->
           (* Selling reduces cost basis proportionally *)
-          if Float.(t.running_qty > 0.) then
-            t.cost_basis -. (t.cost_basis *. qty /. t.running_qty)
-          else 0.
+          match Float.(t.running_qty > 0.) with
+          | true -> t.cost_basis -. (t.cost_basis *. qty /. t.running_qty)
+          | false -> 0.
       in
 
       (* Running quantity and price *)
@@ -210,7 +210,7 @@ module Entry = struct
       in
 
       let running_price =
-        if Float.(running_qty > 0.) then cost_basis /. running_qty else 0.
+        match Float.(running_qty > 0.) with true -> cost_basis /. running_qty | false -> 0.
       in
 
       { symbol = t.symbol;
