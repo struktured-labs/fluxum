@@ -44,17 +44,17 @@ let test_depth () =
   | Ok book ->
     let bid_count = List.length book.bids in
     let ask_count = List.length book.asks in
-    if bid_count > 0 && ask_count > 0 then begin
-      pass (sprintf "Got %d bids, %d asks" bid_count ask_count);
-      (match List.hd book.bids with
-       | Some (price, qty) -> pass (sprintf "Best bid: %s @ $%s" qty price)
-       | None -> ());
-      (match List.hd book.asks with
-       | Some (price, qty) -> pass (sprintf "Best ask: %s @ $%s" qty price)
-       | None -> ());
-      pass (sprintf "Last update ID: %Ld" book.lastUpdateId)
-    end else
-      fail "Empty order book"
+    (match bid_count > 0 && ask_count > 0 with
+     | true ->
+       pass (sprintf "Got %d bids, %d asks" bid_count ask_count);
+       (match List.hd book.bids with
+        | Some (price, qty) -> pass (sprintf "Best bid: %s @ $%s" qty price)
+        | None -> ());
+       (match List.hd book.asks with
+        | Some (price, qty) -> pass (sprintf "Best ask: %s @ $%s" qty price)
+        | None -> ());
+       pass (sprintf "Last update ID: %Ld" book.lastUpdateId)
+     | false -> fail "Empty order book")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Bitrue.Rest.Error.sexp_of_t err)))
 
@@ -64,16 +64,16 @@ let test_trades () =
   Bitrue.Rest.trades cfg ~symbol:"BTCUSDT" ~limit:5 () >>| function
   | Ok trades ->
     let count = List.length trades in
-    if count > 0 then begin
-      pass (sprintf "Got %d trades" count);
-      (match List.hd trades with
-       | Some t ->
-         let side = match t.isBuyerMaker with true -> "SELL" | false -> "BUY" in
-         pass (sprintf "Latest: %s %s @ $%s" side t.qty t.price);
-         pass (sprintf "Trade ID: %Ld" t.id)
-       | None -> ())
-    end else
-      fail "No trades returned"
+    (match count > 0 with
+     | true ->
+       pass (sprintf "Got %d trades" count);
+       (match List.hd trades with
+        | Some t ->
+          let side = match t.isBuyerMaker with true -> "SELL" | false -> "BUY" in
+          pass (sprintf "Latest: %s %s @ $%s" side t.qty t.price);
+          pass (sprintf "Trade ID: %Ld" t.id)
+        | None -> ())
+     | false -> fail "No trades returned")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Bitrue.Rest.Error.sexp_of_t err)))
 
@@ -97,15 +97,15 @@ let test_klines () =
   Bitrue.Rest.klines cfg ~symbol:"BTCUSDT" ~interval:"1h" ~limit:5 () >>| function
   | Ok klines ->
     let count = List.length klines in
-    if count > 0 then begin
-      pass (sprintf "Got %d klines" count);
-      (match List.hd klines with
-       | Some k ->
-         pass (sprintf "Latest: O=%s H=%s L=%s C=%s" k.open_ k.high k.low k.close);
-         pass (sprintf "Volume: %s, Trades: %d" k.volume k.trades)
-       | None -> ())
-    end else
-      fail "No klines returned"
+    (match count > 0 with
+     | true ->
+       pass (sprintf "Got %d klines" count);
+       (match List.hd klines with
+        | Some k ->
+          pass (sprintf "Latest: O=%s H=%s L=%s C=%s" k.open_ k.high k.low k.close);
+          pass (sprintf "Volume: %s, Trades: %d" k.volume k.trades)
+        | None -> ())
+     | false -> fail "No klines returned")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Bitrue.Rest.Error.sexp_of_t err)))
 

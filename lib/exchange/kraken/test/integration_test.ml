@@ -210,10 +210,9 @@ let run_tests () =
   printf "Failed:       %d ✗\n" !tests_failed;
   printf "===========================================\n";
 
-  if !tests_failed > 0 then
-    exit 1
-  else
-    return ()
+  match !tests_failed > 0 with
+  | true -> exit 1
+  | false -> return ()
 
 let () =
   don't_wait_for (run_tests ());

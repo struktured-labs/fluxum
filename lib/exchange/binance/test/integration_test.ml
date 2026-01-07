@@ -29,10 +29,9 @@ let test_server_time () =
   printf "\n[REST] Server Time\n";
   Binance.V3.Server_time.request cfg () >>| function
   | `Ok resp ->
-    if Int64.(resp.serverTime > 0L) then
-      pass (sprintf "Server time: %Ld" resp.serverTime)
-    else
-      fail "Server time is 0"
+    (match Int64.(resp.serverTime > 0L) with
+     | true -> pass (sprintf "Server time: %Ld" resp.serverTime)
+     | false -> fail "Server time is 0")
   | #Binance.Rest.Error.t as err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Binance.Rest.Error.sexp_of_t err)))
 
@@ -56,17 +55,17 @@ let test_depth () =
   | `Ok resp ->
     let bid_count = List.length resp.bids in
     let ask_count = List.length resp.asks in
-    if bid_count > 0 && ask_count > 0 then begin
-      pass (sprintf "Got %d bids, %d asks" bid_count ask_count);
-      (match List.hd resp.bids with
-       | Some (price, qty) -> pass (sprintf "Best bid: %s @ %s" qty price)
-       | None -> ());
-      (match List.hd resp.asks with
-       | Some (price, qty) -> pass (sprintf "Best ask: %s @ %s" qty price)
-       | None -> ());
-      pass (sprintf "Last update ID: %Ld" resp.lastUpdateId)
-    end else
-      fail "Empty order book"
+    (match bid_count > 0 && ask_count > 0 with
+     | true ->
+       pass (sprintf "Got %d bids, %d asks" bid_count ask_count);
+       (match List.hd resp.bids with
+        | Some (price, qty) -> pass (sprintf "Best bid: %s @ %s" qty price)
+        | None -> ());
+       (match List.hd resp.asks with
+        | Some (price, qty) -> pass (sprintf "Best ask: %s @ %s" qty price)
+        | None -> ());
+       pass (sprintf "Last update ID: %Ld" resp.lastUpdateId)
+     | false -> fail "Empty order book")
   | #Binance.Rest.Error.t as err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Binance.Rest.Error.sexp_of_t err)))
 
@@ -88,16 +87,16 @@ let test_recent_trades () =
   Binance.V3.Recent_trades.request cfg { symbol = "BTCUSDT"; limit = Some 5 } >>| function
   | `Ok trades ->
     let count = List.length trades in
-    if count > 0 then begin
-      pass (sprintf "Got %d trades" count);
-      (match List.hd trades with
-       | Some trade ->
-         let side = match trade.isBuyerMaker with true -> "SELL" | false -> "BUY" in
-         pass (sprintf "Latest: %s %s @ %s" side trade.qty trade.price);
-         pass (sprintf "Trade ID: %Ld" trade.id)
-       | None -> ())
-    end else
-      fail "No trades returned"
+    (match count > 0 with
+     | true ->
+       pass (sprintf "Got %d trades" count);
+       (match List.hd trades with
+        | Some trade ->
+          let side = match trade.isBuyerMaker with true -> "SELL" | false -> "BUY" in
+          pass (sprintf "Latest: %s %s @ %s" side trade.qty trade.price);
+          pass (sprintf "Trade ID: %Ld" trade.id)
+        | None -> ())
+     | false -> fail "No trades returned")
   | #Binance.Rest.Error.t as err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Binance.Rest.Error.sexp_of_t err)))
 

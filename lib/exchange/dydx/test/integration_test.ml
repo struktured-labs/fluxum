@@ -26,20 +26,20 @@ let test_markets () =
   Dydx.Rest.markets (module Dydx.Cfg.Production) () >>| function
   | Ok resp ->
     let count = List.length resp.markets in
-    if count > 0 then begin
-      pass (sprintf "Got %d markets" count);
-      match List.hd resp.markets with
-      | Some (ticker, market) ->
-        let base = Dydx.Rest.Types.base_asset_of_ticker ticker in
-        let quote = Dydx.Rest.Types.quote_asset_of_ticker ticker in
-        pass (sprintf "%s: %s/%s (status: %s)" ticker base quote market.status);
-        Option.iter market.oraclePrice ~f:(fun p ->
-          pass (sprintf "Oracle price: %s" p));
-        Option.iter market.volume24H ~f:(fun v ->
-          pass (sprintf "24h volume: %s" v))
-      | None -> ()
-    end else
-      fail "No markets returned"
+    (match count > 0 with
+     | true ->
+       pass (sprintf "Got %d markets" count);
+       (match List.hd resp.markets with
+        | Some (ticker, market) ->
+          let base = Dydx.Rest.Types.base_asset_of_ticker ticker in
+          let quote = Dydx.Rest.Types.quote_asset_of_ticker ticker in
+          pass (sprintf "%s: %s/%s (status: %s)" ticker base quote market.status);
+          Option.iter market.oraclePrice ~f:(fun p ->
+            pass (sprintf "Oracle price: %s" p));
+          Option.iter market.volume24H ~f:(fun v ->
+            pass (sprintf "24h volume: %s" v))
+        | None -> ())
+     | false -> fail "No markets returned")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Dydx.Rest.Error.sexp_of_t err)))
 
@@ -64,15 +64,15 @@ let test_trades () =
   Dydx.Rest.trades (module Dydx.Cfg.Production) ~market:"BTC-USD" ~limit:5 () >>| function
   | Ok trades ->
     let count = List.length trades in
-    if count > 0 then begin
-      pass (sprintf "Got %d trades" count);
-      match List.hd trades with
-      | Some trade ->
-        pass (sprintf "Latest: %s %s @ %s" trade.side trade.size trade.price);
-        pass (sprintf "Created: %s" trade.createdAt)
-      | None -> ()
-    end else
-      fail "No trades returned"
+    (match count > 0 with
+     | true ->
+       pass (sprintf "Got %d trades" count);
+       (match List.hd trades with
+        | Some trade ->
+          pass (sprintf "Latest: %s %s @ %s" trade.side trade.size trade.price);
+          pass (sprintf "Created: %s" trade.createdAt)
+        | None -> ())
+     | false -> fail "No trades returned")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Dydx.Rest.Error.sexp_of_t err)))
 
@@ -82,15 +82,15 @@ let test_candles () =
     ~resolution:Dydx.Common.ONE_HOUR ~limit:5 () >>| function
   | Ok candles ->
     let count = List.length candles in
-    if count > 0 then begin
-      pass (sprintf "Got %d candles" count);
-      match List.hd candles with
-      | Some candle ->
-        pass (sprintf "O: %s H: %s L: %s C: %s" candle.open_ candle.high candle.low candle.close);
-        pass (sprintf "Volume: %s USD" candle.usdVolume)
-      | None -> ()
-    end else
-      fail "No candles returned"
+    (match count > 0 with
+     | true ->
+       pass (sprintf "Got %d candles" count);
+       (match List.hd candles with
+        | Some candle ->
+          pass (sprintf "O: %s H: %s L: %s C: %s" candle.open_ candle.high candle.low candle.close);
+          pass (sprintf "Volume: %s USD" candle.usdVolume)
+        | None -> ())
+     | false -> fail "No candles returned")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Dydx.Rest.Error.sexp_of_t err)))
 

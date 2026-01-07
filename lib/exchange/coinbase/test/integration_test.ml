@@ -44,20 +44,20 @@ let test_products () =
   get_json "/products" >>| function
   | Ok (`List products) ->
     let count = List.length products in
-    if count > 0 then begin
-      pass (sprintf "Got %d products" count);
-      let open Yojson.Safe.Util in
-      (match List.find products ~f:(fun p ->
-         String.equal (p |> member "id" |> to_string) "BTC-USD") with
-       | Some p ->
-         let status = p |> member "status" |> to_string in
-         pass (sprintf "BTC-USD: status=%s" status);
-         let base = p |> member "base_currency" |> to_string in
-         let quote = p |> member "quote_currency" |> to_string in
-         pass (sprintf "BTC-USD: %s/%s" base quote)
-       | None -> fail "BTC-USD not found in products")
-    end else
-      fail "No products returned"
+    (match count > 0 with
+     | true ->
+       pass (sprintf "Got %d products" count);
+       let open Yojson.Safe.Util in
+       (match List.find products ~f:(fun p ->
+          String.equal (p |> member "id" |> to_string) "BTC-USD") with
+        | Some p ->
+          let status = p |> member "status" |> to_string in
+          pass (sprintf "BTC-USD: status=%s" status);
+          let base = p |> member "base_currency" |> to_string in
+          let quote = p |> member "quote_currency" |> to_string in
+          pass (sprintf "BTC-USD: %s/%s" base quote)
+        | None -> fail "BTC-USD not found in products")
+     | false -> fail "No products returned")
   | Ok _ -> fail "Unexpected response format"
   | Error e -> fail (sprintf "Error: %s" e)
 
@@ -76,7 +76,8 @@ let test_product_book () =
          in
          let bid_count = List.length bids in
          let ask_count = List.length asks in
-         if bid_count > 0 && ask_count > 0 then begin
+         (match bid_count > 0 && ask_count > 0 with
+         | true ->
            pass (sprintf "Got %d bids, %d asks" bid_count ask_count);
            (* Coinbase book format: [price, size, num_orders] *)
            (match List.hd bids with
@@ -91,8 +92,7 @@ let test_product_book () =
               let s = match size with `String s -> s | _ -> "?" in
               pass (sprintf "Best ask: %s @ $%s" s p)
             | _ -> pass "Could not parse ask level")
-         end else
-           fail (sprintf "Empty order book (bids=%d, asks=%d)" bid_count ask_count)
+         | false -> fail (sprintf "Empty order book (bids=%d, asks=%d)" bid_count ask_count))
        | _ -> fail "Unexpected JSON structure"
      with e -> fail (sprintf "Parse error: %s" (Exn.to_string e)))
   | Error e -> fail (sprintf "Error: %s" e)
@@ -119,25 +119,25 @@ let test_trades () =
   | Ok json ->
     let trades = match json with `List l -> l | _ -> [] in
     let count = List.length trades in
-    if count > 0 then begin
-      pass (sprintf "Got %d trades" count);
-      let open Yojson.Safe.Util in
-      (match List.hd trades with
-       | Some trade ->
-         (try
-            let price = trade |> member "price" |> to_string in
-            let size = trade |> member "size" |> to_string in
-            let side = trade |> member "side" |> to_string in
-            let trade_id_str = match trade |> member "trade_id" with
-              | `Int n -> Int.to_string n
-              | `Intlit s -> s
-              | _ -> "?"
-            in
-            pass (sprintf "Latest: %s %s @ $%s (id: %s)" side size price trade_id_str)
-          with e -> fail (sprintf "Parse error: %s" (Exn.to_string e)))
-       | None -> ())
-    end else
-      fail "No trades returned"
+    (match count > 0 with
+     | true ->
+       pass (sprintf "Got %d trades" count);
+       let open Yojson.Safe.Util in
+       (match List.hd trades with
+        | Some trade ->
+          (try
+             let price = trade |> member "price" |> to_string in
+             let size = trade |> member "size" |> to_string in
+             let side = trade |> member "side" |> to_string in
+             let trade_id_str = match trade |> member "trade_id" with
+               | `Int n -> Int.to_string n
+               | `Intlit s -> s
+               | _ -> "?"
+             in
+             pass (sprintf "Latest: %s %s @ $%s (id: %s)" side size price trade_id_str)
+           with e -> fail (sprintf "Parse error: %s" (Exn.to_string e)))
+        | None -> ())
+     | false -> fail "No trades returned")
   | Error e -> fail (sprintf "Error: %s" e)
 
 (* ============================================================ *)

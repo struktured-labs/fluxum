@@ -112,26 +112,26 @@ let test_trades () =
   | Ok json ->
     let trades = match json with `List l -> l | _ -> [] in
     let count = List.length trades in
-    if count > 0 then begin
-      pass (sprintf "Got %d trades" count);
-      (match List.hd trades with
-       | Some trade ->
-         let open Yojson.Safe.Util in
-         (try
-            let price = trade |> member "price" |> to_string in
-            let amount = trade |> member "amount" |> to_string in
-            let side = trade |> member "type" |> to_string in
-            (* tid can be a large int64, use to_string or to_int_exn with care *)
-            let tid_str = match trade |> member "tid" with
-              | `Int n -> Int.to_string n
-              | `Intlit s -> s
-              | _ -> "?"
-            in
-            pass (sprintf "Latest: %s %s @ $%s (tid: %s)" side amount price tid_str)
-          with e -> fail (sprintf "Failed to parse trade: %s" (Exn.to_string e)))
-       | None -> ())
-    end else
-      fail "No trades returned"
+    (match count > 0 with
+     | true ->
+       pass (sprintf "Got %d trades" count);
+       (match List.hd trades with
+        | Some trade ->
+          let open Yojson.Safe.Util in
+          (try
+             let price = trade |> member "price" |> to_string in
+             let amount = trade |> member "amount" |> to_string in
+             let side = trade |> member "type" |> to_string in
+             (* tid can be a large int64, use to_string or to_int_exn with care *)
+             let tid_str = match trade |> member "tid" with
+               | `Int n -> Int.to_string n
+               | `Intlit s -> s
+               | _ -> "?"
+             in
+             pass (sprintf "Latest: %s %s @ $%s (tid: %s)" side amount price tid_str)
+           with e -> fail (sprintf "Failed to parse trade: %s" (Exn.to_string e)))
+        | None -> ())
+     | false -> fail "No trades returned")
   | Error e -> fail (sprintf "Error: %s" e)
 
 let test_symbol_details () =

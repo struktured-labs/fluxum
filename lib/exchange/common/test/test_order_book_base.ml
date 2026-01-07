@@ -359,8 +359,9 @@ let%test_module "Edge Cases" = (module struct
   let%test "many price levels" =
     let book = make_book "BTC/USD" in
     let rec add_levels book price count =
-      if count = 0 then book
-      else
+      match count = 0 with
+      | true -> book
+      | false ->
         let book = Book.set book ~side:`Bid ~price ~size:1.0 in
         add_levels book (price -. 1.) (count - 1)
     in

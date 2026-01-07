@@ -26,14 +26,14 @@ let test_all_mids () =
   let cfg = Hyperliquid.Cfg.production in
   Hyperliquid.Rest.all_mids cfg >>| function
   | Ok mids ->
-    if List.length mids > 0 then begin
-      pass (sprintf "Got %d mid prices" (List.length mids));
-      (* Find BTC *)
-      (match List.find mids ~f:(fun (coin, _) -> String.equal coin "BTC") with
-       | Some (_, price) -> pass (sprintf "BTC mid price: %s" price)
-       | None -> pass "BTC not in list (may be on different market)")
-    end else
-      fail "No mid prices returned"
+    (match List.length mids > 0 with
+     | true ->
+       pass (sprintf "Got %d mid prices" (List.length mids));
+       (* Find BTC *)
+       (match List.find mids ~f:(fun (coin, _) -> String.equal coin "BTC") with
+        | Some (_, price) -> pass (sprintf "BTC mid price: %s" price)
+        | None -> pass "BTC not in list (may be on different market)")
+     | false -> fail "No mid prices returned")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Hyperliquid.Rest.Error.sexp_of_t err)))
 
@@ -47,14 +47,16 @@ let test_l2_book () =
      | [bids; asks] ->
        pass (sprintf "Bids: %d levels, Asks: %d levels"
          (List.length bids) (List.length asks));
-       if List.length bids > 0 then begin
-         let best_bid = List.hd_exn bids in
-         pass (sprintf "Best bid: %s @ %s" best_bid.sz best_bid.px)
-       end;
-       if List.length asks > 0 then begin
-         let best_ask = List.hd_exn asks in
-         pass (sprintf "Best ask: %s @ %s" best_ask.sz best_ask.px)
-       end
+       (match List.length bids > 0 with
+        | true ->
+          let best_bid = List.hd_exn bids in
+          pass (sprintf "Best bid: %s @ %s" best_bid.sz best_bid.px)
+        | false -> ());
+       (match List.length asks > 0 with
+        | true ->
+          let best_ask = List.hd_exn asks in
+          pass (sprintf "Best ask: %s @ %s" best_ask.sz best_ask.px)
+        | false -> ())
      | _ -> fail "Unexpected levels structure")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Hyperliquid.Rest.Error.sexp_of_t err)))
@@ -66,10 +68,11 @@ let test_meta () =
   | Ok meta ->
     let count = List.length meta.universe in
     pass (sprintf "Universe has %d assets" count);
-    if count > 0 then begin
-      let first = List.hd_exn meta.universe in
-      pass (sprintf "First asset: %s (decimals: %d)" first.name first.szDecimals)
-    end
+    (match count > 0 with
+     | true ->
+       let first = List.hd_exn meta.universe in
+       pass (sprintf "First asset: %s (decimals: %d)" first.name first.szDecimals)
+     | false -> ())
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Hyperliquid.Rest.Error.sexp_of_t err)))
 
@@ -80,10 +83,11 @@ let test_meta_and_asset_ctxs () =
   | Ok (meta, ctxs) ->
     pass (sprintf "Universe: %d assets, Contexts: %d"
       (List.length meta.universe) (List.length ctxs));
-    if List.length ctxs > 0 then begin
-      let ctx = List.hd_exn ctxs in
-      pass (sprintf "First context - OI: %s, Funding: %s" ctx.openInterest ctx.funding)
-    end
+    (match List.length ctxs > 0 with
+     | true ->
+       let ctx = List.hd_exn ctxs in
+       pass (sprintf "First context - OI: %s, Funding: %s" ctx.openInterest ctx.funding)
+     | false -> ())
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Hyperliquid.Rest.Error.sexp_of_t err)))
 
@@ -92,12 +96,12 @@ let test_recent_trades () =
   let cfg = Hyperliquid.Cfg.production in
   Hyperliquid.Rest.recent_trades cfg ~coin:"ETH" >>| function
   | Ok trades ->
-    if List.length trades > 0 then begin
-      pass (sprintf "Got %d recent trades" (List.length trades));
-      let trade = List.hd_exn trades in
-      pass (sprintf "Latest: %s %s @ %s" trade.side trade.sz trade.px)
-    end else
-      pass "No recent trades (market may be quiet)"
+    (match List.length trades > 0 with
+     | true ->
+       pass (sprintf "Got %d recent trades" (List.length trades));
+       let trade = List.hd_exn trades in
+       pass (sprintf "Latest: %s %s @ %s" trade.side trade.sz trade.px)
+     | false -> pass "No recent trades (market may be quiet)")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Hyperliquid.Rest.Error.sexp_of_t err)))
 
@@ -124,25 +128,24 @@ let test_websocket_connection () =
 
     let rec read_loop () =
       let elapsed = Time_float_unix.diff (Time_float_unix.now ()) start_time in
-      if Time_float_unix.Span.(elapsed > timeout) then begin
-        if !messages_received > 0 then
-          pass (sprintf "Received %d messages before timeout" !messages_received)
-        else
-          fail "No messages received within timeout";
-        return ()
-      end else begin
+      (match Time_float_unix.Span.(elapsed > timeout) with
+       | true ->
+         (match !messages_received > 0 with
+          | true -> pass (sprintf "Received %d messages before timeout" !messages_received)
+          | false -> fail "No messages received within timeout");
+         return ()
+       | false ->
         match%bind Clock.with_timeout (Time_float.Span.of_sec 3.0) (Pipe.read (Hyperliquid.Ws.messages ws)) with
         | `Timeout ->
-          if !messages_received > 0 then begin
-            pass (sprintf "Received %d messages total" !messages_received);
-            return ()
-          end else
-            read_loop ()
+          (match !messages_received > 0 with
+           | true ->
+             pass (sprintf "Received %d messages total" !messages_received);
+             return ()
+           | false -> read_loop ())
         | `Result `Eof ->
-          if !messages_received > 0 then
-            pass (sprintf "Connection closed after %d messages" !messages_received)
-          else
-            fail "Connection closed without receiving messages";
+          (match !messages_received > 0 with
+           | true -> pass (sprintf "Connection closed after %d messages" !messages_received)
+           | false -> fail "Connection closed without receiving messages");
           return ()
         | `Result (`Ok msg) ->
           incr messages_received;
@@ -166,13 +169,12 @@ let test_websocket_connection () =
              pass "Received message (unknown type)"
            | _ ->
              pass "Received other message type");
-          if !messages_received >= 5 then begin
-            pass (sprintf "Successfully received %d messages" !messages_received);
-            Hyperliquid.Ws.close ws;
-            return ()
-          end else
-            read_loop ()
-      end
+          (match !messages_received >= 5 with
+           | true ->
+             pass (sprintf "Successfully received %d messages" !messages_received);
+             Hyperliquid.Ws.close ws;
+             return ()
+           | false -> read_loop ()))
     in
     read_loop ()
 
@@ -190,17 +192,17 @@ let test_websocket_l2_book () =
     let messages_received = ref 0 in
 
     let rec read_loop () =
-      if !messages_received >= 3 then begin
-        pass (sprintf "Received %d L2 book updates" !messages_received);
-        Hyperliquid.Ws.close ws;
-        return ()
-      end else begin
+      (match !messages_received >= 3 with
+       | true ->
+         pass (sprintf "Received %d L2 book updates" !messages_received);
+         Hyperliquid.Ws.close ws;
+         return ()
+       | false ->
         match%bind Clock.with_timeout (Time_float.Span.of_sec 5.0) (Pipe.read (Hyperliquid.Ws.messages ws)) with
         | `Timeout ->
-          if !messages_received > 0 then
-            pass (sprintf "Got %d updates before timeout" !messages_received)
-          else
-            fail "No L2 book updates received";
+          (match !messages_received > 0 with
+           | true -> pass (sprintf "Got %d updates before timeout" !messages_received)
+           | false -> fail "No L2 book updates received");
           Hyperliquid.Ws.close ws;
           return ()
         | `Result `Eof ->
@@ -219,8 +221,7 @@ let test_websocket_l2_book () =
            | Hyperliquid.Ws.Message.SubscriptionResponse _ ->
              pass "Subscription confirmed"
            | _ -> ());
-          read_loop ()
-      end
+          read_loop ())
     in
     read_loop ()
 
@@ -253,11 +254,11 @@ let run_tests () =
   printf "Failed:       %d X\n" !tests_failed;
   printf "===========================================\n";
 
-  if !tests_failed > 0 then begin
+  match !tests_failed > 0 with
+  | true ->
     printf "\nSome tests failed\n";
     exit 1
-  end else
-    return ()
+  | false -> return ()
 
 let () =
   don't_wait_for (run_tests ());
