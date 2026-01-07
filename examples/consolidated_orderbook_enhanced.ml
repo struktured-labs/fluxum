@@ -32,7 +32,8 @@ let main () =
         updates := !updates + 1;
 
         (* Print consolidated book every 10 updates *)
-        if !updates % 10 = 0 then (
+        (match !updates % 10 = 0 with
+         | true ->
           Consolidated_order_book.Book.pretty_print ~max_depth:5 !book_ref ();
 
           (* Calculate and print analytics *)
@@ -51,8 +52,8 @@ let main () =
           (match Consolidated_order_book.Book.vwap_bid !book_ref ~volume:1.0 with
            | Some vwap -> printf "VWAP to sell 1.0 BTC: $%.2f\n" vwap
            | None -> printf "Insufficient liquidity to sell 1.0 BTC\n");
-          printf "\n%!";
-        );
+          printf "\n%!"
+         | false -> ());
         Deferred.unit
       | `Channel_parse_error err ->
         printf "Gemini channel parse error: %s\n%!" err;

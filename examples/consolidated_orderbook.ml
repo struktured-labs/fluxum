@@ -74,43 +74,43 @@ let test ~exchanges ~depth ~max_display =
 
   (* Conditionally connect to Gemini *)
   let%bind gemini_pipe =
-    if List.mem selected `Gemini ~equal:Poly.equal then (
+    match List.mem selected `Gemini ~equal:Poly.equal with
+    | true ->
       let module Gemini_cfg = Gemini.Cfg.Production () in
       let%bind pipe = Gemini.Order_book.Book.pipe (module Gemini_cfg) ~symbol:`Btcusd () in
       return (Pipe.map pipe ~f:(fun result -> Gemini_update result))
-    ) else (
+    | false ->
       return (create_closed_pipe ())
-    )
   in
 
   (* Conditionally connect to Kraken *)
   let%bind kraken_pipe =
-    if List.mem selected `Kraken ~equal:Poly.equal then (
+    match List.mem selected `Kraken ~equal:Poly.equal with
+    | true ->
       let%bind pipe = Kraken.Order_book.Book.pipe ~symbol:"XBT/USD" ~depth () in
       return (Pipe.map pipe ~f:(fun result -> Kraken_update result))
-    ) else (
+    | false ->
       return (create_closed_pipe ())
-    )
   in
 
   (* Conditionally connect to Hyperliquid *)
   let%bind hyperliquid_pipe =
-    if List.mem selected `Hyperliquid ~equal:Poly.equal then (
+    match List.mem selected `Hyperliquid ~equal:Poly.equal with
+    | true ->
       let%bind pipe = Hyperliquid.Order_book.Book.pipe ~symbol:"BTC" () in
       return (Pipe.map pipe ~f:(fun result -> Hyperliquid_update result))
-    ) else (
+    | false ->
       return (create_closed_pipe ())
-    )
   in
 
   (* Conditionally connect to Bitrue *)
   let%bind bitrue_pipe_result =
-    if List.mem selected `Bitrue ~equal:Poly.equal then (
+    match List.mem selected `Bitrue ~equal:Poly.equal with
+    | true ->
       let bitrue_symbol = Fluxum.Types.Symbol.of_string "BTCUSDT" in
       Bitrue.Order_book.Book.pipe ~symbol:bitrue_symbol ()
-    ) else (
+    | false ->
       return (Ok (create_closed_pipe ()))
-    )
   in
   let bitrue_pipe = match bitrue_pipe_result with
     | Ok pipe -> Pipe.map pipe ~f:(fun result -> Bitrue_update result)
@@ -121,24 +121,24 @@ let test ~exchanges ~depth ~max_display =
 
   (* Conditionally connect to Binance *)
   let%bind binance_pipe =
-    if List.mem selected `Binance ~equal:Poly.equal then (
+    match List.mem selected `Binance ~equal:Poly.equal with
+    | true ->
       let binance_symbol = Fluxum.Types.Symbol.of_string "BTCUSDT" in
       let%bind pipe = Binance.Order_book.Book.pipe ~symbol:binance_symbol () in
       return (Pipe.map pipe ~f:(fun result -> Binance_update result))
-    ) else (
+    | false ->
       return (create_closed_pipe ())
-    )
   in
 
   (* Conditionally connect to Coinbase *)
   let%bind coinbase_pipe =
-    if List.mem selected `Coinbase ~equal:Poly.equal then (
+    match List.mem selected `Coinbase ~equal:Poly.equal with
+    | true ->
       let coinbase_symbol = Fluxum.Types.Symbol.of_string "BTC-USD" in
       let%bind pipe = Coinbase.Order_book.Book.pipe ~symbol:coinbase_symbol () in
       return (Pipe.map pipe ~f:(fun result -> Coinbase_update result))
-    ) else (
+    | false ->
       return (create_closed_pipe ())
-    )
   in
 
   printf "✓ Connected to selected exchanges\n\n%!";
@@ -164,10 +164,11 @@ let test ~exchanges ~depth ~max_display =
         | Gemini_update book_result ->
           (match book_result with
            | `Ok gemini_book ->
-             if !gemini_first_update then (
-               printf "[INFO] Gemini data connected!\n%!";
-               gemini_first_update := false
-             );
+             (match !gemini_first_update with
+              | true ->
+                printf "[INFO] Gemini data connected!\n%!";
+                gemini_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_gemini !consolidated gemini_book;
              return ()
            | `Channel_parse_error err ->
@@ -183,10 +184,11 @@ let test ~exchanges ~depth ~max_display =
              eprintf "Kraken error: %s\n%!" err;
              return ()
            | Ok kraken_book ->
-             if !kraken_first_update then (
-               printf "[INFO] Kraken data connected!\n%!";
-               kraken_first_update := false
-             );
+             (match !kraken_first_update with
+              | true ->
+                printf "[INFO] Kraken data connected!\n%!";
+                kraken_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_kraken !consolidated kraken_book;
              return ())
 
@@ -196,10 +198,11 @@ let test ~exchanges ~depth ~max_display =
              eprintf "Hyperliquid error: %s\n%!" err;
              return ()
            | Ok hyperliquid_book ->
-             if !hyperliquid_first_update then (
-               printf "[INFO] Hyperliquid data connected!\n%!";
-               hyperliquid_first_update := false
-             );
+             (match !hyperliquid_first_update with
+              | true ->
+                printf "[INFO] Hyperliquid data connected!\n%!";
+                hyperliquid_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_hyperliquid !consolidated hyperliquid_book;
              return ())
 
@@ -209,10 +212,11 @@ let test ~exchanges ~depth ~max_display =
              eprintf "Bitrue error: %s\n%!" err;
              return ()
            | Ok bitrue_book ->
-             if !bitrue_first_update then (
-               printf "[INFO] Bitrue data connected!\n%!";
-               bitrue_first_update := false
-             );
+             (match !bitrue_first_update with
+              | true ->
+                printf "[INFO] Bitrue data connected!\n%!";
+                bitrue_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_bitrue !consolidated bitrue_book;
              return ())
 
@@ -222,10 +226,11 @@ let test ~exchanges ~depth ~max_display =
              eprintf "Binance error: %s\n%!" err;
              return ()
            | Ok binance_book ->
-             if !binance_first_update then (
-               printf "[INFO] Binance data connected!\n%!";
-               binance_first_update := false
-             );
+             (match !binance_first_update with
+              | true ->
+                printf "[INFO] Binance data connected!\n%!";
+                binance_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_binance !consolidated binance_book;
              return ())
 
@@ -235,10 +240,11 @@ let test ~exchanges ~depth ~max_display =
              eprintf "Coinbase error: %s\n%!" err;
              return ()
            | Ok coinbase_book ->
-             if !coinbase_first_update then (
-               printf "[INFO] Coinbase data connected!\n%!";
-               coinbase_first_update := false
-             );
+             (match !coinbase_first_update with
+              | true ->
+                printf "[INFO] Coinbase data connected!\n%!";
+                coinbase_first_update := false
+              | false -> ());
              consolidated := Consolidated_order_book.Book.update_coinbase !consolidated coinbase_book;
              return ())
       in
@@ -254,10 +260,11 @@ let test ~exchanges ~depth ~max_display =
         Time_float_unix.Span.(time_since_print > of_sec 2.0)
       in
 
-      if should_print then (
-        last_print_time := now;
-        Consolidated_order_book.Book.pretty_print ~max_depth:max_display !consolidated ();
-      );
+      (match should_print with
+       | true ->
+         last_print_time := now;
+         Consolidated_order_book.Book.pretty_print ~max_depth:max_display !consolidated ();
+       | false -> ());
 
       return ()
     )

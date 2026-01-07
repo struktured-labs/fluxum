@@ -67,11 +67,12 @@ let test () =
              );
 
              (* Display every 5 updates *)
-             if !update_count mod 5 = 0 then begin
-               let mid = Mexc.Order_book.Book.mid_price !book in
-               let spread = Mexc.Order_book.Book.spread !book in
-               printf "Update #%d: Mid=%.2f Spread=%.2f\n%!" !update_count mid spread
-             end;
+             (match !update_count mod 5 = 0 with
+              | true ->
+                let mid = Mexc.Order_book.Book.mid_price !book in
+                let spread = Mexc.Order_book.Book.spread !book in
+                printf "Update #%d: Mid=%.2f Spread=%.2f\n%!" !update_count mid spread
+              | false -> ());
 
              return ()
 
@@ -92,11 +93,12 @@ let test () =
                book := Mexc.Order_book.Book.set !book ~side:`Ask ~price ~size
              );
 
-             if !update_count mod 10 = 0 then begin
-               let mid = Mexc.Order_book.Book.mid_price !book in
-               let spread = Mexc.Order_book.Book.spread !book in
-               printf "Update #%d: Mid=%.2f Spread=%.2f\n%!" !update_count mid spread
-             end;
+             (match !update_count mod 10 = 0 with
+              | true ->
+                let mid = Mexc.Order_book.Book.mid_price !book in
+                let spread = Mexc.Order_book.Book.spread !book in
+                printf "Update #%d: Mid=%.2f Spread=%.2f\n%!" !update_count mid spread
+              | false -> ());
 
              return ()
 

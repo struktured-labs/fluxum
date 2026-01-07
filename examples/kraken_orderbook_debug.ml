@@ -34,10 +34,11 @@ let test () =
         printf "\n=== Message %d ===\n%s\n%!" !count msg;
 
         (* Stop after 5 messages *)
-        if !count >= 5 then (
+        match !count >= 5 with
+        | true ->
           printf "\nClosing connection...\n%!";
           Market_data.close md
-        ) else
+        | false ->
           return ()
       )
     in

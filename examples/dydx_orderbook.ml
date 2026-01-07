@@ -62,8 +62,9 @@ let run ~market ~depth () =
     Int.incr update_count;
 
     (* Display book every 10 updates to avoid spam *)
-    if !update_count % 10 = 0 then
-      display_book book ~depth;
+    (match !update_count % 10 = 0 with
+     | true -> display_book book ~depth
+     | false -> ());
 
     return ()
   )
