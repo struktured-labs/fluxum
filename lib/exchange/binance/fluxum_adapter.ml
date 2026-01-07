@@ -206,10 +206,15 @@ module Adapter = struct
           (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
 
   module Streams = struct
+    (** Private trade stream requires authenticated WebSocket.
+        Use Ws.connect with user data stream for real-time fills. *)
     let trades (_ : t) =
       let r, _w = Pipe.create () in
       Deferred.return r
 
+    (** Order book updates via public WebSocket.
+        Note: Native.Book.update is REST Depth type. For real-time streaming,
+        use Order_book.Book.pipe directly which returns incremental updates. *)
     let book_updates (_ : t) =
       let r, _w = Pipe.create () in
       Deferred.return r

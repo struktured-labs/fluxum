@@ -1,10 +1,28 @@
-(** Bitrue Unified Adapter - Implements Exchange_intf.S *)
+(** Bitrue Unified Adapter - Implements Exchange_intf.S
+
+    STATUS: DATA-ONLY VENUE
+
+    This adapter provides read-only market data access:
+    - Account balances (authenticated)
+    - Order book snapshots
+    - Ticker data
+    - Recent trades
+    - Exchange info/symbols
+
+    Order operations (place, cancel, status) are NOT implemented.
+    For trading, use the Bitrue API directly or contribute order
+    implementation to this adapter.
+*)
 
 open Core
 open Async
 
 module Types = Fluxum.Types
 module Exchange_intf = Fluxum.Exchange_intf
+
+(** Bitrue is a data-only venue - order operations are not supported *)
+let data_only_error op =
+  `Api_error (sprintf "Bitrue: %s not supported (data-only venue)" op)
 
 module Adapter = struct
   type t =
@@ -58,10 +76,10 @@ module Adapter = struct
   end
 
   let place_order _t _req =
-    Deferred.return (Error (`Api_error "Order placement not yet implemented"))
+    Deferred.return (Error (data_only_error "order placement"))
 
   let cancel_order _t _order_id =
-    Deferred.return (Error (`Api_error "Order cancellation not yet implemented"))
+    Deferred.return (Error (data_only_error "order cancellation"))
 
   let balances t =
     Rest.account t.cfg >>| function
@@ -69,16 +87,16 @@ module Adapter = struct
     | Error e -> Error e
 
   let get_order_status _t _order_id =
-    Deferred.return (Error (`Api_error "Order status not yet implemented"))
+    Deferred.return (Error (data_only_error "order status"))
 
   let get_open_orders _t ?symbol:_ () =
-    Deferred.return (Error (`Api_error "Open orders not yet implemented"))
+    Deferred.return (Error (data_only_error "open orders"))
 
   let get_order_history _t ?symbol:_ ?limit:_ () =
-    Deferred.return (Error (`Api_error "Order history not yet implemented"))
+    Deferred.return (Error (data_only_error "order history"))
 
   let get_my_trades _t ~symbol:_ ?limit:_ () =
-    Deferred.return (Error (`Api_error "My trades not yet implemented"))
+    Deferred.return (Error (data_only_error "my trades"))
 
   let get_symbols t () =
     Rest.exchange_info t.cfg >>| function
@@ -103,7 +121,7 @@ module Adapter = struct
     | Error e -> Error e
 
   let cancel_all_orders _t ?symbol:_ () =
-    Deferred.return (Error (`Api_error "Cancel all not yet implemented"))
+    Deferred.return (Error (data_only_error "cancel all orders"))
 
   module Streams = struct
     let trades (_ : t) =

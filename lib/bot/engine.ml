@@ -116,6 +116,16 @@ module Strategy_wrapper = struct
     }
 end
 
+(** Order submission callback type.
+    Returns Ok exchange_order_id on success, Error message on failure. *)
+type order_submitter =
+  venue:Event.Venue.t ->
+  symbol:string ->
+  side:Event.Side.t ->
+  qty:float ->
+  price:float option ->
+  (string, string) Result.t Deferred.t
+
 type t =
   { config : Config.t
   ; mutable state : State.t
@@ -127,6 +137,7 @@ type t =
   ; mutable heartbeat_sequence : int64
   ; mutable tick_clock : unit Deferred.t option
   ; mutable heartbeat_clock : unit Deferred.t option
+  ; mutable order_submitter : order_submitter option
   }
 
 (** Emit an event: persist and update state *)
@@ -189,19 +200,40 @@ let execute_signal t signal =
       })
     in
     let%bind () = emit t event in
-    (* TODO: Actually submit order to exchange *)
-    (* For now, emit signal generated event *)
-    let signal_event = Event.Strategy (Event.Strategy_event.Signal_generated
-      { signal_type = Event.Strategy_event.Place_order
-      ; symbol = Some req.symbol
-      ; reason = sprintf "Strategy requested %s %.8f @ %s"
-          (Event.Side.to_string req.side)
-          req.qty
-          (match req.price with Some p -> sprintf "%.2f" p | None -> "MKT")
-      ; details = None
-      })
+    (* Submit order to exchange if submitter is configured *)
+    let%bind () = match t.order_submitter with
+      | None ->
+        (* No order submitter - just log the signal *)
+        let signal_event = Event.Strategy (Event.Strategy_event.Signal_generated
+          { signal_type = Event.Strategy_event.Place_order
+          ; symbol = Some req.symbol
+          ; reason = sprintf "Strategy requested %s %.8f @ %s (no submitter configured)"
+              (Event.Side.to_string req.side)
+              req.qty
+              (match req.price with Some p -> sprintf "%.2f" p | None -> "MKT")
+          ; details = None
+          })
+        in
+        emit t signal_event
+      | Some submit_order ->
+        (* Actually submit to exchange *)
+        let%bind result = submit_order
+          ~venue:req.venue ~symbol:req.symbol ~side:req.side
+          ~qty:req.qty ~price:req.price
+        in
+        (match result with
+         | Ok exchange_id ->
+           let accepted_event = Event.Order (Event.Order_event.Order_accepted
+             { order_id; exchange_id; venue = req.venue })
+           in
+           emit t accepted_event
+         | Error reason ->
+           let rejected_event = Event.Order (Event.Order_event.Order_rejected
+             { order_id; venue = req.venue; reason })
+           in
+           emit t rejected_event)
     in
-    emit t signal_event
+    return ()
   | Strategy_intf.Signal.Cancel cancel_req ->
     let event = match cancel_req with
       | Strategy_intf.Cancel_request.Cancel_order { order_id } ->
@@ -353,11 +385,18 @@ let create config =
     ; heartbeat_sequence = 0L
     ; tick_clock = None
     ; heartbeat_clock = None
+    ; order_submitter = None
     }
 
 (** Set the strategy *)
 let set_strategy t strategy =
   t.strategy <- Some strategy
+
+(** Set the order submitter callback for live trading.
+    When set, Place_order signals will be submitted to exchanges.
+    When not set, orders are only logged as events. *)
+let set_order_submitter t submitter =
+  t.order_submitter <- Some submitter
 
 (** Start the bot *)
 let start t =

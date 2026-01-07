@@ -158,15 +158,68 @@ module Adapter = struct
     | (#Rest.Error.post as e) -> Error e
 
   module Streams = struct
+    (** Private trade stream requires authenticated WebSocket connection.
+        For user trades, use the Order_book module's Session interface instead. *)
     let trades (_ : t) =
-      (* TODO: Implement WebSocket trade stream *)
+      (* Private trades require authenticated WebSocket - return empty pipe *)
       let r, _w = Pipe.create () in
       Deferred.return r
 
-    let book_updates (_ : t) =
-      (* TODO: Implement WebSocket book stream *)
-      let r, _w = Pipe.create () in
-      Deferred.return r
+    (** Subscribe to order book updates via public WebSocket *)
+    let book_updates (t : t) =
+      let symbols = match t.symbols with
+        | [] -> ["XBT/USD"]  (* Default to BTC/USD *)
+        | s -> s
+      in
+      let open Deferred.Let_syntax in
+      let%bind md_result = Market_data.connect
+        ~subscriptions:[{ channel = "book"; pairs = symbols; interval = None; depth = Some 10 }]
+        ()
+      in
+      match md_result with
+      | Error _ ->
+        let r, _w = Pipe.create () in
+        return r
+      | Ok md ->
+        let messages = Market_data.messages md in
+        let book_reader, book_writer = Pipe.create () in
+        don't_wait_for (
+          Pipe.iter messages ~f:(fun msg_str ->
+            match Ws.parse_message msg_str with
+            | Ok (Ws.Public (Ws.Public.Book book_data)) ->
+              (* Convert Book_data to Book_update for each side *)
+              let now = Time_float_unix.now () in
+              let symbol = book_data.pair in
+              let bids = List.map book_data.update.bids ~f:(fun l ->
+                (Float.of_string l.Ws.Public.Price_level.price,
+                 Float.of_string l.volume))
+              in
+              let asks = List.map book_data.update.asks ~f:(fun l ->
+                (Float.of_string l.Ws.Public.Price_level.price,
+                 Float.of_string l.volume))
+              in
+              let%bind () =
+                match bids with
+                | [] -> Deferred.unit
+                | _ ->
+                  let update : Ws.Public.Book_update.t =
+                    { side = `Bid; levels = bids; symbol; timestamp = now; is_snapshot = false }
+                  in
+                  Pipe.write book_writer update
+              in
+              (match asks with
+               | [] -> Deferred.unit
+               | _ ->
+                 let update : Ws.Public.Book_update.t =
+                   { side = `Ask; levels = asks; symbol; timestamp = now; is_snapshot = false }
+                 in
+                 Pipe.write book_writer update)
+            | Ok _ -> Deferred.unit  (* Other messages *)
+            | Error _ -> Deferred.unit
+          )
+          >>| fun () -> Pipe.close book_writer
+        );
+        return book_reader
   end
 
   module Normalize = struct

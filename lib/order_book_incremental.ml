@@ -275,7 +275,12 @@ end
 module Checksum = struct
   type validator = bids:(float * float) list -> asks:(float * float) list -> string
 
-  (** CRC32 checksum (used by Kraken, OKX, etc.) *)
+  (** CRC32 checksum placeholder (used by Kraken, OKX, etc.)
+
+      Note: Uses String.hash as a stand-in. For production validation against
+      exchange checksums, add 'checkseum' or 'crc' opam package dependency
+      and implement proper CRC32 algorithm. The current implementation is
+      useful for detecting data changes but won't match exchange checksums. *)
   let crc32 ~bids ~asks =
     let levels_to_string levels =
       List.map levels ~f:(fun (price, size) ->
@@ -284,9 +289,10 @@ module Checksum = struct
       |> String.concat ~sep:":"
     in
     let data = sprintf "%s:%s" (levels_to_string bids) (levels_to_string asks) in
-    (* TODO: Implement actual CRC32 - requires digestif or crc library *)
-    let crc = String.hash data in
-    sprintf "%u" crc
+    (* Placeholder: uses String.hash. For exchange-compatible CRC32,
+       add checkseum library: opam install checkseum *)
+    let hash = String.hash data in
+    sprintf "%u" (abs hash)
 
   (** Validate checksum *)
   let validate ~validator ~expected ~bids ~asks =
