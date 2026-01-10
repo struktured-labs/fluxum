@@ -126,18 +126,21 @@ let test_adapter_order_book () =
   let adapter = Mexc.Fluxum_adapter.Adapter.create ~cfg ~symbols:["BTCUSDT"] () in
   Mexc.Fluxum_adapter.Adapter.get_order_book adapter ~symbol:"BTCUSDT" ~limit:5 () >>| function
   | Ok book_native ->
-    let book = Mexc.Fluxum_adapter.Adapter.Normalize.order_book book_native in
-    pass (sprintf "Bids: %d | Asks: %d" (List.length book.bids) (List.length book.asks));
-    let spread = Fluxum.Types.Order_book.spread book in
-    pass (sprintf "Spread: %.4f" spread);
-    let mid = Fluxum.Types.Order_book.mid_price book in
-    pass (sprintf "Mid price: %.2f" mid);
-    (match List.hd book.bids with
-     | Some level -> pass (sprintf "Best bid: %.8f @ %.2f" level.volume level.price)
-     | None -> ());
-    (match List.hd book.asks with
-     | Some level -> pass (sprintf "Best ask: %.8f @ %.2f" level.volume level.price)
-     | None -> ())
+    (match Mexc.Fluxum_adapter.Adapter.Normalize.order_book book_native with
+     | Ok book ->
+       pass (sprintf "Bids: %d | Asks: %d" (List.length book.bids) (List.length book.asks));
+       let spread = Fluxum.Types.Order_book.spread book in
+       pass (sprintf "Spread: %.4f" spread);
+       let mid = Fluxum.Types.Order_book.mid_price book in
+       pass (sprintf "Mid price: %.2f" mid);
+       (match List.hd book.bids with
+        | Some level -> pass (sprintf "Best bid: %.8f @ %.2f" level.volume level.price)
+        | None -> ());
+       (match List.hd book.asks with
+        | Some level -> pass (sprintf "Best ask: %.8f @ %.2f" level.volume level.price)
+        | None -> ())
+     | Error msg ->
+       fail (sprintf "Failed to normalize order book: %s" msg))
   | Error err ->
     let e = Mexc.Fluxum_adapter.Adapter.Normalize.error err in
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))
@@ -148,16 +151,27 @@ let test_adapter_recent_trades () =
   let adapter = Mexc.Fluxum_adapter.Adapter.create ~cfg ~symbols:["BTCUSDT"] () in
   Mexc.Fluxum_adapter.Adapter.get_recent_trades adapter ~symbol:"BTCUSDT" ~limit:5 () >>| function
   | Ok trades_native ->
-    let trades = List.map trades_native ~f:Mexc.Fluxum_adapter.Adapter.Normalize.public_trade in
-    pass (sprintf "Trades: %d" (List.length trades));
-    (match List.hd trades with
-     | Some trade ->
-       let side_str = match trade.side with
-         | Some s -> Fluxum.Types.Side.to_string s
-         | None -> "?"
-       in
-       pass (sprintf "Latest: %s %.8f @ %.2f" side_str trade.qty trade.price)
-     | None -> fail "No trades")
+    let trades_results = List.map trades_native ~f:Mexc.Fluxum_adapter.Adapter.Normalize.public_trade in
+    let result_transpose results =
+      List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+        match res, acc with
+        | Ok v, Ok vs -> Ok (v :: vs)
+        | Error e, _ -> Error e
+        | _, Error e -> Error e)
+    in
+    (match result_transpose trades_results with
+     | Ok trades ->
+       pass (sprintf "Trades: %d" (List.length trades));
+       (match List.hd trades with
+        | Some trade ->
+          let side_str = match trade.side with
+            | Some s -> Fluxum.Types.Side.to_string s
+            | None -> "?"
+          in
+          pass (sprintf "Latest: %s %.8f @ %.2f" side_str trade.qty trade.price)
+        | None -> fail "No trades")
+     | Error msg ->
+       fail (sprintf "Failed to normalize trades: %s" msg))
   | Error err ->
     let e = Mexc.Fluxum_adapter.Adapter.Normalize.error err in
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))

@@ -266,38 +266,84 @@ module Unified = struct
       Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
         { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = "Gemini does not support order history" }))
     | "kraken" ->
+      let result_transpose results =
+        List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+          match res, acc with
+          | Ok v, Ok vs -> Ok (v :: vs)
+          | Error e, _ -> Error e
+          | _, Error e -> Error e)
+      in
       kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
       Kraken.Fluxum_adapter.Adapter.get_order_history adapter ?symbol ?limit ()
-      >>| Result.map ~f:(List.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.order_from_status)
-      >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok orders ->
+          let normalized = List.map orders ~f:Kraken.Fluxum_adapter.Adapter.Normalize.order_from_status in
+          (match result_transpose normalized with
+           | Ok ords -> Ok ords
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Kraken.Fluxum_adapter.Adapter.Normalize.error e))
     | "mexc" ->
       let symbols = match symbol with Some s -> [s] | None -> [] in
+      let result_transpose results =
+        List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+          match res, acc with
+          | Ok v, Ok vs -> Ok (v :: vs)
+          | Error e, _ -> Error e
+          | _, Error e -> Error e)
+      in
       mexc_adapter ~symbols >>= fun adapter ->
       Mexc.Fluxum_adapter.Adapter.get_order_history adapter ?symbol ?limit ()
-      >>| Result.map ~f:(List.map ~f:Mexc.Fluxum_adapter.Adapter.Normalize.order_from_status)
-      >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok orders ->
+          let normalized = List.map orders ~f:Mexc.Fluxum_adapter.Adapter.Normalize.order_from_status in
+          (match result_transpose normalized with
+           | Ok ords -> Ok ords
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Mexc.Fluxum_adapter.Adapter.Normalize.error e))
     | _ ->
       Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
         { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = sprintf "Exchange %s not supported" exchange }))
 
   (* Get my trades *)
   let get_my_trades ~exchange ~cfg_env ~symbol ?limit () =
+    let result_transpose results =
+      List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+        match res, acc with
+        | Ok v, Ok vs -> Ok (v :: vs)
+        | Error e, _ -> Error e
+        | _, Error e -> Error e)
+    in
     match exchange with
     | "gemini" ->
       gemini_adapter cfg_env >>= fun adapter ->
       Gemini.Fluxum_adapter.Adapter.get_my_trades adapter ~symbol ?limit ()
-      >>| Result.map ~f:(List.map ~f:Gemini.Fluxum_adapter.Adapter.Normalize.trade)
-      >>| Result.map_error ~f:Gemini.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok trades ->
+          let normalized = List.map trades ~f:Gemini.Fluxum_adapter.Adapter.Normalize.trade in
+          (match result_transpose normalized with
+           | Ok trds -> Ok trds
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Gemini.Fluxum_adapter.Adapter.Normalize.error e))
     | "kraken" ->
       kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
       Kraken.Fluxum_adapter.Adapter.get_my_trades adapter ~symbol ?limit ()
-      >>| Result.map ~f:(List.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.trade)
-      >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok trades ->
+          let normalized = List.map trades ~f:Kraken.Fluxum_adapter.Adapter.Normalize.trade in
+          (match result_transpose normalized with
+           | Ok trds -> Ok trds
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Kraken.Fluxum_adapter.Adapter.Normalize.error e))
     | "mexc" ->
       mexc_adapter ~symbols:[symbol] >>= fun adapter ->
       Mexc.Fluxum_adapter.Adapter.get_my_trades adapter ~symbol ?limit ()
-      >>| Result.map ~f:(List.map ~f:Mexc.Fluxum_adapter.Adapter.Normalize.trade)
-      >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok trades ->
+          let normalized = List.map trades ~f:Mexc.Fluxum_adapter.Adapter.Normalize.trade in
+          (match result_transpose normalized with
+           | Ok trds -> Ok trds
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Mexc.Fluxum_adapter.Adapter.Normalize.error e))
     | _ ->
       Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
         { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = sprintf "Exchange %s not supported" exchange }))
@@ -326,22 +372,44 @@ module Unified = struct
 
   (* Get balances (using new adapter) *)
   let get_balances ~exchange ~cfg_env () =
+    let result_transpose results =
+      List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+        match res, acc with
+        | Ok v, Ok vs -> Ok (v :: vs)
+        | Error e, _ -> Error e
+        | _, Error e -> Error e)
+    in
     match exchange with
     | "gemini" ->
       gemini_adapter cfg_env >>= fun adapter ->
       Gemini.Fluxum_adapter.Adapter.balances adapter
-      >>| Result.map ~f:(List.map ~f:Gemini.Fluxum_adapter.Adapter.Normalize.balance)
-      >>| Result.map_error ~f:Gemini.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok balances ->
+          let normalized = List.map balances ~f:Gemini.Fluxum_adapter.Adapter.Normalize.balance in
+          (match result_transpose normalized with
+           | Ok bals -> Ok bals
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Gemini.Fluxum_adapter.Adapter.Normalize.error e))
     | "kraken" ->
       kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
       Kraken.Fluxum_adapter.Adapter.balances adapter
-      >>| Result.map ~f:(List.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.balance)
-      >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok balances ->
+          let normalized = List.map balances ~f:Kraken.Fluxum_adapter.Adapter.Normalize.balance in
+          (match result_transpose normalized with
+           | Ok bals -> Ok bals
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Kraken.Fluxum_adapter.Adapter.Normalize.error e))
     | "mexc" ->
       mexc_adapter ~symbols:[] >>= fun adapter ->
       Mexc.Fluxum_adapter.Adapter.balances adapter
-      >>| Result.map ~f:(List.map ~f:Mexc.Fluxum_adapter.Adapter.Normalize.balance)
-      >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok balances ->
+          let normalized = List.map balances ~f:Mexc.Fluxum_adapter.Adapter.Normalize.balance in
+          (match result_transpose normalized with
+           | Ok bals -> Ok bals
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Mexc.Fluxum_adapter.Adapter.Normalize.error e))
     | _ ->
       Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
         { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = sprintf "Exchange %s not supported" exchange }))
@@ -357,8 +425,12 @@ module Unified = struct
     | "mexc" ->
       mexc_adapter ~symbols:[symbol] >>= fun adapter ->
       Mexc.Fluxum_adapter.Adapter.get_ticker adapter ~symbol ()
-      >>| Result.map ~f:Mexc.Fluxum_adapter.Adapter.Normalize.ticker
-      >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok ticker_native ->
+          (match Mexc.Fluxum_adapter.Adapter.Normalize.ticker ticker_native with
+           | Ok ticker -> Ok ticker
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Mexc.Fluxum_adapter.Adapter.Normalize.error e))
     | "gemini" ->
       Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
         { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = "Gemini ticker endpoint not implemented" }))
@@ -377,8 +449,12 @@ module Unified = struct
     | "mexc" ->
       mexc_adapter ~symbols:[symbol] >>= fun adapter ->
       Mexc.Fluxum_adapter.Adapter.get_order_book adapter ~symbol ?limit ()
-      >>| Result.map ~f:Mexc.Fluxum_adapter.Adapter.Normalize.order_book
-      >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok book_native ->
+          (match Mexc.Fluxum_adapter.Adapter.Normalize.order_book book_native with
+           | Ok book -> Ok book
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Mexc.Fluxum_adapter.Adapter.Normalize.error e))
     | "gemini" ->
       Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
         { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = "Gemini order book endpoint not implemented" }))
@@ -395,10 +471,22 @@ module Unified = struct
       >>| Result.map ~f:(List.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.public_trade)
       >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
     | "mexc" ->
+      let result_transpose results =
+        List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+          match res, acc with
+          | Ok v, Ok vs -> Ok (v :: vs)
+          | Error e, _ -> Error e
+          | _, Error e -> Error e)
+      in
       mexc_adapter ~symbols:[symbol] >>= fun adapter ->
       Mexc.Fluxum_adapter.Adapter.get_recent_trades adapter ~symbol ?limit ()
-      >>| Result.map ~f:(List.map ~f:Mexc.Fluxum_adapter.Adapter.Normalize.public_trade)
-      >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok trades_native ->
+          let trades_results = List.map trades_native ~f:Mexc.Fluxum_adapter.Adapter.Normalize.public_trade in
+          (match result_transpose trades_results with
+           | Ok trades -> Ok trades
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Mexc.Fluxum_adapter.Adapter.Normalize.error e))
     | "gemini" ->
       Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
         { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = "Gemini recent trades endpoint not implemented" }))
