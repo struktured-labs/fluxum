@@ -212,13 +212,13 @@ module Unified = struct
       in
       gemini_adapter cfg_env >>= fun adapter ->
       Gemini.Fluxum_adapter.Adapter.get_open_orders adapter ?symbol ()
-      >>| function
-      | Ok orders ->
-        let normalized = List.map orders ~f:Gemini.Fluxum_adapter.Adapter.Normalize.order_from_status in
-        (match result_transpose normalized with
-         | Ok ords -> Ok ords
-         | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
-      | Error e -> Error (Gemini.Fluxum_adapter.Adapter.Normalize.error e)
+      >>| (function
+        | Ok orders ->
+          let normalized = List.map orders ~f:Gemini.Fluxum_adapter.Adapter.Normalize.order_from_status in
+          (match result_transpose normalized with
+           | Ok ords -> Ok ords
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Gemini.Fluxum_adapter.Adapter.Normalize.error e))
     | "kraken" ->
       let result_transpose results =
         List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
@@ -229,31 +229,31 @@ module Unified = struct
       in
       kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
       Kraken.Fluxum_adapter.Adapter.get_open_orders adapter ?symbol ()
-      >>| function
-      | Ok orders ->
-        let normalized = List.map orders ~f:Kraken.Fluxum_adapter.Adapter.Normalize.order_from_status in
-        (match result_transpose normalized with
-         | Ok ords -> Ok ords
-         | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
-      | Error e -> Error (Kraken.Fluxum_adapter.Adapter.Normalize.error e)
+      >>| (function
+        | Ok orders ->
+          let normalized = List.map orders ~f:Kraken.Fluxum_adapter.Adapter.Normalize.order_from_status in
+          (match result_transpose normalized with
+           | Ok ords -> Ok ords
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Kraken.Fluxum_adapter.Adapter.Normalize.error e))
     | "mexc" ->
       let symbols = match symbol with Some s -> [s] | None -> [] in
       mexc_adapter ~symbols >>= fun adapter ->
       Mexc.Fluxum_adapter.Adapter.get_open_orders adapter ?symbol ()
-      >>| function
-      | Ok orders ->
-        let normalized = List.map orders ~f:Mexc.Fluxum_adapter.Adapter.Normalize.order_from_status in
-        let result_transpose results =
-          List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
-            match res, acc with
-            | Ok v, Ok vs -> Ok (v :: vs)
-            | Error e, _ -> Error e
-            | _, Error e -> Error e)
-        in
-        (match result_transpose normalized with
-         | Ok ords -> Ok ords
-         | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
-      | Error e -> Error (Mexc.Fluxum_adapter.Adapter.Normalize.error e)
+      >>| (function
+        | Ok orders ->
+          let normalized = List.map orders ~f:Mexc.Fluxum_adapter.Adapter.Normalize.order_from_status in
+          let result_transpose results =
+            List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+              match res, acc with
+              | Ok v, Ok vs -> Ok (v :: vs)
+              | Error e, _ -> Error e
+              | _, Error e -> Error e)
+          in
+          (match result_transpose normalized with
+           | Ok ords -> Ok ords
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Mexc.Fluxum_adapter.Adapter.Normalize.error e))
     | _ ->
       Deferred.return (Error (Fluxum.Types.Error.Exchange_specific
         { venue = Fluxum.Types.Venue.Gemini; code = "unsupported"; message = sprintf "Exchange %s not supported" exchange }))
