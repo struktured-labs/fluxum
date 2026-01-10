@@ -193,44 +193,48 @@ module Adapter = struct
   end
 
   module Normalize = struct
-    let order_response (resp : Native.Order.response) : Types.Order.t =
-      let side =
-        match resp.side with
-        | "BUY" -> Types.Side.Buy
-        | _ -> Types.Side.Sell
-      in
-      let kind =
-        match resp.type_ with
-        | "LIMIT" ->
-          Types.Order_kind.Limit (Float.of_string resp.price)
-        | "MARKET" -> Types.Order_kind.Market
-        | _ -> Types.Order_kind.Market
-      in
-      let status =
-        match resp.status with
-        | "FILLED" -> Types.Order_status.Filled
-        | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
-        | "CANCELED" -> Types.Order_status.Canceled
-        | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
-        | _ -> Types.Order_status.New
-      in
-      { venue = Venue.t
-      ; id = resp.orderId
-      ; symbol = resp.symbol
-      ; side
-      ; kind
-      ; qty = Float.of_string resp.origQty
-      ; filled = Float.of_string resp.executedQty
-      ; status
-      ; created_at =
-          (if Int64.(resp.transactTime > 0L)
-          then
-            Some
-              (Time_float_unix.of_span_since_epoch
-                 (Time_float_unix.Span.of_ms (Int64.to_float resp.transactTime)))
-          else None)
-      ; updated_at = None
-      }
+    let order_response (resp : Native.Order.response) : (Types.Order.t, string) Result.t =
+      try
+        let side =
+          match resp.side with
+          | "BUY" -> Types.Side.Buy
+          | _ -> Types.Side.Sell
+        in
+        let kind =
+          match resp.type_ with
+          | "LIMIT" ->
+            Types.Order_kind.Limit (Float.of_string resp.price)
+          | "MARKET" -> Types.Order_kind.Market
+          | _ -> Types.Order_kind.Market
+        in
+        let status =
+          match resp.status with
+          | "FILLED" -> Types.Order_status.Filled
+          | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
+          | "CANCELED" -> Types.Order_status.Canceled
+          | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
+          | _ -> Types.Order_status.New
+        in
+        Ok { venue = Venue.t
+        ; id = resp.orderId
+        ; symbol = resp.symbol
+        ; side
+        ; kind
+        ; qty = Float.of_string resp.origQty
+        ; filled = Float.of_string resp.executedQty
+        ; status
+        ; created_at =
+            (if Int64.(resp.transactTime > 0L)
+            then
+              Some
+                (Time_float_unix.of_span_since_epoch
+                   (Time_float_unix.Span.of_ms (Int64.to_float resp.transactTime)))
+            else None)
+        ; updated_at = None
+        }
+      with
+      | Failure msg -> Error (sprintf "Order response conversion failed: %s" msg)
+      | exn -> Error (sprintf "Order response unexpected error: %s" (Exn.to_string exn))
 
     let order_status (status : Native.Order.status) : Types.Order_status.t =
       match status.status with
