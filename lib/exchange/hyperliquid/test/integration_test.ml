@@ -172,8 +172,7 @@ let test_websocket_connection () =
           (match !messages_received >= 5 with
            | true ->
              pass (sprintf "Successfully received %d messages" !messages_received);
-             Hyperliquid.Ws.close ws;
-             return ()
+             Hyperliquid.Ws.close ws
            | false -> read_loop ()))
     in
     read_loop ()
@@ -195,19 +194,16 @@ let test_websocket_l2_book () =
       (match !messages_received >= 3 with
        | true ->
          pass (sprintf "Received %d L2 book updates" !messages_received);
-         Hyperliquid.Ws.close ws;
-         return ()
+         Hyperliquid.Ws.close ws
        | false ->
         match%bind Clock.with_timeout (Time_float.Span.of_sec 5.0) (Pipe.read (Hyperliquid.Ws.messages ws)) with
         | `Timeout ->
           (match !messages_received > 0 with
            | true -> pass (sprintf "Got %d updates before timeout" !messages_received)
            | false -> fail "No L2 book updates received");
-          Hyperliquid.Ws.close ws;
-          return ()
+          Hyperliquid.Ws.close ws
         | `Result `Eof ->
-          Hyperliquid.Ws.close ws;
-          return ()
+          Hyperliquid.Ws.close ws
         | `Result (`Ok msg) ->
           let parsed = Hyperliquid.Ws.parse_message msg in
           (match parsed with

@@ -327,48 +327,107 @@ let parse_message (msg : string) : Message.t =
 
 type t = {
   uri : Uri.t;
-  reader : string Pipe.Reader.t;
-  writer : string Pipe.Writer.t;
+  ws : Websocket_curl.t;
+  streams : Stream.t list ref;
+  message_pipe : string Pipe.Reader.t;
+  message_writer : string Pipe.Writer.t;
+  mutable active : bool;
 }
 
 let connect ?(url = Endpoint.mainnet) ?(streams = []) () : t Deferred.Or_error.t =
+  let open Deferred.Let_syntax in
   let uri = Uri.of_string url in
-  Deferred.Or_error.try_with (fun () ->
-    let headers = Cohttp.Header.init () in
-    Cohttp_async_websocket.Client.create ~headers uri
-    >>= fun conn_result ->
-    (match conn_result with
-     | Ok (_response, ws) -> return ws
-     | Error err ->
-       eprintf "Hyperliquid WebSocket connection error: %s\n" (Error.to_string_hum err);
-       Error.raise err)
-    >>= fun ws ->
-    let reader, writer = Websocket.pipes ws in
+
+  (* Connect using websocket_curl *)
+  let%bind ws_result = Websocket_curl.connect ~url in
+
+  match ws_result with
+  | Error err ->
+    Deferred.Or_error.error_string (Error.to_string_hum err)
+  | Ok ws ->
+    let message_pipe_reader, message_pipe_writer = Pipe.create () in
+
+    let t = {
+      uri;
+      ws;
+      streams = ref streams;
+      message_pipe = message_pipe_reader;
+      message_writer = message_pipe_writer;
+      active = true;
+    } in
+
+    (* Start background task to receive messages *)
+    don't_wait_for (
+      let rec receive_loop () =
+        match t.active with
+        | false -> return ()
+        | true ->
+          let%bind msg_opt = Websocket_curl.receive ws in
+          match msg_opt with
+          | None ->
+            (* Connection closed *)
+            t.active <- false;
+            Pipe.close t.message_writer;
+            return ()
+          | Some payload ->
+            let%bind () = Pipe.write t.message_writer payload in
+            receive_loop ()
+      in
+      receive_loop ()
+    );
+
+    (* Start background task to send periodic pings (every 2.5 seconds) *)
+    don't_wait_for (
+      let rec ping_loop () =
+        match t.active with
+        | false -> return ()
+        | true ->
+          let%bind _result =
+            try_with (fun () -> Websocket_curl.send ws "{\"method\":\"ping\"}")
+          in
+          let%bind () = Clock.after (Time_float.Span.of_sec 2.5) in
+          ping_loop ()
+      in
+      ping_loop ()
+    );
 
     (* Subscribe to requested streams *)
-    Deferred.List.iter ~how:`Sequential streams ~f:(fun stream ->
-      let msg = Stream.to_subscribe_message stream in
-      let msg_str = Yojson.Safe.to_string msg in
-      Pipe.write_if_open writer msg_str
-    )
-    >>| fun () ->
-    { uri; reader; writer }
-  )
+    let%bind () =
+      Deferred.List.iter ~how:`Sequential streams ~f:(fun stream ->
+        let msg = Stream.to_subscribe_message stream in
+        let msg_str = Yojson.Safe.to_string msg in
+        Websocket_curl.send ws msg_str
+      )
+    in
 
-let messages t = t.reader
+    Deferred.Or_error.return t
+
+let messages t = t.message_pipe
 
 let subscribe t stream =
-  let msg = Stream.to_subscribe_message stream in
-  let msg_str = Yojson.Safe.to_string msg in
-  Pipe.write_if_open t.writer msg_str
+  t.streams := stream :: !(t.streams);
+  match t.active with
+  | false -> Deferred.unit
+  | true ->
+    let msg = Stream.to_subscribe_message stream in
+    let msg_str = Yojson.Safe.to_string msg in
+    Websocket_curl.send t.ws msg_str
 
 let unsubscribe t stream =
-  let msg = Stream.to_unsubscribe_message stream in
-  let msg_str = Yojson.Safe.to_string msg in
-  Pipe.write_if_open t.writer msg_str
+  t.streams := List.filter !(t.streams) ~f:(fun s -> not (phys_equal s stream));
+  match t.active with
+  | false -> Deferred.unit
+  | true ->
+    let msg = Stream.to_unsubscribe_message stream in
+    let msg_str = Yojson.Safe.to_string msg in
+    Websocket_curl.send t.ws msg_str
 
 let ping t =
-  Pipe.write_if_open t.writer "{\"method\":\"ping\"}"
+  match t.active with
+  | false -> Deferred.unit
+  | true -> Websocket_curl.send t.ws "{\"method\":\"ping\"}"
 
 let close t =
-  Pipe.close t.writer
+  t.active <- false;
+  Pipe.close t.message_writer;
+  Websocket_curl.close t.ws
