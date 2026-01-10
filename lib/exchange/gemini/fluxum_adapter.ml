@@ -42,15 +42,15 @@ module Adapter = struct
 
     module Book = struct
       type update = V1.Market_data.Update.t
-      type snapshot = unit  (* Not implemented for Gemini *)
+      type snapshot = Yojson.Safe.t  (* Raw JSON from /v1/book/{symbol} *)
     end
 
     module Ticker = struct
-      type t = unit  (* Not implemented for Gemini *)
+      type t = Yojson.Safe.t  (* Raw JSON from /v1/pubticker/{symbol} *)
     end
 
     module Public_trade = struct
-      type t = unit  (* Not implemented for Gemini *)
+      type t = Yojson.Safe.t  (* Raw JSON from /v1/trades/{symbol} *)
     end
 
     module Symbol_info = struct
@@ -122,17 +122,52 @@ module Adapter = struct
       | #Rest.Error.get -> None)
     >>| fun results -> Ok results
 
-  let get_ticker (_ : t) ~symbol:_ () =
-    (* Gemini public ticker endpoint not implemented yet *)
-    Deferred.return (Error (`Bad_request "Gemini get_ticker not implemented"))
+  let get_ticker (_ : t) ~symbol () =
+    (* Use Gemini public ticker endpoint *)
+    let symbol_lower = String.lowercase symbol in
+    let uri = Uri.of_string (sprintf "https://api.gemini.com/v1/pubticker/%s" symbol_lower) in
+    Monitor.try_with (fun () ->
+      Cohttp_async.Client.get uri >>= fun (_, body) ->
+      Cohttp_async.Body.to_string body
+    ) >>| function
+    | Error _ -> Error (`Network_error "Failed to fetch ticker")
+    | Ok body ->
+      match Yojson.Safe.from_string body with
+      | exception _ -> Error (`Json_parse "Failed to parse ticker response")
+      | json -> Ok json
 
-  let get_order_book (_ : t) ~symbol:_ ?limit:_ () =
-    (* Gemini public order book endpoint not implemented yet *)
-    Deferred.return (Error (`Bad_request "Gemini get_order_book not implemented"))
+  let get_order_book (_ : t) ~symbol ?limit () =
+    (* Use Gemini public order book endpoint *)
+    let symbol_lower = String.lowercase symbol in
+    let limit_str = match limit with Some n -> sprintf "?limit_bids=%d&limit_asks=%d" n n | None -> "" in
+    let uri = Uri.of_string (sprintf "https://api.gemini.com/v1/book/%s%s" symbol_lower limit_str) in
+    Monitor.try_with (fun () ->
+      Cohttp_async.Client.get uri >>= fun (_, body) ->
+      Cohttp_async.Body.to_string body
+    ) >>| function
+    | Error _ -> Error (`Network_error "Failed to fetch order book")
+    | Ok body ->
+      match Yojson.Safe.from_string body with
+      | exception _ -> Error (`Json_parse "Failed to parse order book response")
+      | json -> Ok json
 
-  let get_recent_trades (_ : t) ~symbol:_ ?limit:_ () =
-    (* Gemini public trades endpoint not implemented yet *)
-    Deferred.return (Error (`Bad_request "Gemini get_recent_trades not implemented"))
+  let get_recent_trades (_ : t) ~symbol ?limit () =
+    (* Use Gemini public trades endpoint *)
+    let symbol_lower = String.lowercase symbol in
+    let limit_str = match limit with Some n -> sprintf "?limit_trades=%d" n | None -> "" in
+    let uri = Uri.of_string (sprintf "https://api.gemini.com/v1/trades/%s%s" symbol_lower limit_str) in
+    Monitor.try_with (fun () ->
+      Cohttp_async.Client.get uri >>= fun (_, body) ->
+      Cohttp_async.Body.to_string body
+    ) >>| function
+    | Error _ -> Error (`Network_error "Failed to fetch recent trades")
+    | Ok body ->
+      match Yojson.Safe.from_string body with
+      | exception _ -> Error (`Json_parse "Failed to parse trades response")
+      | json ->
+        match json with
+        | `List trades -> Ok trades
+        | _ -> Error (`Json_parse "Expected array of trades")
 
   let cancel_all_orders (t : t) ?symbol:_ () =
     let (module Cfg) = t.cfg in
@@ -346,41 +381,63 @@ module Adapter = struct
       ; quote_increment = Some (Common.Decimal_number.to_float s.quote_increment)
       }
 
-    let ticker (_ : Native.Ticker.t) : Types.Ticker.t =
-      (* Not implemented - return empty ticker *)
+    let ticker (json : Native.Ticker.t) : Types.Ticker.t =
+      let open Yojson.Safe.Util in
+      let bid = json |> member "bid" |> to_string |> Float.of_string in
+      let ask = json |> member "ask" |> to_string |> Float.of_string in
+      let last = json |> member "last" |> to_string |> Float.of_string in
+      let volume = json |> member "volume" in
+      let symbol_vol = match volume |> to_assoc |> List.hd with
+        | Some (symbol, vol) -> (symbol, vol |> to_string |> Float.of_string)
+        | None -> ("", 0.)
+      in
       { venue = Venue.t
-      ; symbol = ""
-      ; last_price = 0.
-      ; bid_price = 0.
-      ; ask_price = 0.
-      ; high_24h = 0.
-      ; low_24h = 0.
-      ; volume_24h = 0.
+      ; symbol = String.uppercase (fst symbol_vol)
+      ; last_price = last
+      ; bid_price = bid
+      ; ask_price = ask
+      ; high_24h = last  (* Gemini doesn't provide high/low in ticker *)
+      ; low_24h = last
+      ; volume_24h = snd symbol_vol
       ; quote_volume = None
       ; price_change = None
       ; price_change_pct = None
       ; ts = None
       }
 
-    let order_book (_ : Native.Book.snapshot) : Types.Order_book.t =
-      (* Not implemented - return empty order book *)
+    let order_book (json : Native.Book.snapshot) : Types.Order_book.t =
+      let open Yojson.Safe.Util in
+      let parse_levels levels_json =
+        levels_json |> to_list |> List.map ~f:(fun level ->
+          let price = level |> member "price" |> to_string |> Float.of_string in
+          let volume = level |> member "amount" |> to_string |> Float.of_string in
+          { Types.Order_book.Price_level.price; volume })
+      in
+      let bids = json |> member "bids" |> parse_levels in
+      let asks = json |> member "asks" |> parse_levels in
       { venue = Venue.t
-      ; symbol = ""
-      ; bids = []
-      ; asks = []
+      ; symbol = ""  (* Symbol not in response, caller must track *)
+      ; bids
+      ; asks
       ; ts = None
       ; epoch = 0
       }
 
-    let public_trade (_ : Native.Public_trade.t) : Types.Public_trade.t =
-      (* Not implemented - return empty trade *)
+    let public_trade (json : Native.Public_trade.t) : Types.Public_trade.t =
+      let open Yojson.Safe.Util in
+      let timestamp = json |> member "timestampms" |> to_int in
+      let ts = Time_float_unix.of_span_since_epoch
+        (Time_float_unix.Span.of_ms (Float.of_int timestamp)) in
       { venue = Venue.t
-      ; symbol = ""
-      ; price = 0.
-      ; qty = 0.
-      ; side = None
-      ; trade_id = None
-      ; ts = None
+      ; symbol = ""  (* Symbol not in response, caller must track *)
+      ; price = json |> member "price" |> to_string |> Float.of_string
+      ; qty = json |> member "amount" |> to_string |> Float.of_string
+      ; side = Some (match json |> member "type" |> to_string with
+          | "buy" -> Types.Side.Buy
+          | "sell" -> Types.Side.Sell
+          | _ -> Types.Side.Buy)
+      ; trade_id = Some (json |> member "tid" |> to_int |> Int.to_string)
+      ; ts = Some ts
       }
 
     let error (e : Native.Error.t) : Types.Error.t =
