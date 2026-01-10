@@ -105,14 +105,17 @@ let test_adapter_ticker () =
   let adapter = Mexc.Fluxum_adapter.Adapter.create ~cfg ~symbols:["BTCUSDT"] () in
   Mexc.Fluxum_adapter.Adapter.get_ticker adapter ~symbol:"BTCUSDT" () >>| function
   | Ok ticker_native ->
-    let ticker = Mexc.Fluxum_adapter.Adapter.Normalize.ticker ticker_native in
-    pass (sprintf "Symbol: %s" ticker.symbol);
-    pass (sprintf "Last: %.2f | Bid: %.2f | Ask: %.2f"
-      ticker.last_price ticker.bid_price ticker.ask_price);
-    pass (sprintf "24h High: %.2f | Low: %.2f" ticker.high_24h ticker.low_24h);
-    pass (sprintf "24h Volume: %.2f" ticker.volume_24h);
-    Option.iter ticker.price_change_pct ~f:(fun pct ->
-      pass (sprintf "24h Change: %.2f%%" pct))
+    (match Mexc.Fluxum_adapter.Adapter.Normalize.ticker ticker_native with
+     | Ok ticker ->
+       pass (sprintf "Symbol: %s" ticker.symbol);
+       pass (sprintf "Last: %.2f | Bid: %.2f | Ask: %.2f"
+         ticker.last_price ticker.bid_price ticker.ask_price);
+       pass (sprintf "24h High: %.2f | Low: %.2f" ticker.high_24h ticker.low_24h);
+       pass (sprintf "24h Volume: %.2f" ticker.volume_24h);
+       Option.iter ticker.price_change_pct ~f:(fun pct ->
+         pass (sprintf "24h Change: %.2f%%" pct))
+     | Error msg ->
+       fail (sprintf "Failed to normalize ticker: %s" msg))
   | Error err ->
     let e = Mexc.Fluxum_adapter.Adapter.Normalize.error err in
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))

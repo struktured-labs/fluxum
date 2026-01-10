@@ -244,74 +244,86 @@ module Adapter = struct
       | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
       | _ -> Types.Order_status.New
 
-    let order_from_status (status : Native.Order.status) : Types.Order.t =
-      let side =
-        match status.side with
-        | "BUY" -> Types.Side.Buy
-        | _ -> Types.Side.Sell
-      in
-      let kind =
-        match status.type_ with
-        | "LIMIT" -> Types.Order_kind.Limit (Float.of_string status.price)
-        | "MARKET" -> Types.Order_kind.Market
-        | _ -> Types.Order_kind.Market
-      in
-      let order_status =
-        match status.status with
-        | "FILLED" -> Types.Order_status.Filled
-        | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
-        | "CANCELED" -> Types.Order_status.Canceled
-        | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
-        | _ -> Types.Order_status.New
-      in
-      { venue = Venue.t
-      ; id = status.orderId
-      ; symbol = status.symbol
-      ; side
-      ; kind
-      ; qty = Float.of_string status.origQty
-      ; filled = Float.of_string status.executedQty
-      ; status = order_status
-      ; created_at =
-          (if Int64.(status.time > 0L)
-          then
+    let order_from_status (status : Native.Order.status) : (Types.Order.t, string) Result.t =
+      try
+        let side =
+          match status.side with
+          | "BUY" -> Types.Side.Buy
+          | _ -> Types.Side.Sell
+        in
+        let kind =
+          match status.type_ with
+          | "LIMIT" -> Types.Order_kind.Limit (Float.of_string status.price)
+          | "MARKET" -> Types.Order_kind.Market
+          | _ -> Types.Order_kind.Market
+        in
+        let order_status =
+          match status.status with
+          | "FILLED" -> Types.Order_status.Filled
+          | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
+          | "CANCELED" -> Types.Order_status.Canceled
+          | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
+          | _ -> Types.Order_status.New
+        in
+        Ok { venue = Venue.t
+        ; id = status.orderId
+        ; symbol = status.symbol
+        ; side
+        ; kind
+        ; qty = Float.of_string status.origQty
+        ; filled = Float.of_string status.executedQty
+        ; status = order_status
+        ; created_at =
+            (if Int64.(status.time > 0L)
+            then
+              Some
+                (Time_float_unix.of_span_since_epoch
+                   (Time_float_unix.Span.of_ms (Int64.to_float status.time)))
+            else None)
+        ; updated_at =
+            (if Int64.(status.updateTime > 0L)
+            then
+              Some
+                (Time_float_unix.of_span_since_epoch
+                   (Time_float_unix.Span.of_ms (Int64.to_float status.updateTime)))
+            else None)
+        }
+      with
+      | Failure msg -> Error (sprintf "Order from status conversion failed: %s" msg)
+      | exn -> Error (sprintf "Order from status unexpected error: %s" (Exn.to_string exn))
+
+    let trade (t : Native.Trade.t) : (Types.Trade.t, string) Result.t =
+      try
+        let side = match t.isBuyer with true -> Types.Side.Buy | false -> Types.Side.Sell in
+        Ok { venue = Venue.t
+        ; symbol = t.symbol
+        ; side
+        ; price = Float.of_string t.price
+        ; qty = Float.of_string t.qty
+        ; fee = Some (Float.of_string t.commission)
+        ; trade_id = Some (Int64.to_string t.id)
+        ; ts =
             Some
               (Time_float_unix.of_span_since_epoch
-                 (Time_float_unix.Span.of_ms (Int64.to_float status.time)))
-          else None)
-      ; updated_at =
-          (if Int64.(status.updateTime > 0L)
-          then
-            Some
-              (Time_float_unix.of_span_since_epoch
-                 (Time_float_unix.Span.of_ms (Int64.to_float status.updateTime)))
-          else None)
-      }
+                 (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
+        }
+      with
+      | Failure msg -> Error (sprintf "Trade conversion failed: %s" msg)
+      | exn -> Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
 
-    let trade (t : Native.Trade.t) : Types.Trade.t =
-      let side = match t.isBuyer with true -> Types.Side.Buy | false -> Types.Side.Sell in
-      { venue = Venue.t
-      ; symbol = t.symbol
-      ; side
-      ; price = Float.of_string t.price
-      ; qty = Float.of_string t.qty
-      ; fee = Some (Float.of_string t.commission)
-      ; trade_id = Some (Int64.to_string t.id)
-      ; ts =
-          Some
-            (Time_float_unix.of_span_since_epoch
-               (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
-      }
-
-    let balance (b : Native.Balance.t) : Types.Balance.t =
-      let free = Float.of_string b.free in
-      let locked = Float.of_string b.locked in
-      { venue = Venue.t
-      ; currency = b.asset
-      ; total = free +. locked
-      ; available = free
-      ; locked
-      }
+    let balance (b : Native.Balance.t) : (Types.Balance.t, string) Result.t =
+      try
+        let free = Float.of_string b.free in
+        let locked = Float.of_string b.locked in
+        Ok { venue = Venue.t
+        ; currency = b.asset
+        ; total = free +. locked
+        ; available = free
+        ; locked
+        }
+      with
+      | Failure msg -> Error (sprintf "Balance conversion failed: %s" msg)
+      | exn -> Error (sprintf "Balance unexpected error: %s" (Exn.to_string exn))
 
     let book_update (depth : Native.Book.update) : Types.Book_update.t =
       (* Return bid side update - caller should handle both sides *)
@@ -340,56 +352,68 @@ module Adapter = struct
       ; quote_increment = None
       }
 
-    let ticker (t : Native.Ticker.t) : Types.Ticker.t =
-      { venue = Venue.t
-      ; symbol = t.symbol
-      ; last_price = Float.of_string t.lastPrice
-      ; bid_price = Float.of_string t.bidPrice
-      ; ask_price = Float.of_string t.askPrice
-      ; high_24h = Float.of_string t.highPrice
-      ; low_24h = Float.of_string t.lowPrice
-      ; volume_24h = Float.of_string t.volume
-      ; quote_volume = Some (Float.of_string t.quoteVolume)
-      ; price_change = Some (Float.of_string t.priceChange)
-      ; price_change_pct = Some (Float.of_string t.priceChangePercent)
-      ; ts = Some (Time_float_unix.of_span_since_epoch
-                    (Time_float_unix.Span.of_ms (Int64.to_float t.closeTime)))
-      }
+    let ticker (t : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
+      try
+        Ok { venue = Venue.t
+        ; symbol = t.symbol
+        ; last_price = Float.of_string t.lastPrice
+        ; bid_price = Float.of_string t.bidPrice
+        ; ask_price = Float.of_string t.askPrice
+        ; high_24h = Float.of_string t.highPrice
+        ; low_24h = Float.of_string t.lowPrice
+        ; volume_24h = Float.of_string t.volume
+        ; quote_volume = Some (Float.of_string t.quoteVolume)
+        ; price_change = Some (Float.of_string t.priceChange)
+        ; price_change_pct = Some (Float.of_string t.priceChangePercent)
+        ; ts = Some (Time_float_unix.of_span_since_epoch
+                      (Time_float_unix.Span.of_ms (Int64.to_float t.closeTime)))
+        }
+      with
+      | Failure msg -> Error (sprintf "Ticker conversion failed: %s" msg)
+      | exn -> Error (sprintf "Ticker unexpected error: %s" (Exn.to_string exn))
 
-    let order_book (depth : Native.Book.snapshot) : Types.Order_book.t =
-      let bids = List.map depth.bids ~f:(fun (price, qty) ->
-        { Types.Order_book.Price_level.price = Float.of_string price
-        ; volume = Float.of_string qty
-        })
-      in
-      let asks = List.map depth.asks ~f:(fun (price, qty) ->
-        { Types.Order_book.Price_level.price = Float.of_string price
-        ; volume = Float.of_string qty
-        })
-      in
-      { venue = Venue.t
-      ; symbol = ""  (* Symbol not in depth response *)
-      ; bids
-      ; asks
-      ; ts = (match depth.timestamp with
-             | 0L -> None
-             | ts -> Some (Time_float_unix.of_span_since_epoch
-                            (Time_float_unix.Span.of_ms (Int64.to_float ts))))
-      ; epoch = Int64.to_int_trunc depth.lastUpdateId
-      }
+    let order_book (depth : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
+      try
+        let bids = List.map depth.bids ~f:(fun (price, qty) ->
+          { Types.Order_book.Price_level.price = Float.of_string price
+          ; volume = Float.of_string qty
+          })
+        in
+        let asks = List.map depth.asks ~f:(fun (price, qty) ->
+          { Types.Order_book.Price_level.price = Float.of_string price
+          ; volume = Float.of_string qty
+          })
+        in
+        Ok { venue = Venue.t
+        ; symbol = ""  (* Symbol not in depth response *)
+        ; bids
+        ; asks
+        ; ts = (match depth.timestamp with
+               | 0L -> None
+               | ts -> Some (Time_float_unix.of_span_since_epoch
+                              (Time_float_unix.Span.of_ms (Int64.to_float ts))))
+        ; epoch = Int64.to_int_trunc depth.lastUpdateId
+        }
+      with
+      | Failure msg -> Error (sprintf "Order book conversion failed: %s" msg)
+      | exn -> Error (sprintf "Order book unexpected error: %s" (Exn.to_string exn))
 
-    let public_trade (t : Native.Public_trade.t) : Types.Public_trade.t =
-      { venue = Venue.t
-      ; symbol = ""  (* Symbol not in trade response *)
-      ; price = Float.of_string t.price
-      ; qty = Float.of_string t.qty
-      ; side = Some (match t.isBuyerMaker with
-                    | true -> Types.Side.Sell  (* Buyer is maker = sell order filled *)
-                    | false -> Types.Side.Buy) (* Seller is maker = buy order filled *)
-      ; trade_id = Option.map t.id ~f:Int64.to_string
-      ; ts = Some (Time_float_unix.of_span_since_epoch
-                    (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
-      }
+    let public_trade (t : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
+      try
+        Ok { venue = Venue.t
+        ; symbol = ""  (* Symbol not in trade response *)
+        ; price = Float.of_string t.price
+        ; qty = Float.of_string t.qty
+        ; side = Some (match t.isBuyerMaker with
+                      | true -> Types.Side.Sell  (* Buyer is maker = sell order filled *)
+                      | false -> Types.Side.Buy) (* Seller is maker = buy order filled *)
+        ; trade_id = Option.map t.id ~f:Int64.to_string
+        ; ts = Some (Time_float_unix.of_span_since_epoch
+                      (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
+        }
+      with
+      | Failure msg -> Error (sprintf "Public trade conversion failed: %s" msg)
+      | exn -> Error (sprintf "Public trade unexpected error: %s" (Exn.to_string exn))
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

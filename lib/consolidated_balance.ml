@@ -219,7 +219,16 @@ let query_exchange (config : Query_config.exchange_config) : Exchange_result.t D
     Mexc.Fluxum_adapter.Adapter.balances adapter >>| (function
     | Ok balances ->
       let normalized = List.map balances ~f:Mexc.Fluxum_adapter.Adapter.Normalize.balance in
-      Exchange_result.success ~venue:Types.Venue.Mexc ~balances:normalized ~latency_ms:(calc_latency ())
+      let result_transpose results =
+        List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+          match res, acc with
+          | Ok v, Ok vs -> Ok (v :: vs)
+          | Error e, _ -> Error e
+          | _, Error e -> Error e)
+      in
+      (match result_transpose normalized with
+       | Ok bals -> Exchange_result.success ~venue:Types.Venue.Mexc ~balances:bals ~latency_ms:(calc_latency ())
+       | Error _msg -> Exchange_result.failure ~venue:Types.Venue.Mexc ~error:"Normalization error" ~latency_ms:(calc_latency ()))
     | Error e ->
       let error = Sexp.to_string (Mexc.Rest.Error.sexp_of_t e) in
       Exchange_result.failure ~venue:Types.Venue.Mexc ~error ~latency_ms:(calc_latency ()))
