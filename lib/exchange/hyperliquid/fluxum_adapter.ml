@@ -305,37 +305,55 @@ module Adapter = struct
       (* Open orders are considered New *)
       Types.Order_status.New
 
-    let order_from_status (o : Native.Order.status) : Types.Order.t =
-      { venue = Venue.t
-      ; id = Int64.to_string o.oid
-      ; symbol = o.coin
-      ; side = side_of_string o.side
-      ; kind = Types.Order_kind.Limit (Float.of_string o.limitPx)
-      ; qty = Float.of_string o.sz
-      ; filled = 0.  (* Open orders have no filled qty *)
-      ; status = Types.Order_status.New
-      ; created_at = Some (time_of_ms o.timestamp)
-      ; updated_at = Some (time_of_ms o.timestamp)
-      }
+    let order_from_status (o : Native.Order.status) : (Types.Order.t, string) Result.t =
+      try
+        Ok { venue = Venue.t
+        ; id = Int64.to_string o.oid
+        ; symbol = o.coin
+        ; side = side_of_string o.side
+        ; kind = Types.Order_kind.Limit (Float.of_string o.limitPx)
+        ; qty = Float.of_string o.sz
+        ; filled = 0.  (* Open orders have no filled qty *)
+        ; status = Types.Order_status.New
+        ; created_at = Some (time_of_ms o.timestamp)
+        ; updated_at = Some (time_of_ms o.timestamp)
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Order conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Order unexpected error: %s" (Exn.to_string exn))
 
-    let trade (f : Native.Trade.t) : Types.Trade.t =
-      { venue = Venue.t
-      ; symbol = f.coin
-      ; side = side_of_string f.side
-      ; price = Float.of_string f.px
-      ; qty = Float.of_string f.sz
-      ; fee = Some (Float.of_string f.fee)
-      ; trade_id = Some (Int64.to_string f.tid)
-      ; ts = Some (time_of_ms f.time)
-      }
+    let trade (f : Native.Trade.t) : (Types.Trade.t, string) Result.t =
+      try
+        Ok { venue = Venue.t
+        ; symbol = f.coin
+        ; side = side_of_string f.side
+        ; price = Float.of_string f.px
+        ; qty = Float.of_string f.sz
+        ; fee = Some (Float.of_string f.fee)
+        ; trade_id = Some (Int64.to_string f.tid)
+        ; ts = Some (time_of_ms f.time)
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Trade conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
 
-    let balance (state : Native.Balance.t) : Types.Balance.t =
-      { venue = Venue.t
-      ; currency = "USD"  (* Hyperliquid uses USD-settled perps *)
-      ; total = Float.of_string state.marginSummary.accountValue
-      ; available = Float.of_string state.withdrawable
-      ; locked = Float.of_string state.marginSummary.totalMarginUsed
-      }
+    let balance (state : Native.Balance.t) : (Types.Balance.t, string) Result.t =
+      try
+        Ok { venue = Venue.t
+        ; currency = "USD"  (* Hyperliquid uses USD-settled perps *)
+        ; total = Float.of_string state.marginSummary.accountValue
+        ; available = Float.of_string state.withdrawable
+        ; locked = Float.of_string state.marginSummary.totalMarginUsed
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Balance conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Balance unexpected error: %s" (Exn.to_string exn))
 
     let book_update (u : Native.Book.update) : Types.Book_update.t =
       let side = match u.side with
@@ -367,50 +385,68 @@ module Adapter = struct
             (String.make item.szDecimals '0')))
       }
 
-    let ticker ((coin, ctx) : Native.Ticker.t) : Types.Ticker.t =
-      { venue = Venue.t
-      ; symbol = coin
-      ; last_price = Float.of_string ctx.markPx
-      ; bid_price = Float.of_string ctx.markPx  (* Use mark price as approx *)
-      ; ask_price = Float.of_string ctx.markPx
-      ; high_24h = Float.of_string ctx.prevDayPx  (* Best approx available *)
-      ; low_24h = Float.of_string ctx.prevDayPx
-      ; volume_24h = Float.of_string ctx.dayNtlVlm
-      ; quote_volume = None
-      ; price_change = None
-      ; price_change_pct = None
-      ; ts = Some (Time_float_unix.now ())
-      }
+    let ticker ((coin, ctx) : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
+      try
+        Ok { venue = Venue.t
+        ; symbol = coin
+        ; last_price = Float.of_string ctx.markPx
+        ; bid_price = Float.of_string ctx.markPx  (* Use mark price as approx *)
+        ; ask_price = Float.of_string ctx.markPx
+        ; high_24h = Float.of_string ctx.prevDayPx  (* Best approx available *)
+        ; low_24h = Float.of_string ctx.prevDayPx
+        ; volume_24h = Float.of_string ctx.dayNtlVlm
+        ; quote_volume = None
+        ; price_change = None
+        ; price_change_pct = None
+        ; ts = Some (Time_float_unix.now ())
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Ticker conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Ticker unexpected error: %s" (Exn.to_string exn))
 
-    let order_book (book : Native.Book.snapshot) : Types.Order_book.t =
-      let parse_levels (levels : Rest.Types.level list) =
-        List.map levels ~f:(fun (level : Rest.Types.level) ->
-          { Types.Order_book.Price_level.
-            price = Float.of_string level.px
-          ; volume = Float.of_string level.sz
-          })
-      in
-      let bid_levels, ask_levels = match book.levels with
-        | [bid_list; ask_list] -> (parse_levels bid_list, parse_levels ask_list)
-        | _ -> ([], [])
-      in
-      { venue = Venue.t
-      ; symbol = book.coin
-      ; bids = bid_levels
-      ; asks = ask_levels
-      ; ts = Some (time_of_ms book.time)
-      ; epoch = 0  (* No sequence number from Hyperliquid *)
-      }
+    let order_book (book : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
+      try
+        let parse_levels (levels : Rest.Types.level list) =
+          List.map levels ~f:(fun (level : Rest.Types.level) ->
+            { Types.Order_book.Price_level.
+              price = Float.of_string level.px
+            ; volume = Float.of_string level.sz
+            })
+        in
+        let bid_levels, ask_levels = match book.levels with
+          | [bid_list; ask_list] -> (parse_levels bid_list, parse_levels ask_list)
+          | _ -> ([], [])
+        in
+        Ok { venue = Venue.t
+        ; symbol = book.coin
+        ; bids = bid_levels
+        ; asks = ask_levels
+        ; ts = Some (time_of_ms book.time)
+        ; epoch = 0  (* No sequence number from Hyperliquid *)
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Order book conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Order book unexpected error: %s" (Exn.to_string exn))
 
-    let public_trade (t : Native.Public_trade.t) : Types.Public_trade.t =
-      { venue = Venue.t
-      ; symbol = t.coin
-      ; price = Float.of_string t.px
-      ; qty = Float.of_string t.sz
-      ; side = Some (side_of_string t.side)
-      ; trade_id = Some (Int64.to_string t.tid)
-      ; ts = Some (time_of_ms t.time)
-      }
+    let public_trade (t : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
+      try
+        Ok { venue = Venue.t
+        ; symbol = t.coin
+        ; price = Float.of_string t.px
+        ; qty = Float.of_string t.sz
+        ; side = Some (side_of_string t.side)
+        ; trade_id = Some (Int64.to_string t.tid)
+        ; ts = Some (time_of_ms t.time)
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Public trade conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Public trade unexpected error: %s" (Exn.to_string exn))
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

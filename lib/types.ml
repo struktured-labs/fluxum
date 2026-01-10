@@ -318,6 +318,7 @@ module Error = struct
     | Transport of exn [@sexp.opaque]
     | Rate_limited
     | Auth_failed
+    | Normalization_error of string
     | Exchange_specific of
         { venue   : Venue.t
         ; code    : string

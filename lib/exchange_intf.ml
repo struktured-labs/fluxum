@@ -132,16 +132,16 @@ module type S = sig
   end
 
   module Normalize : sig
-    val order_response   : Native.Order.response -> Order.t
+    val order_response   : Native.Order.response -> (Order.t, string) Result.t
     val order_status     : Native.Order.status   -> Order_status.t
-    val order_from_status : Native.Order.status  -> Order.t  (** Full order from status query *)
-    val trade            : Native.Trade.t        -> Trade.t
-    val balance          : Native.Balance.t      -> Balance.t
+    val order_from_status : Native.Order.status  -> (Order.t, string) Result.t  (** Full order from status query *)
+    val trade            : Native.Trade.t        -> (Trade.t, string) Result.t
+    val balance          : Native.Balance.t      -> (Balance.t, string) Result.t
     val book_update      : Native.Book.update    -> Book_update.t
     val symbol_info      : Native.Symbol_info.t  -> Symbol_info.t
-    val ticker           : Native.Ticker.t       -> Ticker.t
-    val order_book       : Native.Book.snapshot  -> Order_book.t
-    val public_trade     : Native.Public_trade.t -> Public_trade.t
+    val ticker           : Native.Ticker.t       -> (Ticker.t, string) Result.t
+    val order_book       : Native.Book.snapshot  -> (Order_book.t, string) Result.t
+    val public_trade     : Native.Public_trade.t -> (Public_trade.t, string) Result.t
     val error            : Native.Error.t        -> Error.t
   end
 end

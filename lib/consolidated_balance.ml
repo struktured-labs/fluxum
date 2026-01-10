@@ -173,7 +173,16 @@ let query_exchange (config : Query_config.exchange_config) : Exchange_result.t D
     Gemini.Fluxum_adapter.Adapter.balances adapter >>| (function
     | Ok balances ->
       let normalized = List.map balances ~f:Gemini.Fluxum_adapter.Adapter.Normalize.balance in
-      Exchange_result.success ~venue:Types.Venue.Gemini ~balances:normalized ~latency_ms:(calc_latency ())
+      let result_transpose results =
+        List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+          match res, acc with
+          | Ok v, Ok vs -> Ok (v :: vs)
+          | Error e, _ -> Error e
+          | _, Error e -> Error e)
+      in
+      (match result_transpose normalized with
+       | Ok bals -> Exchange_result.success ~venue:Types.Venue.Gemini ~balances:bals ~latency_ms:(calc_latency ())
+       | Error _msg -> Exchange_result.failure ~venue:Types.Venue.Gemini ~error:"Normalization error" ~latency_ms:(calc_latency ()))
     | Error _ ->
       Exchange_result.failure ~venue:Types.Venue.Gemini ~error:"API error" ~latency_ms:(calc_latency ()))
 
@@ -182,7 +191,16 @@ let query_exchange (config : Query_config.exchange_config) : Exchange_result.t D
     Kraken.Fluxum_adapter.Adapter.balances adapter >>| (function
     | Ok balances ->
       let normalized = List.map balances ~f:Kraken.Fluxum_adapter.Adapter.Normalize.balance in
-      Exchange_result.success ~venue:Types.Venue.Kraken ~balances:normalized ~latency_ms:(calc_latency ())
+      let result_transpose results =
+        List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+          match res, acc with
+          | Ok v, Ok vs -> Ok (v :: vs)
+          | Error e, _ -> Error e
+          | _, Error e -> Error e)
+      in
+      (match result_transpose normalized with
+       | Ok bals -> Exchange_result.success ~venue:Types.Venue.Kraken ~balances:bals ~latency_ms:(calc_latency ())
+       | Error _msg -> Exchange_result.failure ~venue:Types.Venue.Kraken ~error:"Normalization error" ~latency_ms:(calc_latency ()))
     | Error _e ->
       Exchange_result.failure ~venue:Types.Venue.Kraken ~error:"API error" ~latency_ms:(calc_latency ()))
 

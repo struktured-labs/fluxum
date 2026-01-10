@@ -230,107 +230,127 @@ module Adapter = struct
     let symbol_to_string (s : Common.Symbol.Enum_or_string.t) : string =
       Common.Symbol.Enum_or_string.to_string s
 
-    let order_response (r : Native.Order.response) : Types.Order.t =
-      let qty_orig = Float.of_string (Common.Decimal_string.to_string r.original_amount) in
-      let qty_exec = Float.of_string (Common.Decimal_string.to_string r.executed_amount) in
-      let qty_rem = Float.of_string (Common.Decimal_string.to_string r.remaining_amount) in
-      let reason_to_status = function
-        | Some `Invalid_quantity -> Types.Order_status.Rejected "invalid_quantity"
-        | Some `Insufficient_funds -> Types.Order_status.Rejected "insufficient_funds"
-        | Some `Self_cross_prevented -> Types.Order_status.Rejected "self_cross_prevented"
-        | Some `Immediate_or_cancel_would_post -> Types.Order_status.Rejected "ioc_would_post"
-        | None -> Types.Order_status.New
-      in
-      let status : Types.Order_status.t =
-        match r.is_cancelled with
-        | true -> Types.Order_status.Canceled
-        | false ->
-          match r.is_live with
-          | true ->
-            (match Float.(qty_exec = 0.) with
-             | true -> Types.Order_status.New
-             | false ->
-               match Float.(qty_exec > 0.) with
-               | true -> Types.Order_status.Partially_filled
-               | false ->
-                 match Float.(qty_rem = 0.) with
-                 | true -> Types.Order_status.Filled
-                 | false -> reason_to_status r.reason)
+    let order_response (r : Native.Order.response) : (Types.Order.t, string) Result.t =
+      try
+        let qty_orig = Float.of_string (Common.Decimal_string.to_string r.original_amount) in
+        let qty_exec = Float.of_string (Common.Decimal_string.to_string r.executed_amount) in
+        let qty_rem = Float.of_string (Common.Decimal_string.to_string r.remaining_amount) in
+        let reason_to_status = function
+          | Some `Invalid_quantity -> Types.Order_status.Rejected "invalid_quantity"
+          | Some `Insufficient_funds -> Types.Order_status.Rejected "insufficient_funds"
+          | Some `Self_cross_prevented -> Types.Order_status.Rejected "self_cross_prevented"
+          | Some `Immediate_or_cancel_would_post -> Types.Order_status.Rejected "ioc_would_post"
+          | None -> Types.Order_status.New
+        in
+        let status : Types.Order_status.t =
+          match r.is_cancelled with
+          | true -> Types.Order_status.Canceled
           | false ->
-            match Float.(qty_rem = 0.) with
-            | true -> Types.Order_status.Filled
-            | false -> reason_to_status r.reason
-      in
-      { Types.Order.venue = Venue.t
-      ; id = Common.Int_string.to_string r.order_id
-      ; symbol = symbol_to_string r.symbol
-      ; side = side r.side
-      ; kind = order_kind r.type_ r.price r.options
-      ; qty = qty_orig
-      ; filled = qty_exec
-      ; status
-      ; created_at = time_of_ts_opt (Some r.timestamp)
-      ; updated_at = time_of_ts_opt (Some r.timestamp)
-      }
+            match r.is_live with
+            | true ->
+              (match Float.(qty_exec = 0.) with
+               | true -> Types.Order_status.New
+               | false ->
+                 match Float.(qty_exec > 0.) with
+                 | true -> Types.Order_status.Partially_filled
+                 | false ->
+                   match Float.(qty_rem = 0.) with
+                   | true -> Types.Order_status.Filled
+                   | false -> reason_to_status r.reason)
+            | false ->
+              match Float.(qty_rem = 0.) with
+              | true -> Types.Order_status.Filled
+              | false -> reason_to_status r.reason
+        in
+        Ok { Types.Order.venue = Venue.t
+        ; id = Common.Int_string.to_string r.order_id
+        ; symbol = symbol_to_string r.symbol
+        ; side = side r.side
+        ; kind = order_kind r.type_ r.price r.options
+        ; qty = qty_orig
+        ; filled = qty_exec
+        ; status
+        ; created_at = time_of_ts_opt (Some r.timestamp)
+        ; updated_at = time_of_ts_opt (Some r.timestamp)
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Order conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Order unexpected error: %s" (Exn.to_string exn))
 
     let order_status (r : Native.Order.status) : Types.Order_status.t =
-      (order_response r).status
+      match order_response r with
+      | Ok order -> order.status
+      | Error _ -> Types.Order_status.Rejected "conversion_error"
 
-    let order_from_status (r : Native.Order.status) : Types.Order.t =
+    let order_from_status (r : Native.Order.status) : (Types.Order.t, string) Result.t =
       order_response r
 
-    let trade (t : Native.Trade.t) : Types.Trade.t =
-      match t with
-      | Ws ev ->
-        (match ev.fill with
-         | None ->
-           { venue = Venue.t
-           ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
-           ; side = side ev.side
-           ; price = Option.value_map ev.avg_execution_price ~default:0.0 ~f:(fun d ->
-               Float.of_string (Common.Decimal_string.to_string d))
-           ; qty = Option.value_map ev.executed_amount ~default:0.0 ~f:(fun d ->
-               Float.of_string (Common.Decimal_string.to_string d))
-           ; fee = None
-           ; trade_id = None
-           ; ts = time_of_ts_opt (Some ev.timestamp)
-           }
-         | Some f ->
-           let price = Float.of_string (Common.Decimal_string.to_string f.price) in
-           let qty = Float.of_string (Common.Decimal_string.to_string f.amount) in
-           let fee = Float.of_string (Common.Decimal_string.to_string f.fee) in
-           { venue = Venue.t
-           ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
-           ; side = side ev.side
-           ; price
-           ; qty
-           ; fee = Some fee
-           ; trade_id = Some (Common.Int_string.to_string f.trade_id)
-           ; ts = time_of_ts_opt (Some ev.timestamp)
-           })
-      | Rest tr ->
-        let price = Float.of_string (Common.Decimal_string.to_string tr.price) in
-        let qty = Float.of_string (Common.Decimal_string.to_string tr.amount) in
-        let fee = Float.of_string (Common.Decimal_string.to_string tr.fee_amount) in
-        { venue = Venue.t
-        ; symbol = Common.Symbol.Enum_or_string.to_string tr.symbol
-        ; side = side tr.type_
-        ; price
-        ; qty
-        ; fee = Some fee
-        ; trade_id = Some (Common.Int_number.to_string tr.tid)
-        ; ts = Some tr.timestampms
-        }
+    let trade (t : Native.Trade.t) : (Types.Trade.t, string) Result.t =
+      try
+        Ok (match t with
+        | Ws ev ->
+          (match ev.fill with
+           | None ->
+             { venue = Venue.t
+             ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
+             ; side = side ev.side
+             ; price = Option.value_map ev.avg_execution_price ~default:0.0 ~f:(fun d ->
+                 Float.of_string (Common.Decimal_string.to_string d))
+             ; qty = Option.value_map ev.executed_amount ~default:0.0 ~f:(fun d ->
+                 Float.of_string (Common.Decimal_string.to_string d))
+             ; fee = None
+             ; trade_id = None
+             ; ts = time_of_ts_opt (Some ev.timestamp)
+             }
+           | Some f ->
+             let price = Float.of_string (Common.Decimal_string.to_string f.price) in
+             let qty = Float.of_string (Common.Decimal_string.to_string f.amount) in
+             let fee = Float.of_string (Common.Decimal_string.to_string f.fee) in
+             { venue = Venue.t
+             ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
+             ; side = side ev.side
+             ; price
+             ; qty
+             ; fee = Some fee
+             ; trade_id = Some (Common.Int_string.to_string f.trade_id)
+             ; ts = time_of_ts_opt (Some ev.timestamp)
+             })
+        | Rest tr ->
+          let price = Float.of_string (Common.Decimal_string.to_string tr.price) in
+          let qty = Float.of_string (Common.Decimal_string.to_string tr.amount) in
+          let fee = Float.of_string (Common.Decimal_string.to_string tr.fee_amount) in
+          { venue = Venue.t
+          ; symbol = Common.Symbol.Enum_or_string.to_string tr.symbol
+          ; side = side tr.type_
+          ; price
+          ; qty
+          ; fee = Some fee
+          ; trade_id = Some (Common.Int_number.to_string tr.tid)
+          ; ts = Some tr.timestampms
+          })
+      with
+      | Failure msg ->
+        Error (sprintf "Trade conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
 
-    let balance (b : Native.Balance.t) : Types.Balance.t =
-      let total = Float.of_string (Common.Decimal_string.to_string b.amount) in
-      let available = Float.of_string (Common.Decimal_string.to_string b.available) in
-      { venue = Venue.t
-      ; currency = Common.Currency.Enum_or_string.to_string b.currency
-      ; total
-      ; available
-      ; locked = total -. available
-      }
+    let balance (b : Native.Balance.t) : (Types.Balance.t, string) Result.t =
+      try
+        let total = Float.of_string (Common.Decimal_string.to_string b.amount) in
+        let available = Float.of_string (Common.Decimal_string.to_string b.available) in
+        Ok { venue = Venue.t
+        ; currency = Common.Currency.Enum_or_string.to_string b.currency
+        ; total
+        ; available
+        ; locked = total -. available
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Balance conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Balance unexpected error: %s" (Exn.to_string exn))
 
     let book_update (u : Native.Book.update) : Types.Book_update.t =
       let ts = Option.first_some u.timestamp u.timestampms in
@@ -381,64 +401,88 @@ module Adapter = struct
       ; quote_increment = Some (Common.Decimal_number.to_float s.quote_increment)
       }
 
-    let ticker (json : Native.Ticker.t) : Types.Ticker.t =
-      let open Yojson.Safe.Util in
-      let bid = json |> member "bid" |> to_string |> Float.of_string in
-      let ask = json |> member "ask" |> to_string |> Float.of_string in
-      let last = json |> member "last" |> to_string |> Float.of_string in
-      let volume = json |> member "volume" in
-      let symbol_vol = match volume |> to_assoc |> List.hd with
-        | Some (symbol, vol) -> (symbol, vol |> to_string |> Float.of_string)
-        | None -> ("", 0.)
-      in
-      { venue = Venue.t
-      ; symbol = String.uppercase (fst symbol_vol)
-      ; last_price = last
-      ; bid_price = bid
-      ; ask_price = ask
-      ; high_24h = last  (* Gemini doesn't provide high/low in ticker *)
-      ; low_24h = last
-      ; volume_24h = snd symbol_vol
-      ; quote_volume = None
-      ; price_change = None
-      ; price_change_pct = None
-      ; ts = None
-      }
+    let ticker (json : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
+      try
+        let open Yojson.Safe.Util in
+        let bid = json |> member "bid" |> to_string |> Float.of_string in
+        let ask = json |> member "ask" |> to_string |> Float.of_string in
+        let last = json |> member "last" |> to_string |> Float.of_string in
+        let volume = json |> member "volume" in
+        let symbol_vol = match volume |> to_assoc |> List.hd with
+          | Some (symbol, vol) -> (symbol, vol |> to_string |> Float.of_string)
+          | None -> ("", 0.)
+        in
+        Ok { venue = Venue.t
+        ; symbol = String.uppercase (fst symbol_vol)
+        ; last_price = last
+        ; bid_price = bid
+        ; ask_price = ask
+        ; high_24h = last  (* Gemini doesn't provide high/low in ticker *)
+        ; low_24h = last
+        ; volume_24h = snd symbol_vol
+        ; quote_volume = None
+        ; price_change = None
+        ; price_change_pct = None
+        ; ts = None
+        }
+      with
+      | Yojson.Safe.Util.Type_error (msg, _) ->
+        Error (sprintf "Ticker JSON type error: %s" msg)
+      | Failure msg ->
+        Error (sprintf "Ticker conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Ticker unexpected error: %s" (Exn.to_string exn))
 
-    let order_book (json : Native.Book.snapshot) : Types.Order_book.t =
-      let open Yojson.Safe.Util in
-      let parse_levels levels_json =
-        levels_json |> to_list |> List.map ~f:(fun level ->
-          let price = level |> member "price" |> to_string |> Float.of_string in
-          let volume = level |> member "amount" |> to_string |> Float.of_string in
-          { Types.Order_book.Price_level.price; volume })
-      in
-      let bids = json |> member "bids" |> parse_levels in
-      let asks = json |> member "asks" |> parse_levels in
-      { venue = Venue.t
-      ; symbol = ""  (* Symbol not in response, caller must track *)
-      ; bids
-      ; asks
-      ; ts = None
-      ; epoch = 0
-      }
+    let order_book (json : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
+      try
+        let open Yojson.Safe.Util in
+        let parse_levels levels_json =
+          levels_json |> to_list |> List.map ~f:(fun level ->
+            let price = level |> member "price" |> to_string |> Float.of_string in
+            let volume = level |> member "amount" |> to_string |> Float.of_string in
+            { Types.Order_book.Price_level.price; volume })
+        in
+        let bids = json |> member "bids" |> parse_levels in
+        let asks = json |> member "asks" |> parse_levels in
+        Ok { venue = Venue.t
+        ; symbol = ""  (* Symbol not in response, caller must track *)
+        ; bids
+        ; asks
+        ; ts = None
+        ; epoch = 0
+        }
+      with
+      | Yojson.Safe.Util.Type_error (msg, _) ->
+        Error (sprintf "Order book JSON type error: %s" msg)
+      | Failure msg ->
+        Error (sprintf "Order book conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Order book unexpected error: %s" (Exn.to_string exn))
 
-    let public_trade (json : Native.Public_trade.t) : Types.Public_trade.t =
-      let open Yojson.Safe.Util in
-      let timestamp = json |> member "timestampms" |> to_int in
-      let ts = Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Float.of_int timestamp)) in
-      { venue = Venue.t
-      ; symbol = ""  (* Symbol not in response, caller must track *)
-      ; price = json |> member "price" |> to_string |> Float.of_string
-      ; qty = json |> member "amount" |> to_string |> Float.of_string
-      ; side = Some (match json |> member "type" |> to_string with
-          | "buy" -> Types.Side.Buy
-          | "sell" -> Types.Side.Sell
-          | _ -> Types.Side.Buy)
-      ; trade_id = Some (json |> member "tid" |> to_int |> Int.to_string)
-      ; ts = Some ts
-      }
+    let public_trade (json : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
+      try
+        let open Yojson.Safe.Util in
+        let timestamp = json |> member "timestampms" |> to_int in
+        let ts = Time_float_unix.of_span_since_epoch
+          (Time_float_unix.Span.of_ms (Float.of_int timestamp)) in
+        Ok { venue = Venue.t
+        ; symbol = ""  (* Symbol not in response, caller must track *)
+        ; price = json |> member "price" |> to_string |> Float.of_string
+        ; qty = json |> member "amount" |> to_string |> Float.of_string
+        ; side = Some (match json |> member "type" |> to_string with
+            | "buy" -> Types.Side.Buy
+            | "sell" -> Types.Side.Sell
+            | _ -> Types.Side.Buy)
+        ; trade_id = Some (json |> member "tid" |> to_int |> Int.to_string)
+        ; ts = Some ts
+        }
+      with
+      | Yojson.Safe.Util.Type_error (msg, _) ->
+        Error (sprintf "Public trade JSON type error: %s" msg)
+      | Failure msg ->
+        Error (sprintf "Public trade conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Public trade unexpected error: %s" (Exn.to_string exn))
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

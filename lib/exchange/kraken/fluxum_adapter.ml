@@ -254,68 +254,90 @@ module Adapter = struct
       | "expired" -> Types.Order_status.Canceled
       | _ -> Types.Order_status.New
 
-    let order_response (r : Native.Order.response) : Types.Order.t =
-      let txid = List.hd r.txid |> Option.value ~default:"" in
-      { venue = Venue.t
-      ; id = txid
-      ; symbol = ""  (* Not available in response *)
-      ; side = Types.Side.Buy  (* Not available in response *)
-      ; kind = Types.Order_kind.Market
-      ; qty = 0.
-      ; filled = 0.
-      ; status = Types.Order_status.New
-      ; created_at = None
-      ; updated_at = None
-      }
+    let order_response (r : Native.Order.response) : (Types.Order.t, string) Result.t =
+      try
+        let txid = List.hd r.txid |> Option.value ~default:"" in
+        Ok { venue = Venue.t
+        ; id = txid
+        ; symbol = ""  (* Not available in response *)
+        ; side = Types.Side.Buy  (* Not available in response *)
+        ; kind = Types.Order_kind.Market
+        ; qty = 0.
+        ; filled = 0.
+        ; status = Types.Order_status.New
+        ; created_at = None
+        ; updated_at = None
+        }
+      with
+      | exn ->
+        Error (sprintf "Order response conversion error: %s" (Exn.to_string exn))
 
     let order_status (o : Native.Order.status) : Types.Order_status.t =
       status_of_string o.status
 
-    let order_from_status (o : Native.Order.status) : Types.Order.t =
-      let side = side_of_common o.descr.type_ in
-      let kind = order_type_of_common o.descr.ordertype in
-      let qty = Float.of_string o.vol in
-      let filled = Float.of_string o.vol_exec in
-      let status = status_of_string o.status in
-      let created_at =
-        Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec o.opentm))
-      in
-      { venue = Venue.t
-      ; id = ""  (* txid is the key, not in the order struct *)
-      ; symbol = o.descr.pair
-      ; side
-      ; kind
-      ; qty
-      ; filled
-      ; status
-      ; created_at
-      ; updated_at = None
-      }
+    let order_from_status (o : Native.Order.status) : (Types.Order.t, string) Result.t =
+      try
+        let side = side_of_common o.descr.type_ in
+        let kind = order_type_of_common o.descr.ordertype in
+        let qty = Float.of_string o.vol in
+        let filled = Float.of_string o.vol_exec in
+        let status = status_of_string o.status in
+        let created_at =
+          Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec o.opentm))
+        in
+        Ok { venue = Venue.t
+        ; id = ""  (* txid is the key, not in the order struct *)
+        ; symbol = o.descr.pair
+        ; side
+        ; kind
+        ; qty
+        ; filled
+        ; status
+        ; created_at
+        ; updated_at = None
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Order conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Order unexpected error: %s" (Exn.to_string exn))
 
-    let trade (tr : Native.Trade.t) : Types.Trade.t =
-      let side = side_of_string tr.type_ in
-      let price = Float.of_string tr.price in
-      let qty = Float.of_string tr.vol in
-      let fee = Float.of_string tr.fee in
-      let ts = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec tr.time)) in
-      { venue = Venue.t
-      ; symbol = tr.pair
-      ; side
-      ; price
-      ; qty
-      ; fee = Some fee
-      ; trade_id = Some tr.ordertxid
-      ; ts
-      }
+    let trade (tr : Native.Trade.t) : (Types.Trade.t, string) Result.t =
+      try
+        let side = side_of_string tr.type_ in
+        let price = Float.of_string tr.price in
+        let qty = Float.of_string tr.vol in
+        let fee = Float.of_string tr.fee in
+        let ts = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec tr.time)) in
+        Ok { venue = Venue.t
+        ; symbol = tr.pair
+        ; side
+        ; price
+        ; qty
+        ; fee = Some fee
+        ; trade_id = Some tr.ordertxid
+        ; ts
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Trade conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
 
-    let balance ((currency, amount) : Native.Balance.t) : Types.Balance.t =
-      let total = Float.of_string amount in
-      { venue = Venue.t
-      ; currency
-      ; total
-      ; available = total  (* Kraken doesn't separate available in Balances endpoint *)
-      ; locked = 0.
-      }
+    let balance ((currency, amount) : Native.Balance.t) : (Types.Balance.t, string) Result.t =
+      try
+        let total = Float.of_string amount in
+        Ok { venue = Venue.t
+        ; currency
+        ; total
+        ; available = total  (* Kraken doesn't separate available in Balances endpoint *)
+        ; locked = 0.
+        }
+      with
+      | Failure msg ->
+        Error (sprintf "Balance conversion failed: %s" msg)
+      | exn ->
+        Error (sprintf "Balance unexpected error: %s" (Exn.to_string exn))
 
     let book_update (u : Native.Book.update) : Types.Book_update.t =
       let side = match u.side with
