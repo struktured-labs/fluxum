@@ -54,7 +54,7 @@ let assert_false condition msg =
 let test_candle_creation () =
   printf "\n=== Candle: Creation ===\n";
 
-  let ts = Time_ns.of_string "2024-01-01 00:00:00Z" in
+  let ts = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
   let candle = Backtest.Candle.create
       ~symbol:"BTCUSD"
       ~timestamp:ts
@@ -76,7 +76,7 @@ let test_candle_creation () =
 let test_candle_calculations () =
   printf "\n=== Candle: Calculations ===\n";
 
-  let ts = Time_ns.of_string "2024-01-01 00:00:00Z" in
+  let ts = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
   let candle = Backtest.Candle.create
       ~symbol:"BTCUSD"
       ~timestamp:ts
@@ -107,7 +107,7 @@ let test_candle_calculations () =
 let test_candle_bearish () =
   printf "\n=== Candle: Bearish Detection ===\n";
 
-  let ts = Time_ns.of_string "2024-01-01 00:00:00Z" in
+  let ts = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
   let candle = Backtest.Candle.create
       ~symbol:"BTCUSD"
       ~timestamp:ts
@@ -138,9 +138,9 @@ let test_candle_csv_parsing () =
 let test_candle_sorting () =
   printf "\n=== Candle: Sorting by Time ===\n";
 
-  let ts1 = Time_ns.of_string "2024-01-03 00:00:00Z" in
-  let ts2 = Time_ns.of_string "2024-01-01 00:00:00Z" in
-  let ts3 = Time_ns.of_string "2024-01-02 00:00:00Z" in
+  let ts1 = Time_ns_unix.of_string "2024-01-03 00:00:00Z" in
+  let ts2 = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
+  let ts3 = Time_ns_unix.of_string "2024-01-02 00:00:00Z" in
 
   let c1 = Backtest.Candle.create ~symbol:"BTCUSD" ~timestamp:ts1
       ~open_:50000.0 ~high:51000.0 ~low:49000.0 ~close:50500.0 ~volume:100.0 in
@@ -177,7 +177,7 @@ let test_metrics_std_dev () =
 let test_metrics_calculate_basic () =
   printf "\n=== Metrics: Basic Calculation ===\n";
 
-  let start = Time_ns.of_string "2024-01-01 00:00:00Z" in
+  let start = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
 
   (* Simple equity curve: 10000 -> 11000 (10% return) *)
   let equity_curve = [
@@ -204,7 +204,7 @@ let test_metrics_calculate_basic () =
 let test_metrics_win_loss () =
   printf "\n=== Metrics: Win/Loss Calculations ===\n";
 
-  let start = Time_ns.of_string "2024-01-01 00:00:00Z" in
+  let start = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
 
   let equity_curve = [
     (start, 10000.0);
@@ -243,7 +243,7 @@ let test_metrics_win_loss () =
 let test_metrics_max_drawdown () =
   printf "\n=== Metrics: Max Drawdown ===\n";
 
-  let start = Time_ns.of_string "2024-01-01 00:00:00Z" in
+  let start = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
 
   (* Equity: 10000 -> 12000 -> 9000 -> 11000 *)
   (* Peak at 12000, trough at 9000, drawdown = (12000-9000)/12000 = 25% *)
@@ -296,7 +296,7 @@ let test_fill_model_config () =
 let test_fill_model_base_price () =
   printf "\n=== Fill Model: Base Price Selection ===\n";
 
-  let ts = Time_ns.of_string "2024-01-01 00:00:00Z" in
+  let ts = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
   let candle = Backtest.Candle.create
       ~symbol:"BTCUSD"
       ~timestamp:ts
@@ -357,7 +357,7 @@ let test_fill_model_market_fill () =
       ()
   in
 
-  let ts = Time_ns.of_string "2024-01-01 00:00:00Z" in
+  let ts = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
   let candle = Backtest.Candle.create
       ~symbol:"BTCUSD"
       ~timestamp:ts
@@ -391,7 +391,7 @@ let test_fill_model_limit_fill () =
       ()
   in
 
-  let ts = Time_ns.of_string "2024-01-01 00:00:00Z" in
+  let ts = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
   let candle = Backtest.Candle.create
       ~symbol:"BTCUSD"
       ~timestamp:ts
@@ -540,8 +540,8 @@ let test_interval_parsing () =
 let test_synthetic_data_generation () =
   printf "\n=== Data Source: Synthetic Data Generation ===\n";
 
-  let start = Time_ns.of_string "2024-01-01 00:00:00Z" in
-  let end_ = Time_ns.of_string "2024-01-02 00:00:00Z" in
+  let start = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
+  let end_ = Time_ns_unix.of_string "2024-01-02 00:00:00Z" in
   let interval = Backtest.Interval.hour_1 in
 
   let candles = Backtest.Data_source.Synthetic.random_walk
@@ -576,8 +576,8 @@ let test_synthetic_data_generation () =
 let test_trending_data_generation () =
   printf "\n=== Data Source: Trending Data Generation ===\n";
 
-  let start = Time_ns.of_string "2024-01-01 00:00:00Z" in
-  let end_ = Time_ns.of_string "2024-01-08 00:00:00Z" in  (* 1 week *)
+  let start = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
+  let end_ = Time_ns_unix.of_string "2024-01-08 00:00:00Z" in  (* 1 week *)
   let interval = Backtest.Interval.day_1 in
 
   let candles = Backtest.Data_source.Synthetic.trending
@@ -621,7 +621,7 @@ let test_engine_config () =
 let test_engine_buy_and_hold () =
   printf "\n=== Engine: Buy and Hold Strategy ===\n";
 
-  let start = Time_ns.of_string "2024-01-01 00:00:00Z" in
+  let start = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
 
   (* Generate upward trending candles *)
   let candles = Backtest.Data_source.Synthetic.trending
@@ -664,8 +664,8 @@ let test_engine_buy_and_hold () =
 let test_result_calculations () =
   printf "\n=== Result: Calculations ===\n";
 
-  let start = Time_ns.of_string "2024-01-01 00:00:00Z" in
-  let end_ = Time_ns.of_string "2024-02-01 00:00:00Z" in
+  let start = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
+  let end_ = Time_ns_unix.of_string "2024-02-01 00:00:00Z" in
 
   let trade = Backtest.Result.Trade_record.create
       ~entry_time:start
@@ -688,8 +688,8 @@ let test_result_calculations () =
 let test_result_short_trade () =
   printf "\n=== Result: Short Trade P&L ===\n";
 
-  let start = Time_ns.of_string "2024-01-01 00:00:00Z" in
-  let end_ = Time_ns.of_string "2024-02-01 00:00:00Z" in
+  let start = Time_ns_unix.of_string "2024-01-01 00:00:00Z" in
+  let end_ = Time_ns_unix.of_string "2024-02-01 00:00:00Z" in
 
   let trade = Backtest.Result.Trade_record.create
       ~entry_time:start

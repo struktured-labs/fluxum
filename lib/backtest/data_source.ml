@@ -217,7 +217,7 @@ end
 
 (** Helper to parse time from CLI *)
 let parse_time s =
-  try Time_ns.of_string s
+  try Time_ns_unix.of_string s
   with _ ->
     (* Try parsing as date only *)
     let date = Date.of_string s in
