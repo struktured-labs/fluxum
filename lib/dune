@@ -1,7 +1,7 @@
 (library
  (name fluxum)
  (public_name fluxum)
- (modules :standard \ websocket_curl curl_ext consolidated_order_book consolidated_balance)
+ (modules :standard \ websocket_curl curl_ext consolidated_order_book consolidated_balance normalize_common)
  (libraries core async csvfields yojson)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))
@@ -39,3 +39,11 @@
  (libraries core async fluxum gemini kraken mexc binance coinbase bitrue)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async))
+
+(library
+ (name normalize_common)
+ (public_name fluxum.normalize_common)
+ (modules normalize_common)
+ (libraries core)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
