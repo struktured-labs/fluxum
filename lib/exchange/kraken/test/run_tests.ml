@@ -474,6 +474,33 @@ let test_fluxum_adapter_venue () =
     Types.Venue.Kraken venue "Adapter venue = Kraken" in
   ()
 
+(** ========== NORMALIZE ERROR PATH TESTS (Phase 1) ========== *)
+
+let test_normalize_balance_error_paths () =
+  printf "\n=== Normalize: Balance Error Paths ===\n";
+
+  (* Test malformed balance - invalid float in amount *)
+  let bad_balance = ("BTC", "not_a_number") in
+  (match Fluxum_adapter.Adapter.Normalize.balance bad_balance with
+   | Error _ ->
+     printf "  ✓ Rejected invalid balance amount\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  ✗ FAIL: Should reject non-numeric balance\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test valid balance - ensure it still works *)
+  let good_balance = ("ETH", "10.5") in
+  (match Fluxum_adapter.Adapter.Normalize.balance good_balance with
+   | Ok bal ->
+     let _ = assert_float_equal 10.5 bal.total "Valid balance parsed correctly" in
+     let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
+       "ETH" bal.currency "Currency preserved" in ()
+   | Error msg ->
+     printf "  ✗ FAIL: Valid balance should succeed: %s\n" msg;
+     incr tests_run; incr tests_failed);
+  ()
+
 (** ========== TEST RUNNER ========== *)
 
 let () =
@@ -506,6 +533,9 @@ let () =
   test_fluxum_adapter_side_conversion ();
   test_fluxum_adapter_status_conversion ();
   test_fluxum_adapter_venue ();
+
+  (* Phase 1 normalize error path tests *)
+  test_normalize_balance_error_paths ();
 
   (* Print summary *)
   printf "\n";
