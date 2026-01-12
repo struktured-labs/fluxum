@@ -444,6 +444,67 @@ let test_rest_errors () =
     (String.is_substring (Sexp.to_string sexp) ~substring:"Api_error")
 
 (* ============================================================ *)
+(* Normalize Error Path Tests (Phase 1) *)
+(* ============================================================ *)
+
+let test_normalize_balance_error_paths () =
+  printf "\n[Normalize] Balance error paths\n";
+
+  (* Test malformed balance - invalid float in total *)
+  let bad_balance : Hyperliquid.Rest.Types.clearinghouse_state = {
+    assetPositions = [];
+    marginSummary = {
+      accountValue = "not_a_number";  (* Invalid float *)
+      totalNtlPos = "0.0";
+      totalRawUsd = "0.0";
+      totalMarginUsed = "0.0";
+    };
+    crossMarginSummary = {
+      accountValue = "0.0";
+      totalNtlPos = "0.0";
+      totalRawUsd = "0.0";
+      totalMarginUsed = "0.0";
+    };
+    crossMaintenanceMarginUsed = "0.0";
+    withdrawable = "0.0";
+  } in
+  (match Hyperliquid.Fluxum_adapter.Adapter.Normalize.balance bad_balance with
+   | Error _ ->
+     printf "  * Rejected invalid balance (bad accountValue)\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject non-numeric accountValue\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test valid balance *)
+  let good_balance : Hyperliquid.Rest.Types.clearinghouse_state = {
+    assetPositions = [];
+    marginSummary = {
+      accountValue = "1000.5";
+      totalNtlPos = "500.0";
+      totalRawUsd = "1000.5";
+      totalMarginUsed = "50.0";
+    };
+    crossMarginSummary = {
+      accountValue = "1000.5";
+      totalNtlPos = "500.0";
+      totalRawUsd = "1000.5";
+      totalMarginUsed = "50.0";
+    };
+    crossMaintenanceMarginUsed = "25.0";
+    withdrawable = "950.0";
+  } in
+  (match Hyperliquid.Fluxum_adapter.Adapter.Normalize.balance good_balance with
+   | Ok bal ->
+     test_assert "Valid balance total" Float.(abs (bal.total - 1000.5) < 0.0001);
+     test_assert "Valid balance available" Float.(abs (bal.available - 950.0) < 0.0001);
+     test_assert "Currency is USD" (String.equal "USD" bal.currency)
+   | Error msg ->
+     printf "  X FAIL: Valid balance should succeed: %s\n" msg;
+     incr tests_run; incr tests_failed);
+  ()
+
+(* ============================================================ *)
 (* Main *)
 (* ============================================================ *)
 
@@ -459,6 +520,9 @@ let () =
   test_order_book ();
   test_books ();
   test_rest_errors ();
+
+  (* Phase 1 normalize error path tests *)
+  test_normalize_balance_error_paths ();
 
   printf "\n===========================================\n";
   printf "Test Summary\n";
