@@ -1,5 +1,6 @@
 (library
  (name binance)
+ (public_name fluxum.binance)
  (modules cfg common signature rest v3 ws order_book market_data fluxum_adapter binance)
  (libraries core async cohttp cohttp-async fluxum exchange_common yojson cohttp_async_websocket websocket_curl uri digestif)
  (preprocess (pps ppx_jane ppx_deriving_yojson))

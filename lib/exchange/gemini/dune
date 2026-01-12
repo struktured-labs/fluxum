@@ -1,5 +1,6 @@
 (library
   (name gemini)
+  (public_name fluxum.gemini)
   (flags
     :standard -w -39
     -open Core
