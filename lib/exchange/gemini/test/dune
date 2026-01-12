@@ -1,3 +1,11 @@
+; Unit tests - run with: dune exec ./lib/exchange/gemini/test/run_tests.exe
+(executable
+ (name run_tests)
+ (modules run_tests)
+ (libraries core gemini fluxum)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
+
 ; Integration tests - run manually with: dune exec ./lib/exchange/gemini/test/integration_test.exe
 (executable
  (name integration_test)

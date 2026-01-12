@@ -272,7 +272,7 @@ let query_all (config : Query_config.t) : Consolidated_view.t Deferred.t =
 let pp_consolidated (view : Consolidated_view.t) =
   let buf = Buffer.create 1024 in
   Buffer.add_string buf "\n=== Consolidated Balance View ===\n";
-  Buffer.add_string buf (sprintf "Timestamp: %s\n" (Time_ns.to_string view.timestamp));
+  Buffer.add_string buf (sprintf "Timestamp: %s\n" (Time_ns_unix.to_string view.timestamp));
   Buffer.add_string buf (sprintf "%s\n\n" (Consolidated_view.summary view));
 
   (* Print exchange status *)
