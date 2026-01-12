@@ -526,6 +526,43 @@ let test_ws_apply_depth () =
   ignore (assert_float_equal 1.0 best_ask.volume "Best ask volume is 1.0")
 
 (* ============================================================ *)
+(* Normalize Error Path Tests (Phase 1) *)
+(* ============================================================ *)
+
+let test_normalize_balance_error_paths () =
+  printf "\n[Normalize] Balance error paths\n";
+
+  (* Test malformed balance - invalid float *)
+  let bad_balance : Mexc.V1.Account.balance = {
+    asset = "BTC";
+    free = "not_a_number";  (* Invalid float *)
+    locked = "1.0";
+  } in
+  (match Mexc.Fluxum_adapter.Adapter.Normalize.balance bad_balance with
+   | Error _ ->
+     printf "  * Rejected invalid balance (bad free amount)\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject non-numeric free amount\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test valid balance *)
+  let good_balance : Mexc.V1.Account.balance = {
+    asset = "ETH";
+    free = "5.5";
+    locked = "1.5";
+  } in
+  (match Mexc.Fluxum_adapter.Adapter.Normalize.balance good_balance with
+   | Ok bal ->
+     ignore (assert_float_equal 7.0 bal.total "Valid balance total");
+     ignore (assert_float_equal 5.5 bal.available "Valid balance available");
+     ignore (assert_string_equal "ETH" bal.currency "Currency preserved")
+   | Error msg ->
+     printf "  X FAIL: Valid balance should succeed: %s\n" msg;
+     incr tests_run; incr tests_failed);
+  ()
+
+(* ============================================================ *)
 (* Main Test Runner *)
 (* ============================================================ *)
 
@@ -581,6 +618,9 @@ let () =
   test_ws_protobuf_tag ();
   test_ws_deal_to_trade ();
   test_ws_apply_depth ();
+
+  (* Phase 1 normalize error path tests *)
+  test_normalize_balance_error_paths ();
 
   (* Summary *)
   printf "\n===========================================\n";
