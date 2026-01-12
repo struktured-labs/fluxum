@@ -21,6 +21,11 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.exchange) () : (t,
   (* Connect using websocket_curl *)
   let%bind ws_result = Websocket_curl.connect ~url in
 
+  (* Validate streams is not empty *)
+  match streams with
+  | [] -> return (Error "Cannot connect with empty streams list")
+  | _ ->
+
   match ws_result with
   | Error err ->
     return (Error (Error.to_string_hum err))

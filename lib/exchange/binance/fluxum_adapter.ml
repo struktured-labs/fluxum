@@ -126,9 +126,17 @@ module Adapter = struct
     | #Rest.Error.t as e -> Error e
 
   let get_order_history t ?symbol ?limit () =
-    let symbol = match symbol with Some s -> s | None -> List.hd_exn t.symbols in
+    let symbol = match symbol with
+      | Some s -> Ok s
+      | None -> (match List.hd t.symbols with
+        | Some s -> Ok s
+        | None -> Error "No symbols available - cannot get order history")
+    in
+    match symbol with
+    | Error e -> return (Error e)
+    | Ok sym ->
     V3.All_orders.request t.cfg
-      { symbol; orderId = None; startTime = None; endTime = None; limit; recvWindow = None }
+      { symbol = sym; orderId = None; startTime = None; endTime = None; limit; recvWindow = None }
     >>| function
     | `Ok orders ->
       (* Convert All_orders.order to Open_orders.order *)
