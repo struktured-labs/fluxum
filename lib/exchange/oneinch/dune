@@ -1,5 +1,6 @@
 (library
  (name oneinch)
+ (public_name fluxum.oneinch)
  (modules cfg rest fluxum_adapter oneinch)
  (libraries core async cohttp-async yojson ppx_deriving_yojson.runtime fluxum)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
