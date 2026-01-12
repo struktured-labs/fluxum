@@ -185,7 +185,7 @@ let report t =
   let buf = Buffer.create 2048 in
   Buffer.add_string buf "\n========== LEDGER REPORT ==========\n";
   Buffer.add_string buf (sprintf "Entries: %d\n" (count t));
-  Buffer.add_string buf (sprintf "Last Update: %s\n" (Time_ns.to_string t.last_update));
+  Buffer.add_string buf (sprintf "Last Update: %s\n" (Time_ns_unix.to_string t.last_update));
   Buffer.add_string buf "\n--- P&L Summary ---\n";
   Buffer.add_string buf (sprintf "Total:      %.8f\n" (total_pnl t));
   Buffer.add_string buf (sprintf "Realized:   %.8f\n" (total_realized t));

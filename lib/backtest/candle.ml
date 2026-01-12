@@ -43,7 +43,7 @@ let of_csv_row ~symbol row =
   | [ts; o; h; l; c; v] ->
     let timestamp =
       (* Try parsing as ISO 8601 first, then as epoch seconds *)
-      match Time_ns.of_string ts with
+      match Time_ns_unix.of_string ts with
       | ts -> ts
       | exception _ ->
         (* Try as epoch seconds (float) *)
@@ -83,7 +83,7 @@ let of_yojson json =
     let ts_val = json |> member "timestamp" in
     let timestamp =
       match ts_val with
-      | `String s -> Time_ns.of_string s
+      | `String s -> Time_ns_unix.of_string s
       | `Float f -> Time_ns.of_span_since_epoch (Time_ns.Span.of_sec f)
       | `Int i -> Time_ns.of_span_since_epoch (Time_ns.Span.of_sec (Float.of_int i))
       | `Intlit s -> Time_ns.of_span_since_epoch (Time_ns.Span.of_sec (Float.of_string s))

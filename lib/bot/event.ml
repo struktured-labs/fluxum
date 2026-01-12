@@ -18,7 +18,7 @@ module Time = struct
   let now = Time_ns.now
   let epoch = Time_ns.epoch
   let diff = Time_ns.diff
-  let to_string = Time_ns.to_string
+  let to_string = Time_ns_unix.to_string
 end
 
 module Time_span = Time_ns.Span
