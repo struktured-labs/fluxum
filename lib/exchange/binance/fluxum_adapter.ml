@@ -130,7 +130,7 @@ module Adapter = struct
       | Some s -> Ok s
       | None -> (match List.hd t.symbols with
         | Some s -> Ok s
-        | None -> Error "No symbols available - cannot get order history")
+        | None -> Error (`Bad_request "No symbols available - cannot get order history"))
     in
     match symbol with
     | Error e -> return (Error e)
