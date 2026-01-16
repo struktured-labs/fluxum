@@ -157,11 +157,8 @@ module Adapter = struct
   end
 
   module Normalize = struct
-    let side_of_string s =
-      match String.uppercase s with
-      | "BUY" -> Types.Side.Buy
-      | "SELL" -> Types.Side.Sell
-      | _ -> Types.Side.Buy
+    (* Use shared normalize function *)
+    let side_of_string s = Fluxum.Normalize_common.Side.of_string_exn s
 
     let order_response (() : Native.Order.response) : Types.Order.t =
       { venue = Venue.t

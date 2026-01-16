@@ -281,11 +281,9 @@ module Adapter = struct
       Time_float_unix.of_span_since_epoch
         (Time_float_unix.Span.of_ms (Int64.to_float ms))
 
+    (* Use shared normalize function *)
     let side_of_string (s : string) : Types.Side.t =
-      match String.lowercase s with
-      | "buy" | "b" -> Types.Side.Buy
-      | "sell" | "s" -> Types.Side.Sell
-      | _ -> Types.Side.Buy  (* Default *)
+      Fluxum.Normalize_common.Side.of_string_exn s
 
     let order_response (_r : Native.Order.response) : Types.Order.t =
       (* Not implemented - Hyperliquid doesn't support trading yet *)

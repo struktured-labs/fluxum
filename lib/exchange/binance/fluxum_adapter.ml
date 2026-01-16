@@ -230,25 +230,13 @@ module Adapter = struct
 
   module Normalize = struct
     let order_response (resp : Native.Order.response) : Types.Order.t =
-      let side =
-        match resp.side with
-        | "BUY" -> Types.Side.Buy
-        | _ -> Types.Side.Sell
-      in
+      let side = Fluxum.Normalize_common.Side.of_string_exn resp.side in
       let kind =
-        match resp.type_ with
-        | "LIMIT" -> Types.Order_kind.Limit (Float.of_string resp.price)
-        | "MARKET" -> Types.Order_kind.Market
-        | _ -> Types.Order_kind.Market
+        match Fluxum.Normalize_common.Order_type.of_string_exn resp.type_ with
+        | Types.Order_kind.Limit _ -> Types.Order_kind.Limit (Float.of_string resp.price)
+        | other -> other
       in
-      let status =
-        match resp.status with
-        | "FILLED" -> Types.Order_status.Filled
-        | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
-        | "CANCELED" -> Types.Order_status.Canceled
-        | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
-        | _ -> Types.Order_status.New
-      in
+      let status = Fluxum.Normalize_common.Order_status.of_string_exn resp.status in
       { venue = Venue.t
       ; id = Int64.to_string resp.orderId
       ; symbol = resp.symbol
@@ -268,33 +256,16 @@ module Adapter = struct
       }
 
     let order_status (status : Native.Order.status) : Types.Order_status.t =
-      match status.status with
-      | "FILLED" -> Types.Order_status.Filled
-      | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
-      | "CANCELED" -> Types.Order_status.Canceled
-      | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
-      | _ -> Types.Order_status.New
+      Fluxum.Normalize_common.Order_status.of_string_exn status.status
 
     let order_from_status (status : Native.Order.status) : Types.Order.t =
-      let side =
-        match status.side with
-        | "BUY" -> Types.Side.Buy
-        | _ -> Types.Side.Sell
-      in
+      let side = Fluxum.Normalize_common.Side.of_string_exn status.side in
       let kind =
-        match status.type_ with
-        | "LIMIT" -> Types.Order_kind.Limit (Float.of_string status.price)
-        | "MARKET" -> Types.Order_kind.Market
-        | _ -> Types.Order_kind.Market
+        match Fluxum.Normalize_common.Order_type.of_string_exn status.type_ with
+        | Types.Order_kind.Limit _ -> Types.Order_kind.Limit (Float.of_string status.price)
+        | other -> other
       in
-      let order_status =
-        match status.status with
-        | "FILLED" -> Types.Order_status.Filled
-        | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
-        | "CANCELED" -> Types.Order_status.Canceled
-        | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
-        | _ -> Types.Order_status.New
-      in
+      let order_status = Fluxum.Normalize_common.Order_status.of_string_exn status.status in
       { venue = Venue.t
       ; id = Int64.to_string status.orderId
       ; symbol = status.symbol

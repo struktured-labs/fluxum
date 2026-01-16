@@ -5,6 +5,7 @@ module Types = Types
 module Exchange_intf = Exchange_intf
 module Json = Json
 module Cli_args = Cli_args
+module Normalize_common = Normalize_common
 
 (* Unified interfaces *)
 module Order_book_intf = Order_book_intf

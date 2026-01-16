@@ -223,36 +223,22 @@ module Adapter = struct
   end
 
   module Normalize = struct
-    let side_of_string s =
-      match s with
-      | "buy" | "b" -> Types.Side.Buy
-      | "sell" | "s" -> Types.Side.Sell
-      | _ -> Types.Side.Buy
+    (* Use shared normalize functions for string conversions *)
+    let side_of_string s = Fluxum.Normalize_common.Side.of_string_exn s
+    let order_type_of_string s = Fluxum.Normalize_common.Order_type.of_string_exn s
+    let status_of_string s = Fluxum.Normalize_common.Order_status.of_string_exn s
 
+    (* Keep exchange-specific converters for polymorphic variants *)
     let side_of_common (s : Common.Side.t) : Types.Side.t =
       match s with
       | `Buy -> Types.Side.Buy
       | `Sell -> Types.Side.Sell
-
-    let order_type_of_string s =
-      match s with
-      | "market" -> Types.Order_kind.Market
-      | "limit" -> Types.Order_kind.Limit 0.0  (* price not available in status *)
-      | _ -> Types.Order_kind.Market
 
     let order_type_of_common (o : Common.Order_type.t) : Types.Order_kind.t =
       match o with
       | `Market -> Types.Order_kind.Market
       | `Limit -> Types.Order_kind.Limit 0.0  (* price not available in status *)
       | _ -> Types.Order_kind.Market
-
-    let status_of_string s =
-      match s with
-      | "pending" | "open" -> Types.Order_status.New
-      | "closed" -> Types.Order_status.Filled
-      | "canceled" | "cancelled" -> Types.Order_status.Canceled
-      | "expired" -> Types.Order_status.Canceled
-      | _ -> Types.Order_status.New
 
     let order_response (r : Native.Order.response) : (Types.Order.t, string) Result.t =
       try

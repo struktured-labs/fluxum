@@ -12,3 +12,10 @@
  (libraries core async fluxum binance mexc coinbase bitrue consolidated_balance)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async))
+
+(executable
+ (name run_normalize_common_tests)
+ (modules run_normalize_common_tests)
+ (libraries core fluxum)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
