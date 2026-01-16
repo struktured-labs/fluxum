@@ -41,38 +41,48 @@ module Book = struct
     m.last_update_id
 
   (** Apply Binance depth update *)
-  let apply_depth_update t (update : Ws.Message.depth_update) =
+  let apply_depth_update t (update : Ws.Message.depth_update) : (t, string) Result.t =
+    let open Result.Let_syntax in
     let new_metadata = { last_update_id = update.final_update_id } in
     (* Apply bid updates with new metadata *)
-    let t_with_bids = List.fold update.bids ~init:t ~f:(fun acc (price_str, qty_str) ->
-      let price = Float.of_string price_str in
-      let size = Float.of_string qty_str in
-      set acc ~side:`Bid ~price ~size ~metadata:new_metadata
-    ) in
+    let%bind t_with_bids =
+      List.fold update.bids ~init:(Ok t) ~f:(fun acc_result (price_str, qty_str) ->
+        let%bind acc = acc_result in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+        let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        Ok (set acc ~side:`Bid ~price ~size ~metadata:new_metadata))
+    in
     (* Apply ask updates with new metadata *)
-    List.fold update.asks ~init:t_with_bids ~f:(fun acc (price_str, qty_str) ->
-      let price = Float.of_string price_str in
-      let size = Float.of_string qty_str in
-      set acc ~side:`Ask ~price ~size ~metadata:new_metadata
-    )
+    List.fold update.asks ~init:(Ok t_with_bids) ~f:(fun acc_result (price_str, qty_str) ->
+      let%bind acc = acc_result in
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+      let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+      Ok (set acc ~side:`Ask ~price ~size ~metadata:new_metadata))
 
   (** Apply Binance depth snapshot *)
-  let apply_depth_snapshot t (snapshot : Ws.Message.depth) =
+  let apply_depth_snapshot t (snapshot : Ws.Message.depth) : (t, string) Result.t =
+    let open Result.Let_syntax in
     (* Build new book from snapshot using set_many *)
-    let bid_levels = List.map snapshot.bids ~f:(fun (price_str, qty_str) ->
-      let price = Float.of_string price_str in
-      let size = Float.of_string qty_str in
-      (`Bid, price, size)
-    ) in
-    let ask_levels = List.map snapshot.asks ~f:(fun (price_str, qty_str) ->
-      let price = Float.of_string price_str in
-      let size = Float.of_string qty_str in
-      (`Ask, price, size)
-    ) in
+    let%bind bid_levels =
+      List.fold snapshot.bids ~init:(Ok []) ~f:(fun acc_result (price_str, qty_str) ->
+        let%bind acc = acc_result in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+        let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        Ok ((`Bid, price, size) :: acc))
+      |> Result.map ~f:List.rev
+    in
+    let%bind ask_levels =
+      List.fold snapshot.asks ~init:(Ok []) ~f:(fun acc_result (price_str, qty_str) ->
+        let%bind acc = acc_result in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+        let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        Ok ((`Ask, price, size) :: acc))
+      |> Result.map ~f:List.rev
+    in
     let all_levels = bid_levels @ ask_levels in
     let new_metadata = { last_update_id = snapshot.last_update_id } in
     let new_book = create ~symbol:(symbol t) in
-    set_many new_book all_levels ~metadata:new_metadata
+    Ok (set_many new_book all_levels ~metadata:new_metadata)
 
   (** Create live order book pipe from Binance WebSocket *)
   let pipe ~symbol ?(depth = 20) ?(url = Ws.Endpoint.data_stream) () : (t, string) Result.t Pipe.Reader.t Deferred.t =
@@ -102,11 +112,19 @@ module Book = struct
           try
             match Ws.parse_message msg_str with
             | Ws.Message.Depth snapshot ->
-              book_ref := apply_depth_snapshot !book_ref snapshot;
-              Pipe.write book_writer (Ok !book_ref)
+              (match apply_depth_snapshot !book_ref snapshot with
+               | Ok new_book ->
+                 book_ref := new_book;
+                 Pipe.write book_writer (Ok !book_ref)
+               | Error msg ->
+                 Pipe.write book_writer (Error msg))
             | Ws.Message.DepthUpdate update when String.equal update.symbol symbol ->
-              book_ref := apply_depth_update !book_ref update;
-              Pipe.write book_writer (Ok !book_ref)
+              (match apply_depth_update !book_ref update with
+               | Ok new_book ->
+                 book_ref := new_book;
+                 Pipe.write book_writer (Ok !book_ref)
+               | Error msg ->
+                 Pipe.write book_writer (Error msg))
             | _ -> Deferred.unit
           with exn ->
             Pipe.write book_writer (Error (Exn.to_string exn))

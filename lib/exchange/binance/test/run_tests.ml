@@ -211,14 +211,18 @@ let test_apply_depth_update () =
     bids = [("50000.00", "1.5"); ("49900.00", "2.0")];
     asks = [("51000.00", "1.0"); ("51100.00", "0.5")];
   } in
-  let book = Binance.Order_book.Book.apply_depth_update book update in
-  let best_bid = Binance.Order_book.Book.best_bid book in
-  let best_ask = Binance.Order_book.Book.best_ask book in
-  ignore (assert_float_equal 50000.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Best bid is 50000.0");
-  ignore (assert_float_equal 1.5 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Best bid volume is 1.5");
-  ignore (assert_float_equal 51000.0 (Exchange_common.Order_book_base.Price_level.price best_ask) "Best ask is 51000.0");
-  ignore (assert_float_equal 1.0 (Exchange_common.Order_book_base.Price_level.volume best_ask) "Best ask volume is 1.0");
-  ignore (assert_int64_equal 2L (Binance.Order_book.Book.last_update_id book) "Last update ID is 2")
+  (match Binance.Order_book.Book.apply_depth_update book update with
+   | Ok book ->
+     let best_bid = Binance.Order_book.Book.best_bid book in
+     let best_ask = Binance.Order_book.Book.best_ask book in
+     ignore (assert_float_equal 50000.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Best bid is 50000.0");
+     ignore (assert_float_equal 1.5 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Best bid volume is 1.5");
+     ignore (assert_float_equal 51000.0 (Exchange_common.Order_book_base.Price_level.price best_ask) "Best ask is 51000.0");
+     ignore (assert_float_equal 1.0 (Exchange_common.Order_book_base.Price_level.volume best_ask) "Best ask volume is 1.0");
+     ignore (assert_int64_equal 2L (Binance.Order_book.Book.last_update_id book) "Last update ID is 2")
+   | Error msg ->
+     printf "  X FAIL: Failed to apply depth update: %s\n" msg;
+     incr tests_run; incr tests_failed)
 
 let test_apply_depth_snapshot () =
   printf "\n[Order Book] Apply depth snapshot\n";
@@ -228,14 +232,18 @@ let test_apply_depth_snapshot () =
     bids = [("50100.00", "1.0"); ("50000.00", "2.5"); ("49900.00", "3.0")];
     asks = [("50900.00", "1.5"); ("51000.00", "2.0"); ("51100.00", "1.0")];
   } in
-  let book = Binance.Order_book.Book.apply_depth_snapshot book snapshot in
-  let best_bid = Binance.Order_book.Book.best_bid book in
-  let best_ask = Binance.Order_book.Book.best_ask book in
-  ignore (assert_float_equal 50100.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Best bid is 50100.0");
-  ignore (assert_float_equal 1.0 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Best bid volume is 1.0");
-  ignore (assert_float_equal 50900.0 (Exchange_common.Order_book_base.Price_level.price best_ask) "Best ask is 50900.0");
-  ignore (assert_float_equal 1.5 (Exchange_common.Order_book_base.Price_level.volume best_ask) "Best ask volume is 1.5");
-  ignore (assert_int64_equal 100L (Binance.Order_book.Book.last_update_id book) "Last update ID is 100")
+  (match Binance.Order_book.Book.apply_depth_snapshot book snapshot with
+   | Ok book ->
+     let best_bid = Binance.Order_book.Book.best_bid book in
+     let best_ask = Binance.Order_book.Book.best_ask book in
+     ignore (assert_float_equal 50100.0 (Exchange_common.Order_book_base.Price_level.price best_bid) "Best bid is 50100.0");
+     ignore (assert_float_equal 1.0 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Best bid volume is 1.0");
+     ignore (assert_float_equal 50900.0 (Exchange_common.Order_book_base.Price_level.price best_ask) "Best ask is 50900.0");
+     ignore (assert_float_equal 1.5 (Exchange_common.Order_book_base.Price_level.volume best_ask) "Best ask volume is 1.5");
+     ignore (assert_int64_equal 100L (Binance.Order_book.Book.last_update_id book) "Last update ID is 100")
+   | Error msg ->
+     printf "  X FAIL: Failed to apply depth snapshot: %s\n" msg;
+     incr tests_run; incr tests_failed)
 
 (* Stream name generation tests *)
 let test_stream_names () =
