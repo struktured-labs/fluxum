@@ -99,6 +99,33 @@ module Book = struct
       let price = (List.hd_exn multiple).Attributed_level.price in
       { Attributed_level.price; volume = total_volume; exchange = Multiple exchanges }
 
+  (** Generic level extraction from any exchange book
+
+      This eliminates 12 duplicated blocks (6 exchanges × 2 sides).
+
+      @param book_opt Optional exchange book
+      @param extract_levels Function to get levels from book
+      @param exchange Exchange source identifier
+      @return List of (price, attributed_level) tuples
+  *)
+  let extract_levels_generic
+    (type book level)
+    ~(book_opt : book option)
+    ~(extract_levels : book -> level list)
+    ~(get_price : level -> float)
+    ~(get_volume : level -> float)
+    ~(exchange : exchange_source)
+    : (float * Attributed_level.t) list
+    =
+    match book_opt with
+    | None -> []
+    | Some book ->
+      extract_levels book
+      |> List.map ~f:(fun level ->
+        let price = get_price level in
+        let volume = get_volume level in
+        (price, { Attributed_level.price; volume; exchange }))
+
   (** Rebuild consolidated book from exchange books *)
   let rebuild t =
     let update_time = Time_float_unix.now () in
@@ -106,81 +133,47 @@ module Book = struct
 
     (* Collect all bid levels with exchange attribution *)
     let all_bids =
-      let gemini_bids = match t.gemini_book with
-        | None -> []
-        | Some book ->
-          Gemini.Order_book.Book.best_n_bids book ~n:100 ()
-          |> List.map ~f:(fun level ->
-            (level.Gemini.Order_book.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Gemini
-             }))
+      let gemini_bids = extract_levels_generic
+        ~book_opt:t.gemini_book
+        ~extract_levels:(fun book -> Gemini.Order_book.Book.best_n_bids book ~n:100 ())
+        ~get_price:(fun (level : Gemini.Order_book.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Gemini
       in
-      let kraken_bids = match t.kraken_book with
-        | None -> []
-        | Some book ->
-          Kraken.Order_book.Book.best_n_bids book ~n:100 ()
-          |> List.map ~f:(fun level ->
-            (level.Exchange_common.Order_book_base.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Kraken
-             }))
+      let kraken_bids = extract_levels_generic
+        ~book_opt:t.kraken_book
+        ~extract_levels:(fun book -> Kraken.Order_book.Book.best_n_bids book ~n:100 ())
+        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Kraken
       in
-      let hyperliquid_bids = match t.hyperliquid_book with
-        | None -> []
-        | Some book ->
-          Hyperliquid.Order_book.Book.bids_alist book
-          |> (fun list -> List.take list 100)
-          |> List.map ~f:(fun (_, level) ->
-            (level.Exchange_common.Order_book_base.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Hyperliquid
-             }))
+      let hyperliquid_bids = extract_levels_generic
+        ~book_opt:t.hyperliquid_book
+        ~extract_levels:(fun book -> Hyperliquid.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Hyperliquid
       in
-      let bitrue_bids = match t.bitrue_book with
-        | None -> []
-        | Some book ->
-          Bitrue.Order_book.Book.bids_alist book
-          |> (fun list -> List.take list 100)
-          |> List.map ~f:(fun (_, level) ->
-            (level.Exchange_common.Order_book_base.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Bitrue
-             }))
+      let bitrue_bids = extract_levels_generic
+        ~book_opt:t.bitrue_book
+        ~extract_levels:(fun book -> Bitrue.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Bitrue
       in
-      let binance_bids = match t.binance_book with
-        | None -> []
-        | Some book ->
-          Binance.Order_book.Book.bids_alist book
-          |> (fun list -> List.take list 100)
-          |> List.map ~f:(fun (_, level) ->
-            (level.Exchange_common.Order_book_base.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Binance
-             }))
+      let binance_bids = extract_levels_generic
+        ~book_opt:t.binance_book
+        ~extract_levels:(fun book -> Binance.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Binance
       in
-      let coinbase_bids = match t.coinbase_book with
-        | None -> []
-        | Some book ->
-          Coinbase.Order_book.Book.bids_alist book
-          |> (fun list -> List.take list 100)
-          |> List.map ~f:(fun (_, level) ->
-            (level.Exchange_common.Order_book_base.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Coinbase
-             }))
+      let coinbase_bids = extract_levels_generic
+        ~book_opt:t.coinbase_book
+        ~extract_levels:(fun book -> Coinbase.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Coinbase
       in
       gemini_bids @ kraken_bids @ hyperliquid_bids @ bitrue_bids @ binance_bids @ coinbase_bids
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p2 p1) (* Descending *)
@@ -194,81 +187,47 @@ module Book = struct
 
     (* Collect all ask levels with exchange attribution *)
     let all_asks =
-      let gemini_asks = match t.gemini_book with
-        | None -> []
-        | Some book ->
-          Gemini.Order_book.Book.best_n_asks book ~n:100 ()
-          |> List.map ~f:(fun level ->
-            (level.Gemini.Order_book.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Gemini
-             }))
+      let gemini_asks = extract_levels_generic
+        ~book_opt:t.gemini_book
+        ~extract_levels:(fun book -> Gemini.Order_book.Book.best_n_asks book ~n:100 ())
+        ~get_price:(fun (level : Gemini.Order_book.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Gemini
       in
-      let kraken_asks = match t.kraken_book with
-        | None -> []
-        | Some book ->
-          Kraken.Order_book.Book.best_n_asks book ~n:100 ()
-          |> List.map ~f:(fun level ->
-            (level.Exchange_common.Order_book_base.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Kraken
-             }))
+      let kraken_asks = extract_levels_generic
+        ~book_opt:t.kraken_book
+        ~extract_levels:(fun book -> Kraken.Order_book.Book.best_n_asks book ~n:100 ())
+        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Kraken
       in
-      let hyperliquid_asks = match t.hyperliquid_book with
-        | None -> []
-        | Some book ->
-          Hyperliquid.Order_book.Book.asks_alist book
-          |> (fun list -> List.take list 100)
-          |> List.map ~f:(fun (_, level) ->
-            (level.Exchange_common.Order_book_base.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Hyperliquid
-             }))
+      let hyperliquid_asks = extract_levels_generic
+        ~book_opt:t.hyperliquid_book
+        ~extract_levels:(fun book -> Hyperliquid.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Hyperliquid
       in
-      let bitrue_asks = match t.bitrue_book with
-        | None -> []
-        | Some book ->
-          Bitrue.Order_book.Book.asks_alist book
-          |> (fun list -> List.take list 100)
-          |> List.map ~f:(fun (_, level) ->
-            (level.Exchange_common.Order_book_base.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Bitrue
-             }))
+      let bitrue_asks = extract_levels_generic
+        ~book_opt:t.bitrue_book
+        ~extract_levels:(fun book -> Bitrue.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Bitrue
       in
-      let binance_asks = match t.binance_book with
-        | None -> []
-        | Some book ->
-          Binance.Order_book.Book.asks_alist book
-          |> (fun list -> List.take list 100)
-          |> List.map ~f:(fun (_, level) ->
-            (level.Exchange_common.Order_book_base.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Binance
-             }))
+      let binance_asks = extract_levels_generic
+        ~book_opt:t.binance_book
+        ~extract_levels:(fun book -> Binance.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Binance
       in
-      let coinbase_asks = match t.coinbase_book with
-        | None -> []
-        | Some book ->
-          Coinbase.Order_book.Book.asks_alist book
-          |> (fun list -> List.take list 100)
-          |> List.map ~f:(fun (_, level) ->
-            (level.Exchange_common.Order_book_base.Price_level.price,
-             { Attributed_level.
-               price = level.price;
-               volume = level.volume;
-               exchange = Coinbase
-             }))
+      let coinbase_asks = extract_levels_generic
+        ~book_opt:t.coinbase_book
+        ~extract_levels:(fun book -> Coinbase.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+        ~get_volume:(fun level -> level.volume)
+        ~exchange:Coinbase
       in
       gemini_asks @ kraken_asks @ hyperliquid_asks @ bitrue_asks @ binance_asks @ coinbase_asks
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2) (* Ascending *)
