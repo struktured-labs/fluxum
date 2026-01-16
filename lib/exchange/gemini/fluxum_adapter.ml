@@ -1,3 +1,38 @@
+(** Gemini Exchange Adapter
+
+    Reference implementation of Exchange_intf.S for Gemini exchange.
+
+    {b Features:}
+    - ✅ REST trading (spot only, no derivatives)
+    - ✅ WebSocket market data (trades, order book, L2 updates)
+    - ✅ Order book tracking (Order_book_intf.S)
+    - ✅ P&L ledger (Ledger_intf.ENTRY)
+    - ✅ Session management with auto-reconnect
+
+    {b Authentication:}
+    - API key/secret via environment variables (GEMINI_API_KEY, GEMINI_SECRET)
+    - Nonce management with file-based tracking to prevent replay attacks
+    - Payload signing with HMAC-SHA384
+
+    {b Rate Limits:}
+    - Public endpoints: 120 requests/minute
+    - Private endpoints: 600 requests/minute
+    - WebSocket: No documented limit
+
+    {b Symbol Format:}
+    - Lowercase, no separator: ["btcusd"], ["ethusd"]
+    - Use normalize functions to convert to/from Fluxum types
+
+    {b Known Limitations:}
+    - Spot trading only (no margin, futures, or perpetuals)
+    - No batch order placement
+    - Limited order types (market, limit, IOC, maker-or-cancel)
+    - WebSocket reconnection requires full re-subscription
+
+    @see <https://docs.gemini.com/rest-api/> Gemini REST API Documentation
+    @see <https://docs.gemini.com/websocket-api/> Gemini WebSocket API Documentation
+*)
+
 open Core
 open Async
 

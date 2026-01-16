@@ -1,3 +1,48 @@
+(** Kraken Exchange Adapter
+
+    Complete implementation of Exchange_intf.S for Kraken exchange.
+
+    {b Features:}
+    - ✅ REST trading (spot, margin, futures via different APIs)
+    - ✅ WebSocket market data (trades, order book, ticker, OHLC)
+    - ✅ WebSocket v2 with authenticated feeds
+    - ✅ Order book tracking (Order_book_intf.S)
+    - ✅ P&L ledger (Ledger_intf.ENTRY)
+    - ✅ Session management with auto-reconnect
+
+    {b Authentication:}
+    - API key/secret via environment variables or config
+    - Nonce generation with microsecond precision
+    - Payload signing with HMAC-SHA512
+    - Supports both production and sandbox environments
+
+    {b Rate Limits:}
+    - Public endpoints: Variable by tier (15-60 requests per second)
+    - Private endpoints: Rate limited by API key tier
+    - WebSocket: 50 subscriptions per connection
+    - Order placement: Burst up to 20, sustained 15/second
+
+    {b Symbol Format:}
+    - Uppercase with prefixes: ["XBTUSD"], ["ETHUSD"], ["XXBTZUSD"]
+    - XBT = Bitcoin (BTC), Z = fiat currency prefix
+    - Use normalize functions for conversion
+
+    {b Known Limitations:}
+    - Margin trading requires additional permissions
+    - Futures trading uses separate API (not yet integrated)
+    - Some order types unavailable on certain pairs
+    - WebSocket v1 deprecated in favor of v2
+
+    {b WebSocket v2:}
+    - New protocol with better error handling
+    - Authenticated private data feeds
+    - Multiplexed subscriptions
+    - Automatic heartbeat/pong
+
+    @see <https://docs.kraken.com/rest/> Kraken REST API Documentation
+    @see <https://docs.kraken.com/websockets-v2/> Kraken WebSocket v2 Documentation
+*)
+
 open Core
 open Async
 

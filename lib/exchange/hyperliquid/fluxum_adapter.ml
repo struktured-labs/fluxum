@@ -1,3 +1,60 @@
+(** Hyperliquid Exchange Adapter
+
+    Partial implementation of Exchange_intf.S for Hyperliquid L1 DEX.
+
+    {b Features:}
+    - ✅ REST market data (order books, trades, ticker-like data)
+    - ✅ REST account queries (positions, balances, open orders, fills)
+    - ✅ WebSocket market data (L2 book, trades, all mids)
+    - ✅ Order book tracking with safe float conversions
+    - ❌ Trading operations (requires blockchain signing - not yet implemented)
+
+    {b Architecture:}
+    - Layer 1 blockchain (not just smart contract)
+    - On-chain order matching and settlement
+    - Off-chain order signing, on-chain execution
+    - EVM-compatible addresses (Ethereum wallet format)
+
+    {b Authentication:}
+    - Wallet address for account queries (read-only)
+    - Private key signing required for trading (not implemented)
+    - No traditional API keys - uses Ethereum-style signatures
+    - Public endpoints do not require authentication
+
+    {b Rate Limits:}
+    - No documented public endpoint rate limits
+    - WebSocket: Unlimited connections
+    - Designed for high-frequency trading (HFT-friendly)
+
+    {b Symbol Format:}
+    - Perpetual futures only: ["BTC"], ["ETH"], ["SOL"]
+    - No spot trading
+    - No separate quote currency in symbol (always USD-denominated)
+    - Index-based pricing (mark price from oracle)
+
+    {b Known Limitations:}
+    - ❌ No REST trading operations (requires blockchain integration)
+    - ❌ No spot trading (perpetuals only)
+    - ❌ No margin modes (cross margin only)
+    - Limited to perpetual futures
+    - Requires understanding of perp mechanics (funding, liquidation)
+
+    {b Trading Implementation Plan:}
+    - Phase 1: Market data ✅ (complete)
+    - Phase 2: Account queries ✅ (complete)
+    - Phase 3: Order signing (requires eth-crypto integration)
+    - Phase 4: Order placement via REST/WebSocket
+
+    {b Data Peculiarities:}
+    - Prices in string format with high precision
+    - Sizes in "contracts" not base currency
+    - Funding rates updated every hour
+    - Liquidation engine runs continuously
+
+    @see <https://hyperliquid.gitbook.io/hyperliquid-docs/> Hyperliquid Documentation
+    @see <https://api.hyperliquid.xyz/info> REST API Base URL
+*)
+
 open Core
 open Async
 
@@ -7,17 +64,6 @@ module Exchange_intf = Fluxum.Exchange_intf
 module Rest = Rest
 module Ws = Ws
 module Order_book = Order_book
-
-(** Hyperliquid Exchange Adapter
-
-    Note: Hyperliquid is a decentralized perpetual futures exchange.
-    Trading operations (place/cancel orders) require blockchain transactions
-    and are not yet implemented. This adapter provides:
-
-    - Market data (order books, trades, tickers)
-    - Account queries (positions, balances, open orders, fills)
-    - WebSocket streams
-*)
 
 module Adapter = struct
   type t =

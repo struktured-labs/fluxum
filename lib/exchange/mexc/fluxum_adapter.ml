@@ -1,4 +1,46 @@
-(** MEXC Unified Adapter - Implements Exchange_intf.S *)
+(** MEXC Exchange Adapter
+
+    Complete implementation of Exchange_intf.S for MEXC Global exchange.
+
+    {b Features:}
+    - ✅ REST trading (spot only)
+    - ✅ WebSocket market data (trades, depth, kline, 24hr ticker)
+    - ✅ Order book tracking with incremental updates
+    - ✅ Safe float conversions (Phase 3 complete)
+    - ✅ Binance-compatible API structure
+
+    {b Authentication:}
+    - API key/secret via environment variables or config
+    - HMAC-SHA256 signature
+    - Timestamp-based request signing
+    - Supports custom recv window for clock skew
+
+    {b Rate Limits:}
+    - Public endpoints: 20 requests/second per IP
+    - Private endpoints: 10 requests/second per API key
+    - WebSocket: 5 connections per IP, 200 subscriptions per connection
+    - Order placement: 100 orders/10 seconds per symbol
+
+    {b Symbol Format:}
+    - Uppercase with underscore: ["BTC_USDT"], ["ETH_USDT"]
+    - Different from Binance (no underscore) and Kraken (prefixes)
+    - Use normalize functions for conversion
+
+    {b Known Limitations:}
+    - Spot trading only (no margin, futures, or options)
+    - Some order types not available (OCO, iceberg)
+    - WebSocket reconnection requires full re-subscription
+    - Historical data limited compared to larger exchanges
+    - Binance-compatible but not 100% identical
+
+    {b API Compatibility:}
+    - Similar to Binance Spot API v3
+    - Some endpoints have different parameter names
+    - Response formats mostly compatible
+    - Error codes may differ
+
+    @see <https://mexcdevelop.github.io/apidocs/spot_v3_en/> MEXC Spot API v3 Documentation
+*)
 
 open Core
 open Async
