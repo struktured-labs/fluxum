@@ -243,7 +243,7 @@ module Adapter = struct
     let order_response (r : Native.Order.response) : (Types.Order.t, string) Result.t =
       try
         let txid = List.hd r.txid |> Option.value ~default:"" in
-        Ok { venue = Venue.t
+        Ok ({ venue = Venue.t
         ; id = txid
         ; symbol = ""  (* Not available in response *)
         ; side = Types.Side.Buy  (* Not available in response *)
@@ -253,7 +253,7 @@ module Adapter = struct
         ; status = Types.Order_status.New
         ; created_at = None
         ; updated_at = None
-        }
+        } : Types.Order.t)
       with
       | exn ->
         Error (sprintf "Order response conversion error: %s" (Exn.to_string exn))
@@ -262,16 +262,17 @@ module Adapter = struct
       status_of_string o.status
 
     let order_from_status (o : Native.Order.status) : (Types.Order.t, string) Result.t =
+      let open Result.Let_syntax in
       try
         let side = side_of_common o.descr.type_ in
         let kind = order_type_of_common o.descr.ordertype in
-        let qty = Float.of_string o.vol in
-        let filled = Float.of_string o.vol_exec in
+        let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string o.vol in
+        let%bind filled = Fluxum.Normalize_common.Float_conv.qty_of_string o.vol_exec in
         let status = status_of_string o.status in
         let created_at =
           Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec o.opentm))
         in
-        Ok { venue = Venue.t
+        Ok ({ venue = Venue.t
         ; id = ""  (* txid is the key, not in the order struct *)
         ; symbol = o.descr.pair
         ; side
@@ -281,7 +282,7 @@ module Adapter = struct
         ; status
         ; created_at
         ; updated_at = None
-        }
+        } : Types.Order.t)
       with
       | Failure msg ->
         Error (sprintf "Order conversion failed: %s" msg)
@@ -289,13 +290,14 @@ module Adapter = struct
         Error (sprintf "Order unexpected error: %s" (Exn.to_string exn))
 
     let trade (tr : Native.Trade.t) : (Types.Trade.t, string) Result.t =
+      let open Result.Let_syntax in
       try
         let side = side_of_string tr.type_ in
-        let price = Float.of_string tr.price in
-        let qty = Float.of_string tr.vol in
-        let fee = Float.of_string tr.fee in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string tr.price in
+        let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string tr.vol in
+        let%bind fee = Fluxum.Normalize_common.Float_conv.amount_of_string tr.fee in
         let ts = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec tr.time)) in
-        Ok { venue = Venue.t
+        Ok ({ venue = Venue.t
         ; symbol = tr.pair
         ; side
         ; price
@@ -303,7 +305,7 @@ module Adapter = struct
         ; fee = Some fee
         ; trade_id = Some tr.ordertxid
         ; ts
-        }
+        } : Types.Trade.t)
       with
       | Failure msg ->
         Error (sprintf "Trade conversion failed: %s" msg)
@@ -311,14 +313,15 @@ module Adapter = struct
         Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
 
     let balance ((currency, amount) : Native.Balance.t) : (Types.Balance.t, string) Result.t =
+      let open Result.Let_syntax in
       try
-        let total = Float.of_string amount in
-        Ok { venue = Venue.t
+        let%bind total = Fluxum.Normalize_common.Float_conv.amount_of_string amount in
+        Ok ({ venue = Venue.t
         ; currency
         ; total
         ; available = total  (* Kraken doesn't separate available in Balances endpoint *)
         ; locked = 0.
-        }
+        } : Types.Balance.t)
       with
       | Failure msg ->
         Error (sprintf "Balance conversion failed: %s" msg)
@@ -356,67 +359,84 @@ module Adapter = struct
       ; quote_increment = None
       }
 
-    let ticker ((pair, data) : Native.Ticker.t) : Types.Ticker.t =
-      let get_first lst = List.hd lst |> Option.value ~default:"0" |> Float.of_string in
-      let get_second lst = List.nth lst 1 |> Option.value ~default:"0" |> Float.of_string in
-      { venue = Venue.t
+    let ticker ((pair, data) : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
+      let open Result.Let_syntax in
+      let get_first lst =
+        List.hd lst |> Option.value ~default:"0"
+        |> Fluxum.Normalize_common.Float_conv.of_string
+      in
+      let get_second lst =
+        List.nth lst 1 |> Option.value ~default:"0"
+        |> Fluxum.Normalize_common.Float_conv.of_string
+      in
+      let%bind last_price = get_first data.c in
+      let%bind bid_price = get_first data.b in
+      let%bind ask_price = get_first data.a in
+      let%bind high_24h = get_second data.h in
+      let%bind low_24h = get_second data.l in
+      let%bind volume_24h = get_second data.v in
+      Ok ({ venue = Venue.t
       ; symbol = pair
-      ; last_price = get_first data.c  (* c[0] = last trade price *)
-      ; bid_price = get_first data.b   (* b[0] = best bid price *)
-      ; ask_price = get_first data.a   (* a[0] = best ask price *)
-      ; high_24h = get_second data.h   (* h[1] = 24hr high *)
-      ; low_24h = get_second data.l    (* l[1] = 24hr low *)
-      ; volume_24h = get_second data.v (* v[1] = 24hr volume *)
+      ; last_price  (* c[0] = last trade price *)
+      ; bid_price   (* b[0] = best bid price *)
+      ; ask_price   (* a[0] = best ask price *)
+      ; high_24h    (* h[1] = 24hr high *)
+      ; low_24h     (* l[1] = 24hr low *)
+      ; volume_24h  (* v[1] = 24hr volume *)
       ; quote_volume = None
       ; price_change = None
       ; price_change_pct = None
       ; ts = None
-      }
+      } : Types.Ticker.t)
 
-    let order_book (depth_list : Native.Book.snapshot) : Types.Order_book.t =
+    let order_book (depth_list : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
+      let open Result.Let_syntax in
       (* Take first pair's depth data *)
       match List.hd depth_list with
       | Some (pair, depth) ->
-        let bids = List.map depth.bids ~f:(fun (price, vol, _ts) ->
-          { Types.Order_book.Price_level.price = Float.of_string price
-          ; volume = Float.of_string vol
-          })
+        let%bind bids =
+          List.fold depth.bids ~init:(Ok []) ~f:(fun acc_result (price, vol, _ts) ->
+            let%bind acc = acc_result in
+            let%bind price_f = Fluxum.Normalize_common.Float_conv.price_of_string price in
+            let%bind volume_f = Fluxum.Normalize_common.Float_conv.qty_of_string vol in
+            Ok ({ Types.Order_book.Price_level.price = price_f; volume = volume_f } :: acc))
+          |> Result.map ~f:List.rev
         in
-        let asks = List.map depth.asks ~f:(fun (price, vol, _ts) ->
-          { Types.Order_book.Price_level.price = Float.of_string price
-          ; volume = Float.of_string vol
-          })
+        let%bind asks =
+          List.fold depth.asks ~init:(Ok []) ~f:(fun acc_result (price, vol, _ts) ->
+            let%bind acc = acc_result in
+            let%bind price_f = Fluxum.Normalize_common.Float_conv.price_of_string price in
+            let%bind volume_f = Fluxum.Normalize_common.Float_conv.qty_of_string vol in
+            Ok ({ Types.Order_book.Price_level.price = price_f; volume = volume_f } :: acc))
+          |> Result.map ~f:List.rev
         in
-        { venue = Venue.t
+        Ok ({ venue = Venue.t
         ; symbol = pair
         ; bids
         ; asks
         ; ts = None
         ; epoch = 0
-        }
+        } : Types.Order_book.t)
       | None ->
-        { venue = Venue.t
-        ; symbol = ""
-        ; bids = []
-        ; asks = []
-        ; ts = None
-        ; epoch = 0
-        }
+        Error "Empty order book depth list"
 
-    let public_trade (tr : Native.Public_trade.t) : Types.Public_trade.t =
+    let public_trade (tr : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
+      let open Result.Let_syntax in
       let side = match tr.side with
         | "b" -> Some Types.Side.Buy
         | "s" -> Some Types.Side.Sell
         | _ -> None
       in
-      { venue = Venue.t
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string tr.price in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string tr.volume in
+      Ok ({ venue = Venue.t
       ; symbol = ""  (* Not included in trade data *)
-      ; price = Float.of_string tr.price
-      ; qty = Float.of_string tr.volume
+      ; price
+      ; qty
       ; side
       ; trade_id = Some (Int.to_string tr.trade_id)
       ; ts = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec tr.time))
-      }
+      } : Types.Public_trade.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

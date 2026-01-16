@@ -107,12 +107,15 @@ let test_adapter_ticker () =
   let adapter = Kraken.Fluxum_adapter.Adapter.create ~cfg ~symbols:[] () in
   Kraken.Fluxum_adapter.Adapter.get_ticker adapter ~symbol:"XETHZUSD" () >>| function
   | Ok ticker_native ->
-    let ticker = Kraken.Fluxum_adapter.Adapter.Normalize.ticker ticker_native in
-    pass (sprintf "Symbol: %s" ticker.symbol);
-    pass (sprintf "Last: %.2f | Bid: %.2f | Ask: %.2f"
-      ticker.last_price ticker.bid_price ticker.ask_price);
-    pass (sprintf "24h High: %.2f | Low: %.2f" ticker.high_24h ticker.low_24h);
-    pass (sprintf "24h Volume: %.2f" ticker.volume_24h)
+    (match Kraken.Fluxum_adapter.Adapter.Normalize.ticker ticker_native with
+     | Ok ticker ->
+       pass (sprintf "Symbol: %s" ticker.symbol);
+       pass (sprintf "Last: %.2f | Bid: %.2f | Ask: %.2f"
+         ticker.last_price ticker.bid_price ticker.ask_price);
+       pass (sprintf "24h High: %.2f | Low: %.2f" ticker.high_24h ticker.low_24h);
+       pass (sprintf "24h Volume: %.2f" ticker.volume_24h)
+     | Error msg ->
+       fail (sprintf "Failed to normalize ticker: %s" msg))
   | Error err ->
     let e = Kraken.Fluxum_adapter.Adapter.Normalize.error err in
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))
@@ -123,13 +126,16 @@ let test_adapter_order_book () =
   let adapter = Kraken.Fluxum_adapter.Adapter.create ~cfg ~symbols:[] () in
   Kraken.Fluxum_adapter.Adapter.get_order_book adapter ~symbol:"XETHZUSD" ~limit:5 () >>| function
   | Ok book_native ->
-    let book = Kraken.Fluxum_adapter.Adapter.Normalize.order_book book_native in
-    pass (sprintf "Symbol: %s" book.symbol);
-    pass (sprintf "Bids: %d | Asks: %d" (List.length book.bids) (List.length book.asks));
-    let spread = Fluxum.Types.Order_book.spread book in
-    pass (sprintf "Spread: %.4f" spread);
-    let mid = Fluxum.Types.Order_book.mid_price book in
-    pass (sprintf "Mid price: %.2f" mid)
+    (match Kraken.Fluxum_adapter.Adapter.Normalize.order_book book_native with
+     | Ok book ->
+       pass (sprintf "Symbol: %s" book.symbol);
+       pass (sprintf "Bids: %d | Asks: %d" (List.length book.bids) (List.length book.asks));
+       let spread = Fluxum.Types.Order_book.spread book in
+       pass (sprintf "Spread: %.4f" spread);
+       let mid = Fluxum.Types.Order_book.mid_price book in
+       pass (sprintf "Mid price: %.2f" mid)
+     | Error msg ->
+       fail (sprintf "Failed to normalize order book: %s" msg))
   | Error err ->
     let e = Kraken.Fluxum_adapter.Adapter.Normalize.error err in
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))
@@ -140,7 +146,14 @@ let test_adapter_recent_trades () =
   let adapter = Kraken.Fluxum_adapter.Adapter.create ~cfg ~symbols:[] () in
   Kraken.Fluxum_adapter.Adapter.get_recent_trades adapter ~symbol:"XETHZUSD" ~limit:5 () >>| function
   | Ok trades_native ->
-    let trades = List.map trades_native ~f:Kraken.Fluxum_adapter.Adapter.Normalize.public_trade in
+    (* Normalize all trades, collecting successes *)
+    let trades_results = List.map trades_native ~f:Kraken.Fluxum_adapter.Adapter.Normalize.public_trade in
+    let trades = List.filter_map trades_results ~f:(fun r ->
+      match r with
+      | Ok trade -> Some trade
+      | Error msg ->
+        printf "  ! Warning: Failed to normalize trade: %s\n" msg;
+        None) in
     pass (sprintf "Trades: %d" (List.length trades));
     (match List.hd trades with
      | Some trade ->
