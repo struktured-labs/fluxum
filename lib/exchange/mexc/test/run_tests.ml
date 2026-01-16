@@ -562,6 +562,123 @@ let test_normalize_balance_error_paths () =
      incr tests_run; incr tests_failed);
   ()
 
+(* Phase 2 Priority 2: Additional error path tests *)
+
+let test_normalize_float_conversion_errors () =
+  printf "\n[Normalize] Float conversion errors\n";
+
+  (* Test malformed float *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "not_a_float" with
+   | Error _ ->
+     printf "  * Rejected malformed float string\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject malformed float\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test infinity *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "inf" with
+   | Error _ ->
+     printf "  * Rejected non-finite float (infinity)\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject non-finite float\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test price validation (must be positive) *)
+  (match Fluxum.Normalize_common.Float_conv.price_of_string "-100.0" with
+   | Error _ ->
+     printf "  * Rejected negative price\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Price should be positive\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test valid price *)
+  (match Fluxum.Normalize_common.Float_conv.price_of_string "50000.5" with
+   | Ok f ->
+     ignore (assert_float_equal 50000.5 f "Valid price parsed");
+     ()
+   | Error msg ->
+     printf "  X FAIL: Valid price should succeed: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test quantity validation (must be non-negative) *)
+  (match Fluxum.Normalize_common.Float_conv.qty_of_string "-1.5" with
+   | Error _ ->
+     printf "  * Rejected negative quantity\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Quantity should be non-negative\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test zero quantity (allowed) *)
+  (match Fluxum.Normalize_common.Float_conv.qty_of_string "0.0" with
+   | Ok f ->
+     ignore (assert_float_equal 0.0 f "Zero quantity allowed");
+     ()
+   | Error msg ->
+     printf "  X FAIL: Zero quantity should be allowed: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  ()
+
+let test_normalize_edge_cases () =
+  printf "\n[Normalize] Edge cases\n";
+
+  (* Test very large number *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "999999999999.123456" with
+   | Ok f ->
+     (* Allow for floating point rounding *)
+     ignore (assert_float_equal 999999999999.123456 f "Very large number parsed");
+     ()
+   | Error msg ->
+     printf "  X FAIL: Large number should parse: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test very small number *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "0.00000001" with
+   | Ok f ->
+     let diff = Float.abs (f -. 0.00000001) in
+     (match Float.(diff < 0.000000001) with
+      | true ->
+        printf "  * Very small number parsed\n";
+        incr tests_run; incr tests_passed
+      | false ->
+        printf "  X FAIL: Very small number precision: got %f\n" f;
+        incr tests_run; incr tests_failed);
+     ()
+   | Error msg ->
+     printf "  X FAIL: Small number should parse: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test scientific notation *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "1.5e10" with
+   | Ok f ->
+     ignore (assert_float_equal 1.5e10 f "Scientific notation parsed");
+     ()
+   | Error msg ->
+     printf "  X FAIL: Scientific notation should parse: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test negative exponent *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "1.5e-8" with
+   | Ok f ->
+     let diff = Float.abs (f -. 1.5e-8) in
+     (match Float.(diff < 1e-9) with
+      | true ->
+        printf "  * Negative exponent parsed\n";
+        incr tests_run; incr tests_passed
+      | false ->
+        printf "  X FAIL: Negative exponent precision: got %f\n" f;
+        incr tests_run; incr tests_failed);
+     ()
+   | Error msg ->
+     printf "  X FAIL: Negative exponent should parse: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  ()
+
 (* ============================================================ *)
 (* Main Test Runner *)
 (* ============================================================ *)
@@ -621,6 +738,10 @@ let () =
 
   (* Phase 1 normalize error path tests *)
   test_normalize_balance_error_paths ();
+
+  (* Phase 2 Priority 2: Additional error path tests *)
+  test_normalize_float_conversion_errors ();
+  test_normalize_edge_cases ();
 
   (* Summary *)
   printf "\n===========================================\n";

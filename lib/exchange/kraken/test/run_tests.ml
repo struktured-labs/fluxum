@@ -499,6 +499,192 @@ let test_normalize_balance_error_paths () =
    | Error msg ->
      printf "  ✗ FAIL: Valid balance should succeed: %s\n" msg;
      incr tests_run; incr tests_failed);
+
+  (* Test negative balance *)
+  let negative_balance = ("BTC", "-5.0") in
+  (match Fluxum_adapter.Adapter.Normalize.balance negative_balance with
+   | Ok bal ->
+     (* Kraken doesn't validate negative - parsed as-is *)
+     let _ = assert_float_equal (-5.0) bal.total "Negative balance parsed (no validation)" in ()
+   | Error _ ->
+     printf "  ✗ FAIL: Unexpected rejection of negative balance\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test zero balance *)
+  let zero_balance = ("USD", "0.0") in
+  (match Fluxum_adapter.Adapter.Normalize.balance zero_balance with
+   | Ok bal ->
+     let _ = assert_float_equal 0.0 bal.total "Zero balance accepted" in ()
+   | Error msg ->
+     printf "  ✗ FAIL: Should accept zero balance: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test high precision *)
+  let precision_balance = ("ETH", "123.456789012345") in
+  (match Fluxum_adapter.Adapter.Normalize.balance precision_balance with
+   | Ok bal ->
+     let _ = assert_float_equal 123.456789012345 bal.total "High precision balance" in ()
+   | Error msg ->
+     printf "  ✗ FAIL: Should handle high precision: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  ()
+
+(** Test normalize functions with various error conditions *)
+let test_normalize_side_error_paths () =
+  printf "\n=== Normalize: Side Error Paths ===\n";
+
+  (* Valid sides *)
+  let buy = Fluxum_adapter.Adapter.Normalize.side_of_string "buy" in
+  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
+    Types.Side.Buy buy "Side 'buy' → Buy" in
+
+  let sell = Fluxum_adapter.Adapter.Normalize.side_of_string "sell" in
+  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
+    Types.Side.Sell sell "Side 'sell' → Sell" in
+
+  (* Invalid side - uses default *)
+  let invalid = Fluxum_adapter.Adapter.Normalize.side_of_string "invalid_side" in
+  printf "  ✓ Invalid side defaults to: %s\n"
+    (Sexp.to_string (Types.Side.sexp_of_t invalid));
+  incr tests_run; incr tests_passed;
+
+  (* Case insensitive *)
+  let buy_upper = Fluxum_adapter.Adapter.Normalize.side_of_string "BUY" in
+  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
+    Types.Side.Buy buy_upper "Side 'BUY' → Buy (case insensitive)" in
+
+  ()
+
+let test_normalize_status_error_paths () =
+  printf "\n=== Normalize: Order Status Error Paths ===\n";
+
+  (* Valid statuses *)
+  let open_status = Fluxum_adapter.Adapter.Normalize.status_of_string "open" in
+  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
+    Types.Order_status.New open_status "Status 'open' → New" in
+
+  let closed = Fluxum_adapter.Adapter.Normalize.status_of_string "closed" in
+  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
+    Types.Order_status.Filled closed "Status 'closed' → Filled" in
+
+  (* Invalid status - uses default *)
+  let invalid = Fluxum_adapter.Adapter.Normalize.status_of_string "invalid_status" in
+  printf "  ✓ Invalid status defaults to: %s\n"
+    (Sexp.to_string (Types.Order_status.sexp_of_t invalid));
+  incr tests_run; incr tests_passed;
+
+  (* Case variations *)
+  let canceled_var1 = Fluxum_adapter.Adapter.Normalize.status_of_string "canceled" in
+  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
+    Types.Order_status.Canceled canceled_var1 "Status 'canceled' → Canceled" in
+
+  let canceled_var2 = Fluxum_adapter.Adapter.Normalize.status_of_string "cancelled" in
+  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
+    Types.Order_status.Canceled canceled_var2 "Status 'cancelled' → Canceled" in
+
+  ()
+
+let test_normalize_float_conversion_errors () =
+  printf "\n=== Normalize: Float Conversion Errors ===\n";
+
+  (* Test valid float conversions *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "123.456" with
+   | Ok f ->
+     let _ = assert_float_equal 123.456 f "Valid float string parsed" in ()
+   | Error msg ->
+     printf "  ✗ FAIL: Should parse valid float: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test malformed float *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "not_a_float" with
+   | Error _ ->
+     printf "  ✓ Rejected malformed float string\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  ✗ FAIL: Should reject malformed float\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test infinity *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "inf" with
+   | Error _ ->
+     printf "  ✓ Rejected non-finite float (infinity)\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  ✗ FAIL: Should reject non-finite float\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test price validation (must be positive) *)
+  (match Fluxum.Normalize_common.Float_conv.price_of_string "-100.0" with
+   | Error _ ->
+     printf "  ✓ Rejected negative price\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  ✗ FAIL: Price should be positive\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test valid price *)
+  (match Fluxum.Normalize_common.Float_conv.price_of_string "50000.50" with
+   | Ok p ->
+     let _ = assert_float_equal 50000.50 p "Valid price parsed" in ()
+   | Error msg ->
+     printf "  ✗ FAIL: Should parse valid price: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test quantity validation (non-negative) *)
+  (match Fluxum.Normalize_common.Float_conv.qty_of_string "-1.5" with
+   | Error _ ->
+     printf "  ✓ Rejected negative quantity\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  ✗ FAIL: Quantity cannot be negative\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test zero quantity (should be allowed) *)
+  (match Fluxum.Normalize_common.Float_conv.qty_of_string "0.0" with
+   | Ok q ->
+     let _ = assert_float_equal 0.0 q "Zero quantity allowed" in ()
+   | Error msg ->
+     printf "  ✗ FAIL: Should allow zero quantity: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  ()
+
+let test_normalize_edge_cases () =
+  printf "\n=== Normalize: Edge Cases ===\n";
+
+  (* Test very large numbers *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "999999999999.99" with
+   | Ok f ->
+     let _ = assert_float_equal 999999999999.99 f "Very large number parsed" in ()
+   | Error msg ->
+     printf "  ✗ FAIL: Should handle large numbers: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test very small numbers *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "0.000000001" with
+   | Ok f ->
+     let _ = assert_float_equal 0.000000001 f ~tolerance:0.0000000001 "Very small number parsed" in ()
+   | Error msg ->
+     printf "  ✗ FAIL: Should handle small numbers: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test scientific notation *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "1.23e10" with
+   | Ok f ->
+     let _ = assert_float_equal 12300000000.0 f "Scientific notation parsed" in ()
+   | Error msg ->
+     printf "  ✗ FAIL: Should handle scientific notation: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test negative scientific notation *)
+  (match Fluxum.Normalize_common.Float_conv.of_string "1.5e-8" with
+   | Ok f ->
+     let _ = assert_float_equal 0.000000015 f ~tolerance:0.0000000001 "Negative exponent parsed" in ()
+   | Error msg ->
+     printf "  ✗ FAIL: Should handle negative exponents: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
   ()
 
 (** ========== TEST RUNNER ========== *)
@@ -536,6 +722,12 @@ let () =
 
   (* Phase 1 normalize error path tests *)
   test_normalize_balance_error_paths ();
+
+  (* Phase 2 Priority 2: Additional error path tests *)
+  test_normalize_side_error_paths ();
+  test_normalize_status_error_paths ();
+  test_normalize_float_conversion_errors ();
+  test_normalize_edge_cases ();
 
   (* Print summary *)
   printf "\n";
