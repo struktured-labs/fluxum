@@ -420,8 +420,12 @@ module Unified = struct
     | "kraken" ->
       kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
       Kraken.Fluxum_adapter.Adapter.get_ticker adapter ~symbol ()
-      >>| Result.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.ticker
-      >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok ticker_native ->
+          (match Kraken.Fluxum_adapter.Adapter.Normalize.ticker ticker_native with
+           | Ok ticker -> Ok ticker
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Kraken.Fluxum_adapter.Adapter.Normalize.error e))
     | "mexc" ->
       mexc_adapter ~symbols:[symbol] >>= fun adapter ->
       Mexc.Fluxum_adapter.Adapter.get_ticker adapter ~symbol ()
@@ -444,8 +448,12 @@ module Unified = struct
     | "kraken" ->
       kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
       Kraken.Fluxum_adapter.Adapter.get_order_book adapter ~symbol ?limit ()
-      >>| Result.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.order_book
-      >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok book_native ->
+          (match Kraken.Fluxum_adapter.Adapter.Normalize.order_book book_native with
+           | Ok book -> Ok book
+           | Error msg -> Error (Fluxum.Types.Error.Normalization_error msg))
+        | Error e -> Error (Kraken.Fluxum_adapter.Adapter.Normalize.error e))
     | "mexc" ->
       mexc_adapter ~symbols:[symbol] >>= fun adapter ->
       Mexc.Fluxum_adapter.Adapter.get_order_book adapter ~symbol ?limit ()
@@ -468,8 +476,18 @@ module Unified = struct
     | "kraken" ->
       kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
       Kraken.Fluxum_adapter.Adapter.get_recent_trades adapter ~symbol ?limit ()
-      >>| Result.map ~f:(List.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.public_trade)
-      >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
+      >>| (function
+        | Ok trades_native ->
+          let trades_results = List.map trades_native ~f:Kraken.Fluxum_adapter.Adapter.Normalize.public_trade in
+          let result_transpose results =
+            List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
+              match res, acc with
+              | Ok v, Ok vs -> Ok (v :: vs)
+              | Error e, _ -> Error (Fluxum.Types.Error.Normalization_error e)
+              | _, Error e -> Error e)
+          in
+          result_transpose trades_results
+        | Error e -> Error (Kraken.Fluxum_adapter.Adapter.Normalize.error e))
     | "mexc" ->
       let result_transpose results =
         List.fold_right results ~init:(Ok []) ~f:(fun res acc ->

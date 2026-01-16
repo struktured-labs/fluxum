@@ -62,18 +62,20 @@ let test_binance_balance_normalization () =
     }
   in
 
-  let normalized = Binance.Fluxum_adapter.Adapter.Normalize.balance native_balance in
-
-  let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
-    "BTC" normalized.currency "Currency is BTC" in
-  let _ = assert_float_equal 2.0 normalized.total "Total = 2.0 (1.5 + 0.5)" in
-  let _ = assert_float_equal 1.5 normalized.available "Available = 1.5" in
-  let _ = assert_float_equal 0.5 normalized.locked "Locked = 0.5" in
-  let _ = assert_equal
-    ~equal:[%equal: Fluxum.Types.Venue.t]
-    ~sexp_of_t:[%sexp_of: Fluxum.Types.Venue.t]
-    Fluxum.Types.Venue.Binance normalized.venue "Venue is Binance" in
-  ()
+  (match Binance.Fluxum_adapter.Adapter.Normalize.balance native_balance with
+   | Ok normalized ->
+     let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
+       "BTC" normalized.currency "Currency is BTC" in
+     let _ = assert_float_equal 2.0 normalized.total "Total = 2.0 (1.5 + 0.5)" in
+     let _ = assert_float_equal 1.5 normalized.available "Available = 1.5" in
+     let _ = assert_float_equal 0.5 normalized.locked "Locked = 0.5" in
+     let _ = assert_equal
+       ~equal:[%equal: Fluxum.Types.Venue.t]
+       ~sexp_of_t:[%sexp_of: Fluxum.Types.Venue.t]
+       Fluxum.Types.Venue.Binance normalized.venue "Venue is Binance" in
+     ()
+   | Error msg ->
+     failwith (Printf.sprintf "Failed to normalize balance: %s" msg))
 
 (** ========== MEXC BALANCE NORMALIZATION TESTS ========== *)
 
