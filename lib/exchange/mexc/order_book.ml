@@ -32,20 +32,29 @@ module Book = struct
     create ~symbol
 
   let apply_depth_snapshot t (depth : V1.Depth.T.response) =
+    let open Result.Let_syntax in
     let new_metadata = { last_update_id = depth.lastUpdateId } in
-    let bid_levels = List.map depth.bids ~f:(fun (price_str, qty_str) ->
-      let price = Float.of_string price_str in
-      let size = Float.of_string qty_str in
-      (`Bid, price, size)
-    ) in
-    let ask_levels = List.map depth.asks ~f:(fun (price_str, qty_str) ->
-      let price = Float.of_string price_str in
-      let size = Float.of_string qty_str in
-      (`Ask, price, size)
-    ) in
+    (* Process bids with safe conversion *)
+    let%bind bid_levels =
+      List.fold depth.bids ~init:(Ok []) ~f:(fun acc_result (price_str, qty_str) ->
+        let%bind acc = acc_result in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+        let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        Ok ((`Bid, price, size) :: acc))
+      |> Result.map ~f:List.rev
+    in
+    (* Process asks with safe conversion *)
+    let%bind ask_levels =
+      List.fold depth.asks ~init:(Ok []) ~f:(fun acc_result (price_str, qty_str) ->
+        let%bind acc = acc_result in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+        let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        Ok ((`Ask, price, size) :: acc))
+      |> Result.map ~f:List.rev
+    in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in
-    set_many new_book all_levels ~metadata:new_metadata
+    Ok (set_many new_book all_levels ~metadata:new_metadata)
 
   let pretty_print ?(max_depth = 10) ?refresh_ms:_ ?tick_size:_ t =
     ignore (max_depth, t);

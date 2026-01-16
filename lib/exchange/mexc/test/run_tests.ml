@@ -502,10 +502,14 @@ let test_ws_deal_to_trade () =
     trade_type = 1;  (* buy *)
     time = 1700000000000L;
   } in
-  let trade = Ws.deal_to_trade ~symbol:"BTCUSDT" deal in
-  ignore (assert_float_equal 50000.0 trade.price "Trade price is 50000");
-  ignore (assert_float_equal 1.5 trade.qty "Trade qty is 1.5");
-  ignore (assert_true (Fluxum.Types.Side.equal trade.side Fluxum.Types.Side.Buy) "Trade side is Buy")
+  (match Ws.deal_to_trade ~symbol:"BTCUSDT" deal with
+   | Ok trade ->
+     ignore (assert_float_equal 50000.0 trade.price "Trade price is 50000");
+     ignore (assert_float_equal 1.5 trade.qty "Trade qty is 1.5");
+     ignore (assert_true (Fluxum.Types.Side.equal trade.side Fluxum.Types.Side.Buy) "Trade side is Buy")
+   | Error msg ->
+     printf "  X FAIL: Failed to convert deal to trade: %s\n" msg;
+     incr tests_run; incr tests_failed)
 
 let test_ws_apply_depth () =
   printf "\n[WebSocket] Apply depth to order book\n";
@@ -517,13 +521,17 @@ let test_ws_apply_depth () =
     from_version = "1";
     to_version = "2";
   } in
-  let book = Ws.apply_depth_to_book book depth in
-  let best_bid = Order_book.Book.best_bid book in
-  let best_ask = Order_book.Book.best_ask book in
-  ignore (assert_float_equal 50000.0 best_bid.price "Best bid is 50000");
-  ignore (assert_float_equal 1.5 best_bid.volume "Best bid volume is 1.5");
-  ignore (assert_float_equal 51000.0 best_ask.price "Best ask is 51000");
-  ignore (assert_float_equal 1.0 best_ask.volume "Best ask volume is 1.0")
+  (match Ws.apply_depth_to_book book depth with
+   | Ok book ->
+     let best_bid = Order_book.Book.best_bid book in
+     let best_ask = Order_book.Book.best_ask book in
+     ignore (assert_float_equal 50000.0 best_bid.price "Best bid is 50000");
+     ignore (assert_float_equal 1.5 best_bid.volume "Best bid volume is 1.5");
+     ignore (assert_float_equal 51000.0 best_ask.price "Best ask is 51000");
+     ignore (assert_float_equal 1.0 best_ask.volume "Best ask volume is 1.0")
+   | Error msg ->
+     printf "  X FAIL: Failed to apply depth to book: %s\n" msg;
+     incr tests_run; incr tests_failed)
 
 (* ============================================================ *)
 (* Normalize Error Path Tests (Phase 1) *)

@@ -602,44 +602,57 @@ let connect ?(url = Endpoint.public_url) ~streams () : t Deferred.Or_error.t =
 let messages t = t.message_pipe
 
 (** Apply depth update to order book *)
-let apply_depth_to_book (book : Order_book.Book.t) (depth : Message.aggre_depth) =
-  let book =
-    List.fold depth.bids ~init:book ~f:(fun acc item ->
-      let price = Float.of_string item.price in
-      let size = Float.of_string item.quantity in
-      Order_book.Book.set acc ~side:`Bid ~price ~size)
+let apply_depth_to_book (book : Order_book.Book.t) (depth : Message.aggre_depth) : (Order_book.Book.t, string) Result.t =
+  let open Result.Let_syntax in
+  (* Process bids *)
+  let%bind book =
+    List.fold depth.bids ~init:(Ok book) ~f:(fun acc_result item ->
+      let%bind acc = acc_result in
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string item.price in
+      let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string item.quantity in
+      Ok (Order_book.Book.set acc ~side:`Bid ~price ~size))
   in
-  List.fold depth.asks ~init:book ~f:(fun acc item ->
-    let price = Float.of_string item.price in
-    let size = Float.of_string item.quantity in
-    Order_book.Book.set acc ~side:`Ask ~price ~size)
+  (* Process asks *)
+  List.fold depth.asks ~init:(Ok book) ~f:(fun acc_result item ->
+    let%bind acc = acc_result in
+    let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string item.price in
+    let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string item.quantity in
+    Ok (Order_book.Book.set acc ~side:`Ask ~price ~size))
 
 (** Apply limit depth snapshot to order book *)
-let apply_limit_depth_to_book (book : Order_book.Book.t) (depth : Message.limit_depth) =
+let apply_limit_depth_to_book (book : Order_book.Book.t) (depth : Message.limit_depth) : (Order_book.Book.t, string) Result.t =
+  let open Result.Let_syntax in
   (* Clear existing book and apply snapshot *)
   let book = Order_book.Book.empty (Order_book.Book.symbol book) in
-  let book =
-    List.fold depth.bids ~init:book ~f:(fun acc item ->
-      let price = Float.of_string item.price in
-      let size = Float.of_string item.quantity in
-      Order_book.Book.set acc ~side:`Bid ~price ~size)
+  (* Process bids *)
+  let%bind book =
+    List.fold depth.bids ~init:(Ok book) ~f:(fun acc_result item ->
+      let%bind acc = acc_result in
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string item.price in
+      let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string item.quantity in
+      Ok (Order_book.Book.set acc ~side:`Bid ~price ~size))
   in
-  List.fold depth.asks ~init:book ~f:(fun acc item ->
-    let price = Float.of_string item.price in
-    let size = Float.of_string item.quantity in
-    Order_book.Book.set acc ~side:`Ask ~price ~size)
+  (* Process asks *)
+  List.fold depth.asks ~init:(Ok book) ~f:(fun acc_result item ->
+    let%bind acc = acc_result in
+    let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string item.price in
+    let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string item.quantity in
+    Ok (Order_book.Book.set acc ~side:`Ask ~price ~size))
 
 (** Convert deal to normalized trade *)
-let deal_to_trade ~symbol:sym (deal : Message.deal_item) : Fluxum.Types.Trade.t =
+let deal_to_trade ~symbol:sym (deal : Message.deal_item) : (Fluxum.Types.Trade.t, string) Result.t =
+  let open Result.Let_syntax in
   let side = match deal.trade_type = 1 with true -> Fluxum.Types.Side.Buy | false -> Fluxum.Types.Side.Sell in
   let ts = Time_float_unix.of_span_since_epoch
     (Time_float_unix.Span.of_ms (Int64.to_float deal.time)) in
-  { Fluxum.Types.Trade.
+  let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string deal.price in
+  let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string deal.quantity in
+  Ok { Fluxum.Types.Trade.
     venue = Fluxum.Types.Venue.Mexc
   ; symbol = sym
   ; side
-  ; price = Float.of_string deal.price
-  ; qty = Float.of_string deal.quantity
+  ; price
+  ; qty
   ; fee = None
   ; trade_id = None
   ; ts = Some ts
