@@ -36,47 +36,69 @@ module Book = struct
 
   (** Apply L2 book update from Hyperliquid.
       Hyperliquid l2Book has levels as [[bids], [asks]] where each level is {px, sz, n} *)
-  let apply_l2_book t (book : Ws.Message.l2_book) =
+  let apply_l2_book t (book : Ws.Message.l2_book) : (t, string) Result.t =
+    let open Result.Let_syntax in
     let new_metadata = { last_update_time = book.time } in
     let bids, asks = match book.levels with
       | [bid_levels; ask_levels] -> (bid_levels, ask_levels)
       | _ -> ([], [])  (* Invalid format, return empty *)
     in
-    (* Build level lists *)
-    let bid_levels = List.filter_map bids ~f:(fun level ->
-      let price = Float.of_string level.Ws.Message.px in
-      let volume = Float.of_string level.sz in
-      match Float.(volume > 0.) with true -> Some (`Bid, price, volume) | false -> None
-    ) in
-    let ask_levels = List.filter_map asks ~f:(fun level ->
-      let price = Float.of_string level.Ws.Message.px in
-      let volume = Float.of_string level.sz in
-      match Float.(volume > 0.) with true -> Some (`Ask, price, volume) | false -> None
-    ) in
+    (* Build level lists with safe conversions *)
+    let%bind bid_levels =
+      List.fold bids ~init:(Ok []) ~f:(fun acc_result level ->
+        let%bind acc = acc_result in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.Ws.Message.px in
+        let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string level.sz in
+        match Float.(volume > 0.) with
+        | true -> Ok ((`Bid, price, volume) :: acc)
+        | false -> Ok acc)  (* Skip zero volume *)
+      |> Result.map ~f:List.rev
+    in
+    let%bind ask_levels =
+      List.fold asks ~init:(Ok []) ~f:(fun acc_result level ->
+        let%bind acc = acc_result in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.Ws.Message.px in
+        let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string level.sz in
+        match Float.(volume > 0.) with
+        | true -> Ok ((`Ask, price, volume) :: acc)
+        | false -> Ok acc)  (* Skip zero volume *)
+      |> Result.map ~f:List.rev
+    in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in
-    set_many new_book all_levels ~metadata:new_metadata
+    Ok (set_many new_book all_levels ~metadata:new_metadata)
 
   (** Apply REST API l2_book response *)
-  let apply_rest_l2_book t (book : Rest.Types.l2_book) =
+  let apply_rest_l2_book t (book : Rest.Types.l2_book) : (t, string) Result.t =
+    let open Result.Let_syntax in
     let new_metadata = { last_update_time = book.time } in
     let bids, asks = match book.levels with
       | [bid_levels; ask_levels] -> (bid_levels, ask_levels)
       | _ -> ([], [])
     in
-    let bid_levels = List.filter_map bids ~f:(fun level ->
-      let price = Float.of_string level.Rest.Types.px in
-      let volume = Float.of_string level.sz in
-      match Float.(volume > 0.) with true -> Some (`Bid, price, volume) | false -> None
-    ) in
-    let ask_levels = List.filter_map asks ~f:(fun level ->
-      let price = Float.of_string level.Rest.Types.px in
-      let volume = Float.of_string level.sz in
-      match Float.(volume > 0.) with true -> Some (`Ask, price, volume) | false -> None
-    ) in
+    let%bind bid_levels =
+      List.fold bids ~init:(Ok []) ~f:(fun acc_result level ->
+        let%bind acc = acc_result in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.Rest.Types.px in
+        let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string level.sz in
+        match Float.(volume > 0.) with
+        | true -> Ok ((`Bid, price, volume) :: acc)
+        | false -> Ok acc)
+      |> Result.map ~f:List.rev
+    in
+    let%bind ask_levels =
+      List.fold asks ~init:(Ok []) ~f:(fun acc_result level ->
+        let%bind acc = acc_result in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.Rest.Types.px in
+        let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string level.sz in
+        match Float.(volume > 0.) with
+        | true -> Ok ((`Ask, price, volume) :: acc)
+        | false -> Ok acc)
+      |> Result.map ~f:List.rev
+    in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in
-    set_many new_book all_levels ~metadata:new_metadata
+    Ok (set_many new_book all_levels ~metadata:new_metadata)
 
   (** Create live order book pipe from Hyperliquid WebSocket *)
   let pipe ~symbol ?url () : (t, string) Result.t Pipe.Reader.t Deferred.t =
@@ -100,8 +122,12 @@ module Book = struct
           try
             match Ws.parse_message msg_str with
             | Ws.Message.L2Book l2_book when String.equal l2_book.coin coin ->
-              book_ref := apply_l2_book !book_ref l2_book;
-              Pipe.write book_writer (Ok !book_ref)
+              (match apply_l2_book !book_ref l2_book with
+               | Ok new_book ->
+                 book_ref := new_book;
+                 Pipe.write book_writer (Ok !book_ref)
+               | Error msg ->
+                 Pipe.write book_writer (Error msg))
             | _ -> Deferred.unit
           with exn ->
             Pipe.write book_writer (Error (Exn.to_string exn))
