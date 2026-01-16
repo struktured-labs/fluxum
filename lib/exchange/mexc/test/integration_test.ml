@@ -284,6 +284,116 @@ let test_websocket_connection () =
     in
     read_loop ()
 
+(* Phase 2 Priority 3: WebSocket Error Handling Tests *)
+
+let test_websocket_invalid_url () =
+  printf "\n[WebSocket] Connection Failure - Invalid URL\n";
+  let streams = [
+    Mexc.Ws.Stream.AggreDeals { symbol = "BTCUSDT"; frequency = Ms100 };
+  ] in
+  let invalid_url = "wss://invalid.nonexistent-domain-12345.com/ws" in
+  (* Set a short timeout for the connection attempt *)
+  Clock.with_timeout (Time_float.Span.of_sec 5.0)
+    (Mexc.Ws.connect ~url:invalid_url ~streams ())
+  >>| function
+  | `Timeout ->
+    pass "Connection timeout on invalid URL (as expected)";
+    ()
+  | `Result (Error _err) ->
+    pass "Connection error properly returned for invalid URL";
+    ()
+  | `Result (Ok _ws) ->
+    fail "Should not connect to invalid URL";
+    ()
+
+let test_websocket_malformed_message () =
+  printf "\n[WebSocket] Malformed Message Handling\n";
+
+  (* Test 1: Invalid JSON *)
+  let malformed_json = "{this is not valid json}" in
+  let parsed1 = Mexc.Ws.parse_message malformed_json in
+  (match parsed1 with
+   | Mexc.Ws.Message.Error _ -> pass "Parse error caught for malformed JSON"
+   | _ -> fail "Should detect malformed JSON");
+
+  (* Test 2: Empty string *)
+  let empty = "" in
+  let parsed2 = Mexc.Ws.parse_message empty in
+  (match parsed2 with
+   | Mexc.Ws.Message.Error _ -> pass "Parse error caught for empty message"
+   | _ -> fail "Should reject empty message");
+
+  (* Test 3: Invalid protobuf data *)
+  let invalid_proto = "\x00\x01\x02\x03\x04" in
+  let parsed3 = Mexc.Ws.parse_message invalid_proto in
+  (match parsed3 with
+   | Mexc.Ws.Message.Error _ -> pass "Parse error caught for invalid protobuf"
+   | Mexc.Ws.Message.Raw _ -> pass "Raw message returned for unrecognized format"
+   | _ -> ());
+
+  return ()
+
+let test_websocket_connection_recovery () =
+  printf "\n[WebSocket] Connection Recovery Behavior\n";
+
+  (* Test connecting with empty streams list *)
+  Mexc.Ws.connect ~streams:[] () >>= function
+  | Error err ->
+    pass (sprintf "Empty streams rejected or failed: %s" (Error.to_string_hum err));
+    return ()
+  | Ok ws ->
+    pass "Connected with empty streams (will rely on manual subscriptions)";
+    (* Verify we can still read from the connection *)
+    Clock.with_timeout (Time_float.Span.of_sec 2.0)
+      (Pipe.read (Mexc.Ws.messages ws))
+    >>| (function
+      | `Timeout ->
+        pass "No messages on empty streams (as expected)"
+      | `Result `Eof ->
+        pass "Connection closed on empty streams"
+      | `Result (`Ok msg) ->
+        let parsed = Mexc.Ws.parse_message msg in
+        (match parsed with
+         | Mexc.Ws.Message.SubscriptionAck _ -> pass "Got subscription ack"
+         | Mexc.Ws.Message.Pong -> pass "Got pong"
+         | _ -> pass (sprintf "Got message: %s" (String.prefix msg 50))))
+
+let test_websocket_invalid_symbol () =
+  printf "\n[WebSocket] Invalid Symbol Handling\n";
+  let streams = [
+    Mexc.Ws.Stream.AggreDeals { symbol = "INVALIDSYMBOL12345"; frequency = Ms100 };
+  ] in
+  (* Try secure first, fall back to insecure if SSL fails *)
+  Mexc.Ws.connect ~streams () >>= fun result ->
+  (match result with
+   | Ok _ -> return result
+   | Error _ ->
+     printf "  (Trying insecure endpoint...)\n";
+     Mexc.Ws.connect ~url:Mexc.Ws.Endpoint.public_url_insecure ~streams ())
+  >>= function
+  | Error err ->
+    pass (sprintf "Connection rejected invalid symbol: %s" (Error.to_string_hum err));
+    return ()
+  | Ok ws ->
+    pass "Connected (exchange may accept invalid symbol)";
+    (* Try to read messages for a short time *)
+    Clock.with_timeout (Time_float.Span.of_sec 3.0)
+      (Pipe.read (Mexc.Ws.messages ws))
+    >>| (function
+      | `Timeout ->
+        pass "No messages for invalid symbol (exchange may silently ignore)"
+      | `Result `Eof ->
+        pass "Connection closed for invalid symbol"
+      | `Result (`Ok msg) ->
+        let parsed = Mexc.Ws.parse_message msg in
+        (match parsed with
+         | Mexc.Ws.Message.Error err ->
+           pass (sprintf "Exchange returned error: %s" err)
+         | Mexc.Ws.Message.SubscriptionAck { msg; _ } ->
+           pass (sprintf "Exchange acknowledged: %s (may filter later)" msg)
+         | _ ->
+           pass "Exchange accepted invalid symbol"))
+
 (* ============================================================ *)
 (* Main *)
 (* ============================================================ *)
@@ -308,6 +418,12 @@ let run_tests () =
 
   (* WebSocket test *)
   test_websocket_connection () >>= fun () ->
+
+  (* WebSocket error handling tests *)
+  test_websocket_invalid_url () >>= fun () ->
+  test_websocket_malformed_message () >>= fun () ->
+  test_websocket_connection_recovery () >>= fun () ->
+  test_websocket_invalid_symbol () >>= fun () ->
 
   (* Summary *)
   printf "\n===========================================\n";

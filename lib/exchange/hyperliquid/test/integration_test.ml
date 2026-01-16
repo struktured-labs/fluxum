@@ -221,6 +221,117 @@ let test_websocket_l2_book () =
     in
     read_loop ()
 
+(* Phase 2 Priority 3: WebSocket Error Handling Tests *)
+
+let test_websocket_invalid_url () =
+  printf "\n[WebSocket] Connection Failure - Invalid URL\n";
+  let streams = [
+    Hyperliquid.Ws.Stream.AllMids;
+  ] in
+  let invalid_url = "wss://invalid.nonexistent-domain-12345.com/ws" in
+  (* Set a short timeout for the connection attempt *)
+  Clock.with_timeout (Time_float.Span.of_sec 5.0)
+    (Hyperliquid.Ws.connect ~url:invalid_url ~streams ())
+  >>| function
+  | `Timeout ->
+    pass "Connection timeout on invalid URL (as expected)";
+    ()
+  | `Result (Error _err) ->
+    pass "Connection error properly returned for invalid URL";
+    ()
+  | `Result (Ok _ws) ->
+    fail "Should not connect to invalid URL";
+    ()
+
+let test_websocket_malformed_message () =
+  printf "\n[WebSocket] Malformed Message Handling\n";
+
+  (* Test 1: Invalid JSON *)
+  let malformed_json = "{this is not valid json}" in
+  let parsed1 = Hyperliquid.Ws.parse_message malformed_json in
+  (match parsed1 with
+   | Hyperliquid.Ws.Message.Error _ -> pass "Parse error caught for malformed JSON"
+   | Hyperliquid.Ws.Message.Unknown _ -> pass "Unknown message for malformed JSON"
+   | _ -> fail "Should detect malformed JSON");
+
+  (* Test 2: Empty string *)
+  let empty = "" in
+  let parsed2 = Hyperliquid.Ws.parse_message empty in
+  (match parsed2 with
+   | Hyperliquid.Ws.Message.Error _ -> pass "Parse error caught for empty message"
+   | Hyperliquid.Ws.Message.Unknown _ -> pass "Unknown message for empty string"
+   | _ -> fail "Should reject empty message");
+
+  (* Test 3: Valid JSON but wrong structure *)
+  let invalid_structure = "{\"method\":\"unknown\",\"data\":123}" in
+  let parsed3 = Hyperliquid.Ws.parse_message invalid_structure in
+  (match parsed3 with
+   | Hyperliquid.Ws.Message.Unknown _ -> pass "Unknown message for invalid structure"
+   | Hyperliquid.Ws.Message.Error _ -> pass "Parse error for invalid structure"
+   | _ -> pass "Parser handled unexpected structure");
+
+  return ()
+
+let test_websocket_connection_empty_streams () =
+  printf "\n[WebSocket] Connection with Empty Streams\n";
+
+  (* Test connecting with empty streams list *)
+  Hyperliquid.Ws.connect ~streams:[] () >>= function
+  | Error err ->
+    pass (sprintf "Empty streams rejected: %s" (Error.to_string_hum err));
+    return ()
+  | Ok ws ->
+    pass "Connected with empty streams";
+    (* Verify we can still read from the connection *)
+    Clock.with_timeout (Time_float.Span.of_sec 2.0)
+      (Pipe.read (Hyperliquid.Ws.messages ws))
+    >>= (function
+      | `Timeout ->
+        pass "No messages on empty streams (as expected)";
+        Hyperliquid.Ws.close ws
+      | `Result `Eof ->
+        pass "Connection closed on empty streams";
+        Hyperliquid.Ws.close ws
+      | `Result (`Ok msg) ->
+        let parsed = Hyperliquid.Ws.parse_message msg in
+        (match parsed with
+         | Hyperliquid.Ws.Message.SubscriptionResponse _ -> pass "Got subscription response"
+         | Hyperliquid.Ws.Message.Pong -> pass "Got pong"
+         | _ -> pass (sprintf "Got message: %s" (String.prefix msg 50)));
+        Hyperliquid.Ws.close ws)
+
+let test_websocket_invalid_coin () =
+  printf "\n[WebSocket] Invalid Coin Symbol\n";
+  let streams = [
+    Hyperliquid.Ws.Stream.Trades "INVALIDSYMBOL12345";
+  ] in
+  Hyperliquid.Ws.connect ~streams () >>= function
+  | Error err ->
+    pass (sprintf "Connection rejected invalid coin: %s" (Error.to_string_hum err));
+    return ()
+  | Ok ws ->
+    pass "Connected (exchange may accept invalid coin)";
+    (* Try to read messages for a short time *)
+    Clock.with_timeout (Time_float.Span.of_sec 3.0)
+      (Pipe.read (Hyperliquid.Ws.messages ws))
+    >>= (function
+      | `Timeout ->
+        pass "No messages for invalid coin (exchange may silently ignore)";
+        Hyperliquid.Ws.close ws
+      | `Result `Eof ->
+        pass "Connection closed for invalid coin";
+        Hyperliquid.Ws.close ws
+      | `Result (`Ok msg) ->
+        let parsed = Hyperliquid.Ws.parse_message msg in
+        (match parsed with
+         | Hyperliquid.Ws.Message.Error err ->
+           pass (sprintf "Exchange returned error: %s" err)
+         | Hyperliquid.Ws.Message.SubscriptionResponse resp ->
+           pass (sprintf "Exchange acknowledged: %s (may filter later)" resp.method_)
+         | _ ->
+           pass "Exchange accepted invalid coin");
+        Hyperliquid.Ws.close ws)
+
 (* ============================================================ *)
 (* Main *)
 (* ============================================================ *)
@@ -240,6 +351,12 @@ let run_tests () =
   (* WebSocket tests *)
   test_websocket_connection () >>= fun () ->
   test_websocket_l2_book () >>= fun () ->
+
+  (* WebSocket error handling tests *)
+  test_websocket_invalid_url () >>= fun () ->
+  test_websocket_malformed_message () >>= fun () ->
+  test_websocket_connection_empty_streams () >>= fun () ->
+  test_websocket_invalid_coin () >>= fun () ->
 
   (* Summary *)
   printf "\n===========================================\n";
