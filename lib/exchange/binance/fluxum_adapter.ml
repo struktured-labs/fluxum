@@ -260,8 +260,8 @@ module Adapter = struct
       ; updated_at = None
       } : Types.Order.t)
 
-    let order_status (status : Native.Order.status) : Types.Order_status.t =
-      Fluxum.Normalize_common.Order_status.of_string_exn status.status
+    let order_status (status : Native.Order.status) : (Types.Order_status.t, string) Result.t =
+      Fluxum.Normalize_common.Order_status.of_string status.status
 
     let order_from_status (status : Native.Order.status) : (Types.Order.t, string) Result.t =
       let open Result.Let_syntax in
@@ -348,16 +348,19 @@ module Adapter = struct
       ; is_snapshot = true
       } : Types.Book_update.t)
 
-    let symbol_info (s : Native.Symbol_info.t) : Types.Symbol_info.t =
-      { venue = Venue.t
+    let symbol_info (s : Native.Symbol_info.t) : (Types.Symbol_info.t, string) Result.t =
+      (* Note: Binance API doesn't provide min_order_size/tick_size in the basic symbol_info.
+         These are in the 'filters' array which requires more complex parsing.
+         For now, we use safe defaults. *)
+      Ok ({ venue = Venue.t
       ; symbol = s.symbol
       ; base_currency = s.baseAsset
       ; quote_currency = s.quoteAsset
       ; status = s.status
-      ; min_order_size = 0.0
-      ; tick_size = None
-      ; quote_increment = None
-      }
+      ; min_order_size = 0.0  (* TODO: parse from filters array *)
+      ; tick_size = None      (* TODO: parse from filters array *)
+      ; quote_increment = None (* TODO: parse from filters array *)
+      } : Types.Symbol_info.t)
 
     let ticker (t : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       let open Result.Let_syntax in

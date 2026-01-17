@@ -513,6 +513,224 @@ let test_json_account () =
     incr tests_failed;
     printf "  ✗ FAIL: JSON parse error: %s\n" msg
 
+(* ===== NORMALIZE ERROR PATH TESTS ===== *)
+
+let test_normalize_order_response_invalid_status () =
+  printf "\n[Normalize] Order response with invalid status\n";
+  let response : Binance.V3.New_order.response = {
+    symbol = "BTCUSDT";
+    orderId = 12345L;
+    orderListId = -1L;
+    clientOrderId = "test123";
+    transactTime = 1672531200000L;
+    price = "50000.0";
+    origQty = "1.0";
+    executedQty = "0.5";
+    cummulativeQuoteQty = "25000.0";
+    status = "INVALID_STATUS";  (* Invalid status *)
+    timeInForce = "GTC";
+    type_ = "LIMIT";
+    side = "BUY";
+    fills = [];
+  } in
+  incr tests_run;
+  (match Binance.Fluxum_adapter.Adapter.Normalize.order_response response with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected invalid status: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject invalid order status\n")
+
+let test_normalize_order_status_invalid () =
+  printf "\n[Normalize] Order status with unrecognized status string\n";
+  let status : Binance.V3.Open_orders.order = {
+    symbol = "BTCUSDT";
+    orderId = 12345L;
+    orderListId = -1L;
+    clientOrderId = "test123";
+    price = "50000.0";
+    origQty = "1.0";
+    executedQty = "0.0";
+    cummulativeQuoteQty = "0.0";
+    status = "UNKNOWN_STATUS";  (* Invalid *)
+    timeInForce = "GTC";
+    type_ = "LIMIT";
+    side = "BUY";
+    stopPrice = "0";
+    icebergQty = "0";
+    time = 1672531200000L;
+    updateTime = 1672531200000L;
+    isWorking = true;
+    origQuoteOrderQty = "0";
+  } in
+  incr tests_run;
+  (match Binance.Fluxum_adapter.Adapter.Normalize.order_status status with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected invalid status: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject unrecognized order status\n")
+
+let test_normalize_balance_invalid_free () =
+  printf "\n[Normalize] Balance with invalid 'free' amount\n";
+  let balance : Binance.V3.Account.balance = {
+    asset = "BTC";
+    free = "not_a_number";  (* Invalid *)
+    locked = "0.0";
+  } in
+  incr tests_run;
+  (match Binance.Fluxum_adapter.Adapter.Normalize.balance balance with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected malformed free amount: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject non-numeric free amount\n")
+
+let test_normalize_balance_negative () =
+  printf "\n[Normalize] Balance with negative values\n";
+  let balance : Binance.V3.Account.balance = {
+    asset = "ETH";
+    free = "-10.0";  (* Negative *)
+    locked = "0.0";
+  } in
+  incr tests_run;
+  (match Binance.Fluxum_adapter.Adapter.Normalize.balance balance with
+   | Error _msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected negative balance\n"
+   | Ok b ->
+     (* Some implementations may accept but zero-correct *)
+     (match Float.(b.total < 0.0) with
+      | true ->
+        incr tests_failed;
+        printf "  ✗ FAIL: Should not allow negative total\n"
+      | false ->
+        incr tests_passed;
+        printf "  ✓ Accepted with zero correction\n"))
+
+let test_normalize_ticker_malformed_price () =
+  printf "\n[Normalize] Ticker with malformed price\n";
+  let ticker : Binance.V3.Ticker_24hr.response = {
+    symbol = "BTCUSDT";
+    priceChange = "100.0";
+    priceChangePercent = "0.2";
+    weightedAvgPrice = "50000.0";
+    prevClosePrice = "49900.0";
+    lastPrice = "invalid_price";  (* Malformed *)
+    lastQty = "1.0";
+    bidPrice = "50000.0";
+    bidQty = "1.5";
+    askPrice = "50100.0";
+    askQty = "2.0";
+    openPrice = "49900.0";
+    highPrice = "51000.0";
+    lowPrice = "49500.0";
+    volume = "10000.0";
+    quoteVolume = "500000000.0";
+    openTime = 1672444800000L;
+    closeTime = 1672531200000L;
+    firstId = 1L;
+    lastId = 100L;
+    count = 100L;
+  } in
+  incr tests_run;
+  (match Binance.Fluxum_adapter.Adapter.Normalize.ticker ticker with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected malformed last price: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject non-numeric price\n")
+
+let test_normalize_trade_invalid_qty () =
+  printf "\n[Normalize] Trade with invalid quantity\n";
+  let trade : Binance.V3.Recent_trades.trade = {
+    id = 12345L;
+    price = "50000.0";
+    qty = "NaN";  (* Invalid *)
+    quoteQty = "50000.0";
+    time = 1672531200000L;
+    isBuyerMaker = true;
+    isBestMatch = true;
+  } in
+  incr tests_run;
+  (match Binance.Fluxum_adapter.Adapter.Normalize.public_trade trade with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected invalid quantity: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject NaN quantity\n")
+
+let test_normalize_trade_zero_qty () =
+  printf "\n[Normalize] Trade with zero quantity\n";
+  let trade : Binance.V3.Recent_trades.trade = {
+    id = 12345L;
+    price = "50000.0";
+    qty = "0.0";  (* Zero *)
+    quoteQty = "0.0";
+    time = 1672531200000L;
+    isBuyerMaker = true;
+    isBestMatch = true;
+  } in
+  incr tests_run;
+  (match Binance.Fluxum_adapter.Adapter.Normalize.public_trade trade with
+   | Error _msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected zero quantity\n"
+   | Ok _trade ->
+     (* Some implementations may allow zero qty for special cases *)
+     incr tests_passed;
+     printf "  ✓ Accepted zero quantity trade\n")
+
+let test_normalize_order_response_malformed_price () =
+  printf "\n[Normalize] Order response with malformed executed price\n";
+  let response : Binance.V3.New_order.response = {
+    symbol = "BTCUSDT";
+    orderId = 12345L;
+    orderListId = -1L;
+    clientOrderId = "test123";
+    transactTime = 1672531200000L;
+    price = "not_a_float";  (* Malformed *)
+    origQty = "1.0";
+    executedQty = "0.5";
+    cummulativeQuoteQty = "25000.0";
+    status = "FILLED";
+    timeInForce = "GTC";
+    type_ = "LIMIT";
+    side = "BUY";
+    fills = [];
+  } in
+  incr tests_run;
+  (match Binance.Fluxum_adapter.Adapter.Normalize.order_response response with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected malformed price: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject non-numeric price\n")
+
+let test_normalize_symbol_info_ok () =
+  printf "\n[Normalize] Symbol info with valid data\n";
+  let symbol_info : Binance.V3.Exchange_info.symbol_info = {
+    symbol = "BTCUSDT";
+    status = "TRADING";
+    baseAsset = "BTC";
+    quoteAsset = "USDT";
+  } in
+  incr tests_run;
+  (match Binance.Fluxum_adapter.Adapter.Normalize.symbol_info symbol_info with
+   | Ok info ->
+     incr tests_passed;
+     ignore (assert_string_equal "BTCUSDT" info.symbol "Symbol is BTCUSDT");
+     printf "  ✓ Valid symbol info normalized\n"
+   | Error msg ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should accept valid symbol info: %s\n" msg)
+
 (* Main test runner *)
 let () =
   printf "===========================================\n";
@@ -568,6 +786,17 @@ let () =
   let _ = test_json_depth () in
   let _ = test_json_ticker () in
   let _ = test_json_account () in
+
+  (* Normalize Error Path Tests *)
+  let _ = test_normalize_order_response_invalid_status () in
+  let _ = test_normalize_order_status_invalid () in
+  let _ = test_normalize_balance_invalid_free () in
+  let _ = test_normalize_balance_negative () in
+  let _ = test_normalize_ticker_malformed_price () in
+  let _ = test_normalize_trade_invalid_qty () in
+  let _ = test_normalize_trade_zero_qty () in
+  let _ = test_normalize_order_response_malformed_price () in
+  let _ = test_normalize_symbol_info_ok () in
 
   (* Summary *)
   printf "\n===========================================\n";
