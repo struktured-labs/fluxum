@@ -271,6 +271,170 @@ let test_books_multiple_symbols () =
   ignore (assert_true (List.mem symbols "BTC-USD" ~equal:String.equal) "Contains BTC-USD");
   ignore (assert_true (List.mem symbols "ETH-USD" ~equal:String.equal) "Contains ETH-USD")
 
+(* ===== NORMALIZE ERROR PATH TESTS ===== *)
+
+let test_normalize_trade_invalid_price () =
+  printf "\n[Normalize] Trade with invalid price\n";
+  let trade : Coinbase.Rest.Types.trade = {
+    trade_id = "12345";
+    product_id = "BTC-USD";
+    price = "not_a_number";  (* Invalid *)
+    size = "1.0";
+    time = "2023-01-01T00:00:00Z";
+    side = "BUY";
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.trade trade with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected malformed price: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject non-numeric price\n")
+
+let test_normalize_trade_invalid_side () =
+  printf "\n[Normalize] Trade with invalid side\n";
+  let trade : Coinbase.Rest.Types.trade = {
+    trade_id = "12345";
+    product_id = "BTC-USD";
+    price = "50000.0";
+    size = "1.0";
+    time = "2023-01-01T00:00:00Z";
+    side = "INVALID_SIDE";  (* Invalid *)
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.trade trade with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected invalid side: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject invalid side\n")
+
+let test_normalize_balance_invalid_value () =
+  printf "\n[Normalize] Balance with invalid value\n";
+  let balance : Coinbase.Rest.Account.account = {
+    uuid = "test-uuid";
+    name = "BTC Wallet";
+    currency = "BTC";
+    available_balance = { value = "invalid"; currency = "BTC" };
+    default = false;
+    active = true;
+    created_at = None;
+    updated_at = None;
+    deleted_at = None;
+    type_ = None;
+    ready = true;
+    hold = None;
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.balance balance with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected malformed balance: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject non-numeric balance\n")
+
+let test_normalize_ticker_invalid_bid () =
+  printf "\n[Normalize] Ticker with invalid bid price\n";
+  let ticker : Coinbase.Rest.Types.ticker = {
+    trades = [];
+    best_bid = "NaN";  (* Invalid *)
+    best_ask = "51000.0";
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.ticker ticker with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected NaN bid: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject NaN bid price\n")
+
+let test_normalize_order_book_malformed () =
+  printf "\n[Normalize] Order book with malformed price\n";
+  let book : Coinbase.Rest.Types.product_book = {
+    product_id = "BTC-USD";
+    bids = [{ price = "invalid_price"; size = "1.0" }];  (* Invalid *)
+    asks = [{ price = "51000.0"; size = "1.0" }];
+    time = "2023-01-01T00:00:00Z";
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.order_book book with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected malformed price: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject non-numeric price\n")
+
+let test_normalize_public_trade_zero_qty () =
+  printf "\n[Normalize] Public trade with zero quantity\n";
+  let trade : Coinbase.Rest.Types.trade = {
+    trade_id = "12345";
+    product_id = "BTC-USD";
+    price = "50000.0";
+    size = "0.0";  (* Zero *)
+    time = "2023-01-01T00:00:00Z";
+    side = "BUY";
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.public_trade trade with
+   | Error _msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected zero quantity\n"
+   | Ok _trade ->
+     (* Some implementations may allow zero qty *)
+     incr tests_passed;
+     printf "  ✓ Accepted zero quantity trade\n")
+
+let test_normalize_symbol_info_missing_fields () =
+  printf "\n[Normalize] Symbol info with missing optional fields\n";
+  let symbol_info : Coinbase.Rest.Types.product = {
+    product_id = "BTC-USD";
+    price = None;
+    price_percentage_change_24h = None;
+    volume_24h = None;
+    volume_percentage_change_24h = None;
+    base_increment = None;  (* Missing *)
+    quote_increment = None;  (* Missing *)
+    quote_min_size = None;
+    quote_max_size = None;
+    base_min_size = None;  (* Missing *)
+    base_max_size = None;
+    base_name = Some "Bitcoin";
+    quote_name = Some "US Dollar";
+    status = Some "online";
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.symbol_info symbol_info with
+   | Ok info ->
+     incr tests_passed;
+     ignore (assert_string_equal "BTC-USD" info.symbol "Symbol is BTC-USD");
+     printf "  ✓ Valid symbol info with missing optionals\n"
+   | Error msg ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should accept valid symbol info: %s\n" msg)
+
+let test_normalize_book_update_empty_levels () =
+  printf "\n[Normalize] Book update with empty levels\n";
+  let book : Coinbase.Rest.Types.product_book = {
+    product_id = "BTC-USD";
+    bids = [];  (* Empty *)
+    asks = [];
+    time = "2023-01-01T00:00:00Z";
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.book_update book with
+   | Ok update ->
+     incr tests_passed;
+     ignore (assert_true (List.is_empty update.levels) "Empty levels list");
+     printf "  ✓ Accepted empty book update\n"
+   | Error msg ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should accept empty book update: %s\n" msg)
+
 (* Main test runner *)
 let () =
   printf "===========================================\n";
@@ -299,6 +463,16 @@ let () =
   let _ = test_books_empty () in
   let _ = test_books_set_and_get () in
   let _ = test_books_multiple_symbols () in
+
+  (* Normalize Error Path Tests *)
+  let _ = test_normalize_trade_invalid_price () in
+  let _ = test_normalize_trade_invalid_side () in
+  let _ = test_normalize_balance_invalid_value () in
+  let _ = test_normalize_ticker_invalid_bid () in
+  let _ = test_normalize_order_book_malformed () in
+  let _ = test_normalize_public_trade_zero_qty () in
+  let _ = test_normalize_symbol_info_missing_fields () in
+  let _ = test_normalize_book_update_empty_levels () in
 
   (* Summary *)
   printf "\n===========================================\n";

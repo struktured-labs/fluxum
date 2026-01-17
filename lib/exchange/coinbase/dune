@@ -1,7 +1,7 @@
 (library
  (name coinbase)
  (public_name fluxum.coinbase)
- (modules cfg rest ws order_book market_data signature fluxum_adapter coinbase)
+ (modules cfg rest ws order_book market_data signature ledger session fluxum_adapter coinbase)
  (libraries core async fluxum exchange_common yojson uri cohttp-async websocket_curl digestif base64)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))
