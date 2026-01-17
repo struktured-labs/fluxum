@@ -19,7 +19,6 @@
   (async (>= v0.17.0))
   (cohttp (>= 6.0.0))
   (cohttp-async (>= 6.0.0))
-  (cohttp_async_websocket (>= v0.17.0))
   (yojson (>= 2.2.0))
   (ppx_jane (>= v0.17.0))
   (ppx_deriving_yojson (>= 3.9.0))

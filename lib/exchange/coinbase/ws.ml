@@ -253,52 +253,10 @@ let parse_message (msg : string) : Message.t =
       | _ -> Message.Unknown msg
   with _ -> Message.Unknown msg
 
-(* ============================================================ *)
-(* WebSocket Client *)
-(* ============================================================ *)
-
-type t = {
-  uri : Uri.t;
-  reader : string Pipe.Reader.t;
-  writer : string Pipe.Writer.t;
-}
-
-let connect ?(url = Endpoint.advanced_trade) ?(streams = []) () : t Deferred.Or_error.t =
-  let uri = Uri.of_string url in
-  Deferred.Or_error.try_with (fun () ->
-    let headers = Cohttp.Header.init () in
-    Cohttp_async_websocket.Client.create ~headers uri
-    >>= fun conn_result ->
-    (match conn_result with
-     | Ok (_response, ws) -> return ws
-     | Error err ->
-       eprintf "Coinbase WebSocket connection error: %s\n" (Error.to_string_hum err);
-       Error.raise err)
-    >>= fun ws ->
-    let reader, writer = Websocket.pipes ws in
-
-    (* Subscribe to requested streams *)
-    (match List.is_empty streams with
-     | true -> Deferred.unit
-     | false ->
-       let msg = Stream.to_subscribe_message streams in
-       let msg_str = Yojson.Safe.to_string msg in
-       Pipe.write_if_open writer msg_str)
-    >>| fun () ->
-    { uri; reader; writer }
-  )
-
-let messages t = t.reader
-
-let subscribe t streams =
-  let msg = Stream.to_subscribe_message streams in
-  let msg_str = Yojson.Safe.to_string msg in
-  Pipe.write_if_open t.writer msg_str
-
-let unsubscribe t streams =
-  let msg = Stream.to_unsubscribe_message streams in
-  let msg_str = Yojson.Safe.to_string msg in
-  Pipe.write_if_open t.writer msg_str
-
-let close t =
-  Pipe.close t.writer
+(* NOTE: The old cohttp_async_websocket-based WebSocket client has been removed.
+   Use Market_data module instead, which uses websocket_curl and provides:
+   - connect: connect to WebSocket
+   - subscribe/unsubscribe: manage subscriptions
+   - messages: receive parsed messages
+   - close: close connection
+*)

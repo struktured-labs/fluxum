@@ -2,6 +2,6 @@
  (name bitrue)
  (public_name fluxum.bitrue)
  (modules cfg rest ws market_data_curl order_book fluxum_adapter bitrue)
- (libraries core async fluxum exchange_common yojson uri cohttp-async cohttp_async_websocket websocket_curl digestif)
+ (libraries core async fluxum exchange_common yojson uri cohttp-async websocket_curl digestif)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))

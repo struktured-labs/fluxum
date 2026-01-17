@@ -153,7 +153,10 @@ module Impl (Channel : CHANNEL) :
         Nonce.Request.(make ~nonce ~request:path ~payload () >>| to_yojson)
         >>| fun s -> Yojson.Safe.to_string s |> Option.some
     in
-    let headers =
+    let _headers =
+      (* TODO: websocket_curl doesn't support custom headers yet.
+         This means authenticated WebSocket connections will fail.
+         Need to extend websocket_curl or use a different approach. *)
       ( match Channel.authentication with
       | `Private ->
         Option.map
@@ -162,23 +165,41 @@ module Impl (Channel : CHANNEL) :
       | `Public -> None )
       |> Option.value ~default:(Cohttp.Header.init ())
     in
-    Cohttp_async_websocket.Client.create ~headers uri >>= fun x ->
-    Or_error.ok_exn x |> return >>= fun (_response, ws) ->
-    let r, _w = Websocket.pipes ws in
-    Log.Global.flushed () >>| fun () ->
-    let pipe =
-      Pipe.map r ~f:(fun s ->
-          Log.Global.debug "json of event: %s" s;
-          ( try `Ok (Yojson.Safe.from_string s) with
-          | Yojson.Json_error e -> `Json_parse_error e )
-          |> function
-          | #Error.t as e -> e
-          | `Ok json -> (
-            match Channel.response_of_yojson json with
-            | Ok response -> `Ok response
-            | Error e -> `Channel_parse_error e ) )
-    in
-    pipe
+    let url = Uri.to_string uri in
+    let%bind ws_result = Websocket_curl.connect ~url in
+    match ws_result with
+    | Error _err ->
+      (* Return a pipe with a single error *)
+      return (Pipe.of_list [`Json_parse_error "WebSocket connection failed"])
+    | Ok ws ->
+      let r, w = Pipe.create () in
+      (* Background task to receive messages *)
+      don't_wait_for (
+        let rec receive_loop () =
+          let%bind msg_opt = Websocket_curl.receive ws in
+          match msg_opt with
+          | None ->
+            (* Connection closed *)
+            Pipe.close w;
+            return ()
+          | Some s ->
+            let parsed_msg =
+              Log.Global.debug "json of event: %s" s;
+              ( try `Ok (Yojson.Safe.from_string s) with
+              | Yojson.Json_error e -> `Json_parse_error e )
+              |> function
+              | #Error.t as e -> e
+              | `Ok json -> (
+                match Channel.response_of_yojson json with
+                | Ok response -> `Ok response
+                | Error e -> `Channel_parse_error e )
+            in
+            let%bind () = Pipe.write w parsed_msg in
+            receive_loop ()
+        in
+        receive_loop ()
+      );
+      return r
 
   let command =
     let spec : (_, _) Command.Spec.t =

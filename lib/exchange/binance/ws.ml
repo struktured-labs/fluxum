@@ -114,12 +114,7 @@ module Message = struct
     | Unknown msg -> Sexp.List [Sexp.Atom "Unknown"; Sexp.Atom msg]
 end
 
-(** WebSocket client *)
-type t = {
-  uri: Uri.t;
-  messages: string Pipe.Reader.t;
-}
-
+(** Parse a WebSocket message into structured Message.t *)
 let parse_message (msg : string) : Message.t =
   try
     let json = Yojson.Safe.from_string msg in
@@ -147,26 +142,5 @@ let parse_message (msg : string) : Message.t =
        | Error _ -> Message.Unknown msg)
   with _ -> Message.Unknown msg
 
-let connect ?(url = Endpoint.spot_stream) ~streams () : t Deferred.Or_error.t =
-  let stream_names = List.map streams ~f:Stream.to_stream_name in
-  let uri =
-    match List.length stream_names = 1 with
-    | true -> Uri.of_string (sprintf "%s/ws/%s" url (List.hd_exn stream_names))
-    | false -> Uri.of_string (sprintf "%s/stream?streams=%s" url (String.concat ~sep:"/" stream_names))
-  in
-
-  Deferred.Or_error.try_with (fun () ->
-    let headers = Cohttp.Header.init () in
-    Cohttp_async_websocket.Client.create ~headers uri
-    >>= fun conn_result ->
-    (match conn_result with
-    | Ok (_response, ws) -> return ws
-    | Error err ->
-      eprintf "Binance WebSocket connection error: %s\n" (Error.to_string_hum err);
-      Error.raise err)
-    >>= fun ws ->
-    let reader, _writer = Websocket.pipes ws in
-    return { uri; messages = reader }
-  )
-
-let messages t = t.messages
+(* NOTE: The old cohttp_async_websocket-based connect function has been removed.
+   Use Market_data.connect instead, which uses websocket_curl. *)
