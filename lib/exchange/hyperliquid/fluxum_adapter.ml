@@ -304,10 +304,24 @@ module Adapter = struct
               (* Split into separate updates for bids and asks *)
               (match book.levels with
                | [bids; asks] ->
-                 let bid_levels = List.map bids ~f:(fun level ->
-                   (Float.of_string level.Ws.Message.px, Float.of_string level.sz)) in
-                 let ask_levels = List.map asks ~f:(fun level ->
-                   (Float.of_string level.Ws.Message.px, Float.of_string level.sz)) in
+                 let parse_book_level (lvl : Ws.Message.book_level) : (float * float, string) Result.t =
+                   let open Result.Let_syntax in
+                   let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string lvl.Ws.Message.px in
+                   let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string lvl.sz in
+                   Ok (price, qty)
+                 in
+                 let bid_levels = List.filter_map bids ~f:(fun lvl ->
+                   match parse_book_level lvl with
+                   | Ok (price, qty) -> Some (price, qty)
+                   | Error err ->
+                     Log.Global.error "Hyperliquid WS: Failed to parse bid level: %s" err;
+                     None) in
+                 let ask_levels = List.filter_map asks ~f:(fun lvl ->
+                   match parse_book_level lvl with
+                   | Ok (price, qty) -> Some (price, qty)
+                   | Error err ->
+                     Log.Global.error "Hyperliquid WS: Failed to parse ask level: %s" err;
+                     None) in
                  let bid_update = { Native.Book.coin = book.coin; side = `Bid; levels = bid_levels; time = book.time } in
                  let ask_update = { Native.Book.coin = book.coin; side = `Ask; levels = ask_levels; time = book.time } in
                  Pipe.write writer bid_update >>= fun () ->
@@ -350,54 +364,47 @@ module Adapter = struct
       Types.Order_status.New
 
     let order_from_status (o : Native.Order.status) : (Types.Order.t, string) Result.t =
-      try
-        Ok { venue = Venue.t
-        ; id = Int64.to_string o.oid
-        ; symbol = o.coin
-        ; side = side_of_string o.side
-        ; kind = Types.Order_kind.Limit (Float.of_string o.limitPx)
-        ; qty = Float.of_string o.sz
-        ; filled = 0.  (* Open orders have no filled qty *)
-        ; status = Types.Order_status.New
-        ; created_at = Some (time_of_ms o.timestamp)
-        ; updated_at = Some (time_of_ms o.timestamp)
-        }
-      with
-      | Failure msg ->
-        Error (sprintf "Order conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Order unexpected error: %s" (Exn.to_string exn))
+      let open Result.Let_syntax in
+      let%bind limit_price = Fluxum.Normalize_common.Float_conv.price_of_string o.limitPx in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string o.sz in
+      Ok ({ venue = Venue.t
+      ; id = Int64.to_string o.oid
+      ; symbol = o.coin
+      ; side = side_of_string o.side
+      ; kind = Types.Order_kind.Limit limit_price
+      ; qty
+      ; filled = 0.  (* Open orders have no filled qty *)
+      ; status = Types.Order_status.New
+      ; created_at = Some (time_of_ms o.timestamp)
+      ; updated_at = Some (time_of_ms o.timestamp)
+      } : Types.Order.t)
 
     let trade (f : Native.Trade.t) : (Types.Trade.t, string) Result.t =
-      try
-        Ok { venue = Venue.t
-        ; symbol = f.coin
-        ; side = side_of_string f.side
-        ; price = Float.of_string f.px
-        ; qty = Float.of_string f.sz
-        ; fee = Some (Float.of_string f.fee)
-        ; trade_id = Some (Int64.to_string f.tid)
-        ; ts = Some (time_of_ms f.time)
-        }
-      with
-      | Failure msg ->
-        Error (sprintf "Trade conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
+      let open Result.Let_syntax in
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string f.px in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string f.sz in
+      let%bind fee = Fluxum.Normalize_common.Float_conv.qty_of_string f.fee in
+      Ok ({ venue = Venue.t
+      ; symbol = f.coin
+      ; side = side_of_string f.side
+      ; price
+      ; qty
+      ; fee = Some fee
+      ; trade_id = Some (Int64.to_string f.tid)
+      ; ts = Some (time_of_ms f.time)
+      } : Types.Trade.t)
 
     let balance (state : Native.Balance.t) : (Types.Balance.t, string) Result.t =
-      try
-        Ok { venue = Venue.t
-        ; currency = "USD"  (* Hyperliquid uses USD-settled perps *)
-        ; total = Float.of_string state.marginSummary.accountValue
-        ; available = Float.of_string state.withdrawable
-        ; locked = Float.of_string state.marginSummary.totalMarginUsed
-        }
-      with
-      | Failure msg ->
-        Error (sprintf "Balance conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Balance unexpected error: %s" (Exn.to_string exn))
+      let open Result.Let_syntax in
+      let%bind total = Fluxum.Normalize_common.Float_conv.amount_of_string state.marginSummary.accountValue in
+      let%bind available = Fluxum.Normalize_common.Float_conv.amount_of_string state.withdrawable in
+      let%bind locked = Fluxum.Normalize_common.Float_conv.amount_of_string state.marginSummary.totalMarginUsed in
+      Ok ({ venue = Venue.t
+      ; currency = "USD"  (* Hyperliquid uses USD-settled perps *)
+      ; total
+      ; available
+      ; locked
+      } : Types.Balance.t)
 
     let book_update (u : Native.Book.update) : Types.Book_update.t =
       let side = match u.side with
@@ -430,67 +437,63 @@ module Adapter = struct
       }
 
     let ticker ((coin, ctx) : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
-      try
-        Ok { venue = Venue.t
-        ; symbol = coin
-        ; last_price = Float.of_string ctx.markPx
-        ; bid_price = Float.of_string ctx.markPx  (* Use mark price as approx *)
-        ; ask_price = Float.of_string ctx.markPx
-        ; high_24h = Float.of_string ctx.prevDayPx  (* Best approx available *)
-        ; low_24h = Float.of_string ctx.prevDayPx
-        ; volume_24h = Float.of_string ctx.dayNtlVlm
-        ; quote_volume = None
-        ; price_change = None
-        ; price_change_pct = None
-        ; ts = Some (Time_float_unix.now ())
-        }
-      with
-      | Failure msg ->
-        Error (sprintf "Ticker conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Ticker unexpected error: %s" (Exn.to_string exn))
+      let open Result.Let_syntax in
+      let%bind mark_px = Fluxum.Normalize_common.Float_conv.price_of_string ctx.markPx in
+      let%bind prev_day_px = Fluxum.Normalize_common.Float_conv.price_of_string ctx.prevDayPx in
+      let%bind volume_24h = Fluxum.Normalize_common.Float_conv.qty_of_string ctx.dayNtlVlm in
+      Ok ({ venue = Venue.t
+      ; symbol = coin
+      ; last_price = mark_px
+      ; bid_price = mark_px  (* Use mark price as approx *)
+      ; ask_price = mark_px
+      ; high_24h = prev_day_px  (* Best approx available *)
+      ; low_24h = prev_day_px
+      ; volume_24h
+      ; quote_volume = None
+      ; price_change = None
+      ; price_change_pct = None
+      ; ts = Some (Time_float_unix.now ())
+      } : Types.Ticker.t)
 
     let order_book (book : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
-      try
-        let parse_levels (levels : Rest.Types.level list) =
-          List.map levels ~f:(fun (level : Rest.Types.level) ->
-            { Types.Order_book.Price_level.
-              price = Float.of_string level.px
-            ; volume = Float.of_string level.sz
-            })
-        in
-        let bid_levels, ask_levels = match book.levels with
-          | [bid_list; ask_list] -> (parse_levels bid_list, parse_levels ask_list)
-          | _ -> ([], [])
-        in
-        Ok { venue = Venue.t
-        ; symbol = book.coin
-        ; bids = bid_levels
-        ; asks = ask_levels
-        ; ts = Some (time_of_ms book.time)
-        ; epoch = 0  (* No sequence number from Hyperliquid *)
-        }
-      with
-      | Failure msg ->
-        Error (sprintf "Order book conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Order book unexpected error: %s" (Exn.to_string exn))
+      let open Result.Let_syntax in
+      let parse_level (level : Rest.Types.level) : (Types.Order_book.Price_level.t, string) Result.t =
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.px in
+        let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string level.sz in
+        Ok { Types.Order_book.Price_level.price; volume }
+      in
+      let parse_levels (levels : Rest.Types.level list) : (Types.Order_book.Price_level.t list, string) Result.t =
+        levels
+        |> List.map ~f:parse_level
+        |> Fluxum.Normalize_common.Result_util.transpose
+      in
+      let%bind (bid_levels, ask_levels) = match book.levels with
+        | [bid_list; ask_list] ->
+          let%bind bids = parse_levels bid_list in
+          let%bind asks = parse_levels ask_list in
+          Ok (bids, asks)
+        | _ -> Ok ([], [])
+      in
+      Ok ({ venue = Venue.t
+      ; symbol = book.coin
+      ; bids = bid_levels
+      ; asks = ask_levels
+      ; ts = Some (time_of_ms book.time)
+      ; epoch = 0  (* No sequence number from Hyperliquid *)
+      } : Types.Order_book.t)
 
     let public_trade (t : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
-      try
-        Ok { venue = Venue.t
-        ; symbol = t.coin
-        ; price = Float.of_string t.px
-        ; qty = Float.of_string t.sz
-        ; side = Some (side_of_string t.side)
-        ; trade_id = Some (Int64.to_string t.tid)
-        ; ts = Some (time_of_ms t.time)
-        }
-      with
-      | Failure msg ->
-        Error (sprintf "Public trade conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Public trade unexpected error: %s" (Exn.to_string exn))
+      let open Result.Let_syntax in
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string t.px in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string t.sz in
+      Ok ({ venue = Venue.t
+      ; symbol = t.coin
+      ; price
+      ; qty
+      ; side = Some (side_of_string t.side)
+      ; trade_id = Some (Int64.to_string t.tid)
+      ; ts = Some (time_of_ms t.time)
+      } : Types.Public_trade.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with
