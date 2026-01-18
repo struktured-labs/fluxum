@@ -321,3 +321,208 @@ let account cfg : (Account.response, [> Error.t ]) result Deferred.t =
     match Account.response_of_yojson json with
     | Error e -> Error (`Json_parse e)
     | Ok account -> Ok account
+
+(* ============================================================ *)
+(* Order Endpoints *)
+(* ============================================================ *)
+
+module Order = struct
+  type side = [ `BUY | `SELL ]
+  let sexp_of_side = function
+    | `BUY -> Sexp.Atom "BUY"
+    | `SELL -> Sexp.Atom "SELL"
+  let side_to_string = function
+    | `BUY -> "BUY"
+    | `SELL -> "SELL"
+
+  type order_type = [ `LIMIT | `MARKET | `LIMIT_MAKER ]
+  let sexp_of_order_type = function
+    | `LIMIT -> Sexp.Atom "LIMIT"
+    | `MARKET -> Sexp.Atom "MARKET"
+    | `LIMIT_MAKER -> Sexp.Atom "LIMIT_MAKER"
+  let order_type_to_string = function
+    | `LIMIT -> "LIMIT"
+    | `MARKET -> "MARKET"
+    | `LIMIT_MAKER -> "LIMIT_MAKER"
+
+  type time_in_force = [ `GTC | `IOC | `FOK ]
+  let sexp_of_time_in_force = function
+    | `GTC -> Sexp.Atom "GTC"
+    | `IOC -> Sexp.Atom "IOC"
+    | `FOK -> Sexp.Atom "FOK"
+  let time_in_force_to_string = function
+    | `GTC -> "GTC"
+    | `IOC -> "IOC"
+    | `FOK -> "FOK"
+
+  type new_order_request = {
+    symbol: string;
+    side: side;
+    order_type: order_type;
+    quantity: string;
+    price: string option;
+    time_in_force: time_in_force option;
+    new_client_order_id: string option;
+  }
+
+  type new_order_response = {
+    symbol: string;
+    orderId: string;
+    clientOrderId: string option; [@default None]
+    transactTime: int64;
+    price: string;
+    origQty: string;
+    executedQty: string;
+    status: string;
+    type_: string; [@key "type"]
+    side: string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type order_status_response = {
+    symbol: string;
+    orderId: string;
+    clientOrderId: string option; [@default None]
+    price: string;
+    origQty: string;
+    executedQty: string;
+    status: string;
+    type_: string; [@key "type"]
+    side: string;
+    time: int64;
+    updateTime: int64;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type cancel_response = {
+    symbol: string;
+    orderId: string;
+    clientOrderId: string option; [@default None]
+    status: string;
+  } [@@deriving yojson { strict = false }, sexp]
+end
+
+(** Make authenticated POST request *)
+let post_authenticated ~cfg ~path ~params : (Yojson.Safe.t, [> Error.t ]) result Deferred.t =
+  let module Cfg = (val cfg : Cfg.S) in
+  let timestamp = current_timestamp () in
+  let params_with_ts = params @ [("timestamp", timestamp)] in
+  let query_string = build_query_string params_with_ts in
+  let signature = hmac_sha256 ~secret:Cfg.api_secret ~message:query_string in
+  let final_params = params_with_ts @ [("signature", signature)] in
+  let query_string_final = build_query_string final_params in
+  let uri = Uri.of_string (sprintf "%s%s?%s" Cfg.rest_url path query_string_final) in
+  let headers = Cohttp.Header.of_list
+    [ ("X-MBX-APIKEY", Cfg.api_key)
+    ; ("Content-Type", "application/x-www-form-urlencoded")
+    ]
+  in
+  Monitor.try_with (fun () ->
+    Cohttp_async.Client.post ~headers uri
+    >>= fun (_response, body) ->
+    Cohttp_async.Body.to_string body
+  )
+  >>| function
+  | Error exn ->
+    Error (`Http (0, Exn.to_string exn))
+  | Ok body_str ->
+    match Yojson.Safe.from_string body_str with
+    | exception _ -> Error (`Json_parse body_str)
+    | json -> Ok json
+
+(** Make authenticated DELETE request *)
+let delete_authenticated ~cfg ~path ~params : (Yojson.Safe.t, [> Error.t ]) result Deferred.t =
+  let module Cfg = (val cfg : Cfg.S) in
+  let timestamp = current_timestamp () in
+  let params_with_ts = params @ [("timestamp", timestamp)] in
+  let query_string = build_query_string params_with_ts in
+  let signature = hmac_sha256 ~secret:Cfg.api_secret ~message:query_string in
+  let final_params = params_with_ts @ [("signature", signature)] in
+  let query_string_final = build_query_string final_params in
+  let uri = Uri.of_string (sprintf "%s%s?%s" Cfg.rest_url path query_string_final) in
+  let headers = Cohttp.Header.of_list
+    [ ("X-MBX-APIKEY", Cfg.api_key)
+    ; ("Content-Type", "application/x-www-form-urlencoded")
+    ]
+  in
+  Monitor.try_with (fun () ->
+    Cohttp_async.Client.delete ~headers uri
+    >>= fun (_response, body) ->
+    Cohttp_async.Body.to_string body
+  )
+  >>| function
+  | Error exn ->
+    Error (`Http (0, Exn.to_string exn))
+  | Ok body_str ->
+    match Yojson.Safe.from_string body_str with
+    | exception _ -> Error (`Json_parse body_str)
+    | json -> Ok json
+
+(** Place new order *)
+let new_order cfg (req : Order.new_order_request) : (Order.new_order_response, [> Error.t ]) result Deferred.t =
+  let params = [
+    ("symbol", req.symbol);
+    ("side", Order.side_to_string req.side);
+    ("type", Order.order_type_to_string req.order_type);
+    ("quantity", req.quantity);
+  ] in
+  let params = match req.price with
+    | Some p -> params @ [("price", p)]
+    | None -> params
+  in
+  let params = match req.time_in_force with
+    | Some tif -> params @ [("timeInForce", Order.time_in_force_to_string tif)]
+    | None -> params
+  in
+  let params = match req.new_client_order_id with
+    | Some id -> params @ [("newClientOrderId", id)]
+    | None -> params
+  in
+  post_authenticated ~cfg ~path:"/api/v1/order" ~params >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Order.new_order_response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok response -> Ok response
+
+(** Query order status *)
+let query_order cfg ~symbol ~order_id : (Order.order_status_response, [> Error.t ]) result Deferred.t =
+  let params = [
+    ("symbol", symbol);
+    ("orderId", order_id);
+  ] in
+  get_authenticated ~cfg ~path:"/api/v1/order" ~params >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Order.order_status_response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok response -> Ok response
+
+(** Cancel order *)
+let cancel_order cfg ~symbol ~order_id : (Order.cancel_response, [> Error.t ]) result Deferred.t =
+  let params = [
+    ("symbol", symbol);
+    ("orderId", order_id);
+  ] in
+  delete_authenticated ~cfg ~path:"/api/v1/order" ~params >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Order.cancel_response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok response -> Ok response
+
+(** Get open orders *)
+let open_orders cfg ~symbol : (Order.order_status_response list, [> Error.t ]) result Deferred.t =
+  let params = [("symbol", symbol)] in
+  get_authenticated ~cfg ~path:"/api/v1/openOrders" ~params >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match json with
+    | `List orders ->
+      let rec parse acc = function
+        | [] -> Ok (List.rev acc)
+        | o :: rest ->
+          match Order.order_status_response_of_yojson o with
+          | Error e -> Error (`Json_parse e)
+          | Ok order -> parse (order :: acc) rest
+      in
+      parse [] orders
+    | _ -> Error (`Json_parse "Expected list for open orders")
