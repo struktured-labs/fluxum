@@ -296,32 +296,40 @@ module Entry = struct
           Pipe.write writer !entry_ref
         | `Trade trade ->
           (* Parse Binance trade: isBuyer determines side *)
-          let side = match trade.V3.My_trades.isBuyer with
-            | true -> Fluxum.Types.Side.Buy
-            | false -> Fluxum.Types.Side.Sell
-          in
-          let price = Float.of_string trade.V3.My_trades.price in
-          let qty = Float.of_string trade.V3.My_trades.qty in
+          (match (
+            let open Result.Let_syntax in
+            let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string trade.V3.My_trades.price in
+            let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string trade.V3.My_trades.qty in
+            Ok (price, qty)
+          ) with
+          | Error err ->
+            Log.Global.error "Binance ledger: Failed to parse trade price/qty: %s" err;
+            Deferred.unit
+          | Ok (price, qty) ->
+            let side = match trade.V3.My_trades.isBuyer with
+              | true -> Fluxum.Types.Side.Buy
+              | false -> Fluxum.Types.Side.Sell
+            in
 
-          (* Calculate fee in USD (quote currency)
-             Commission is in commissionAsset which could be base or quote *)
-          let fee_usd =
-            try
-              let commission = Float.of_string trade.V3.My_trades.commission in
-              (* Simplified: assume commission is in quote currency (USDT)
-                 For more accuracy, need to check commissionAsset and convert *)
-              match String.is_suffix trade.V3.My_trades.commissionAsset ~suffix:"USD" ||
-                    String.is_suffix trade.V3.My_trades.commissionAsset ~suffix:"USDT" with
-              | true -> commission
-              | false -> commission *. price  (* Convert base asset fee to quote *)
-            with _ -> 0.
-          in
+            (* Calculate fee in USD (quote currency)
+               Commission is in commissionAsset which could be base or quote *)
+            let fee_usd =
+              match Fluxum.Normalize_common.Float_conv.qty_of_string trade.V3.My_trades.commission with
+              | Error _ -> 0.
+              | Ok commission ->
+                (* Simplified: assume commission is in quote currency (USDT)
+                   For more accuracy, need to check commissionAsset and convert *)
+                match String.is_suffix trade.V3.My_trades.commissionAsset ~suffix:"USD" ||
+                      String.is_suffix trade.V3.My_trades.commissionAsset ~suffix:"USDT" with
+                | true -> commission
+                | false -> commission *. price  (* Convert base asset fee to quote *)
+            in
 
-          let timestamp = Time_float_unix.of_span_since_epoch
-            (Time_float_unix.Span.of_ms (Int64.to_float trade.V3.My_trades.time))
-          in
-          entry_ref := on_trade !entry_ref ~timestamp ~price ~side ~qty ~fee_usd;
-          Pipe.write writer !entry_ref
+            let timestamp = Time_float_unix.of_span_since_epoch
+              (Time_float_unix.Span.of_ms (Int64.to_float trade.V3.My_trades.time))
+            in
+            entry_ref := on_trade !entry_ref ~timestamp ~price ~side ~qty ~fee_usd;
+            Pipe.write writer !entry_ref)
       )
       >>| fun () ->
       Pipe.close writer
@@ -336,12 +344,17 @@ type t = Entry.t Fluxum.Types.Symbol.Map.t [@@deriving sexp, compare, equal]
 (** Bootstrap from account balances *)
 let from_balances ?(notional_currency = "USDT") (balances : V3.Account.balance list) : t =
   List.fold balances ~init:Fluxum.Types.Symbol.Map.empty ~f:(fun acc balance ->
-    let position = Float.of_string balance.V3.Account.free in
-    (* Only create entries for non-zero positions *)
-    match Float.(position > 0.) with
-    | false -> acc
-    | true ->
-      (* Map asset to trading pair with notional currency
+    match Fluxum.Normalize_common.Float_conv.amount_of_string balance.V3.Account.free with
+    | Error err ->
+      Log.Global.error "Binance ledger: Failed to parse balance for %s: %s"
+        balance.V3.Account.asset err;
+      acc
+    | Ok position ->
+      (* Only create entries for non-zero positions *)
+      match Float.(position > 0.) with
+      | false -> acc
+      | true ->
+        (* Map asset to trading pair with notional currency
          For Binance, we construct symbol like "BTCUSDT" *)
       let asset_upper = String.uppercase balance.V3.Account.asset in
       let notional_str = String.uppercase notional_currency in
@@ -366,49 +379,58 @@ let from_trades
     ~init:Fluxum.Types.Symbol.Map.empty
     ~f:(fun acc trade ->
       let symbol = trade.V3.My_trades.symbol in
-      let side = match trade.V3.My_trades.isBuyer with
-        | true -> Fluxum.Types.Side.Buy
-        | false -> Fluxum.Types.Side.Sell
-      in
-      let price = Float.of_string trade.V3.My_trades.price in
-      let qty = Float.of_string trade.V3.My_trades.qty in
-      let timestamp = Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Int64.to_float trade.V3.My_trades.time))
-      in
+      (* Parse price and qty *)
+      match (
+        let open Result.Let_syntax in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string trade.V3.My_trades.price in
+        let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string trade.V3.My_trades.qty in
+        Ok (price, qty)
+      ) with
+      | Error err ->
+        Log.Global.error "Binance ledger: Failed to parse trade for %s: %s" symbol err;
+        acc
+      | Ok (price, qty) ->
+        let side = match trade.V3.My_trades.isBuyer with
+          | true -> Fluxum.Types.Side.Buy
+          | false -> Fluxum.Types.Side.Sell
+        in
+        let timestamp = Time_float_unix.of_span_since_epoch
+          (Time_float_unix.Span.of_ms (Int64.to_float trade.V3.My_trades.time))
+        in
 
-      (* Calculate fee *)
-      let fee_usd =
-        try
-          let commission = Float.of_string trade.V3.My_trades.commission in
-          match String.is_suffix trade.V3.My_trades.commissionAsset ~suffix:"USD" ||
-                String.is_suffix trade.V3.My_trades.commissionAsset ~suffix:"USDT" with
-          | true -> commission
-          | false -> commission *. price
-        with _ -> 0.
-      in
+        (* Calculate fee *)
+        let fee_usd =
+          match Fluxum.Normalize_common.Float_conv.qty_of_string trade.V3.My_trades.commission with
+          | Error _ -> 0.
+          | Ok commission ->
+            match String.is_suffix trade.V3.My_trades.commissionAsset ~suffix:"USD" ||
+                  String.is_suffix trade.V3.My_trades.commissionAsset ~suffix:"USDT" with
+            | true -> commission
+            | false -> commission *. price
+        in
 
-      let avg_trade_price = match avg_trade_prices with
-        | Some prices -> Map.find prices symbol
-        | None -> None
-      in
+        let avg_trade_price = match avg_trade_prices with
+          | Some prices -> Map.find prices symbol
+          | None -> None
+        in
 
-      (* Get or create entry with pipe *)
-      let entry, reader, writer = match Map.find acc symbol with
-        | Some (e, r, w) -> (e, r, w)
-        | None ->
-          let init_entry = match Map.find init symbol with
-            | Some e -> e
-            | None -> Entry.create ~symbol ()
-          in
-          let r, w = Pipe.create () in
-          (init_entry, r, w)
-      in
+        (* Get or create entry with pipe *)
+        let entry, reader, writer = match Map.find acc symbol with
+          | Some (e, r, w) -> (e, r, w)
+          | None ->
+            let init_entry = match Map.find init symbol with
+              | Some e -> e
+              | None -> Entry.create ~symbol ()
+            in
+            let r, w = Pipe.create () in
+            (init_entry, r, w)
+        in
 
-      (* Update entry with trade *)
-      let updated_entry = Entry.on_trade entry ~timestamp ~price ~side ~qty ~fee_usd ?avg_trade_price in
+        (* Update entry with trade *)
+        let updated_entry = Entry.on_trade entry ~timestamp ~price ~side ~qty ~fee_usd ?avg_trade_price in
 
-      (* Write to pipe *)
-      Pipe.write_without_pushback writer updated_entry;
+        (* Write to pipe *)
+        Pipe.write_without_pushback writer updated_entry;
 
       (* Update map *)
       Map.set acc ~key:symbol ~data:(updated_entry, reader, writer)
@@ -478,23 +500,30 @@ let on_trade
 (** Order event updates - Parse Binance trade fills *)
 let on_order_events t (fills : V3.New_order.fill list) ~symbol:_ =
   List.fold fills ~init:t ~f:(fun acc fill ->
-    let price = Float.of_string fill.V3.New_order.price in
-    let qty = Float.of_string fill.V3.New_order.qty in
-    let commission = Float.of_string fill.V3.New_order.commission in
+    match (
+      let open Result.Let_syntax in
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string fill.V3.New_order.price in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string fill.V3.New_order.qty in
+      let%bind commission = Fluxum.Normalize_common.Float_conv.qty_of_string fill.V3.New_order.commission in
+      Ok (price, qty, commission)
+    ) with
+    | Error err ->
+      Log.Global.error "Binance ledger: Failed to parse order fill: %s" err;
+      acc
+    | Ok (price, qty, commission) ->
+      (* Determine side from context (would need full order info)
+         For now, we'll need the caller to provide side *)
+      (* This is a simplified version - real implementation needs order context *)
+      let fee_usd = match String.is_suffix fill.V3.New_order.commissionAsset ~suffix:"USD" ||
+                          String.is_suffix fill.V3.New_order.commissionAsset ~suffix:"USDT" with
+        | true -> commission
+        | false -> commission *. price
+      in
 
-    (* Determine side from context (would need full order info)
-       For now, we'll need the caller to provide side *)
-    (* This is a simplified version - real implementation needs order context *)
-    let fee_usd = match String.is_suffix fill.V3.New_order.commissionAsset ~suffix:"USD" ||
-                        String.is_suffix fill.V3.New_order.commissionAsset ~suffix:"USDT" with
-      | true -> commission
-      | false -> commission *. price
-    in
-
-    (* Can't determine side from fill alone - skip for now *)
-    (* Caller should use on_trade directly with full order info *)
-    ignore (fee_usd, qty, price);
-    acc
+      (* Can't determine side from fill alone - skip for now *)
+      (* Caller should use on_trade directly with full order info *)
+      ignore (fee_usd, qty, price);
+      acc
   )
 
 let on_order_event_response t (_response : V3.New_order.response) =
