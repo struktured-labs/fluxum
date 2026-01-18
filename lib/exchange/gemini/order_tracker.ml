@@ -129,7 +129,10 @@ module T = struct
       match
         event.is_cancelled || (not event.is_live)
         || Option.value_map
-             ~f:(fun r -> Float.equal 0. (Float.of_string r))
+             ~f:(fun r ->
+               match Fluxum.Normalize_common.Float_conv.qty_of_string r with
+               | Ok qty -> Float.equal 0. qty
+               | Error _ -> false)
              event.remaining_amount ~default:false
       with
       | true -> Map.remove t.orders order_id
@@ -145,7 +148,9 @@ module T = struct
     let orders =
       match
         response.is_cancelled || (not response.is_live)
-        || Float.equal 0. (Float.of_string response.remaining_amount)
+        || (match Fluxum.Normalize_common.Float_conv.qty_of_string response.remaining_amount with
+            | Ok qty -> Float.equal 0. qty
+            | Error _ -> false)
       with
       | true -> Map.remove t.orders order_id
       | false ->

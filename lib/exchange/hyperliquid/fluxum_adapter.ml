@@ -431,9 +431,11 @@ module Adapter = struct
       ; min_order_size = 0.0  (* Unknown, using 0 *)
       ; tick_size = None
       ; quote_increment =
-          (* Size decimals determines increment *)
-          Some (Float.of_string (sprintf "0.%s1"
-            (String.make item.szDecimals '0')))
+          (* Size decimals determines increment - programmatically generated, should always be valid *)
+          let decimal_str = sprintf "0.%s1" (String.make item.szDecimals '0') in
+          match Fluxum.Normalize_common.Float_conv.amount_of_string decimal_str with
+          | Ok f -> Some f
+          | Error _ -> None  (* Fallback to None if parsing fails *)
       }
 
     let ticker ((coin, ctx) : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =

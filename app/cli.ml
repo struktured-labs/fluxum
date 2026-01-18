@@ -354,12 +354,18 @@ module Unified = struct
     | "gemini" ->
       gemini_adapter cfg_env >>= fun adapter ->
       Gemini.Fluxum_adapter.Adapter.get_symbols adapter ()
-      >>| Result.map ~f:(List.map ~f:Gemini.Fluxum_adapter.Adapter.Normalize.symbol_info)
+      >>| Result.map ~f:(List.filter_map ~f:(fun s ->
+        match Gemini.Fluxum_adapter.Adapter.Normalize.symbol_info s with
+        | Ok info -> Some info
+        | Error _ -> None))
       >>| Result.map_error ~f:Gemini.Fluxum_adapter.Adapter.Normalize.error
     | "kraken" ->
       kraken_adapter cfg_env ~symbols:[] >>= fun adapter ->
       Kraken.Fluxum_adapter.Adapter.get_symbols adapter ()
-      >>| Result.map ~f:(List.map ~f:Kraken.Fluxum_adapter.Adapter.Normalize.symbol_info)
+      >>| Result.map ~f:(List.filter_map ~f:(fun s ->
+        match Kraken.Fluxum_adapter.Adapter.Normalize.symbol_info s with
+        | Ok info -> Some info
+        | Error _ -> None))
       >>| Result.map_error ~f:Kraken.Fluxum_adapter.Adapter.Normalize.error
     | "mexc" ->
       mexc_adapter ~symbols:[] >>= fun adapter ->

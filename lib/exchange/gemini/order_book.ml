@@ -38,9 +38,16 @@ module Book = struct
       match event with
       | `Auction_open _auction_open -> t
       | `Change { price; side; reason = _; remaining; delta = _ } ->
-        let size = Float.of_string remaining in
-        let price = Float.of_string price in
-        set t ~price ~size ~side
+        (match (
+          let open Result.Let_syntax in
+          let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string remaining in
+          let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price in
+          Ok (size, price)
+        ) with
+        | Ok (size, price) -> set t ~price ~size ~side
+        | Error err ->
+          Log.Global.error "Gemini order_book: Failed to parse Change event: %s" err;
+          t)
       | `Trade _trade -> t
       | `Block_trade _trade -> t
       | `Auction _auction -> t
