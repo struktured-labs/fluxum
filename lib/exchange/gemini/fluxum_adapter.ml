@@ -248,14 +248,16 @@ module Adapter = struct
       Option.map ts ~f:Fn.id
 
     let order_kind (type_ : Common.Order_type.t) (price : Common.Decimal_string.t)
-        (options : Common.Order_execution_option.t list) : Types.Order_kind.t =
+        (options : Common.Order_execution_option.t list) : (Types.Order_kind.t, string) Result.t =
       match type_ with
       | `Exchange_limit ->
-        let p = Float.of_string (Common.Decimal_string.to_string price) in
-        (match List.exists options ~f:(fun o -> Poly.equal o `Maker_or_cancel) with
+        let open Result.Let_syntax in
+        let%bind p = Fluxum.Normalize_common.Float_conv.price_of_string
+          (Common.Decimal_string.to_string price) in
+        Ok (match List.exists options ~f:(fun o -> Poly.equal o `Maker_or_cancel) with
          | true -> Types.Order_kind.Post_only_limit p
          | false -> Types.Order_kind.Limit p)
-      | _ -> Types.Order_kind.Market
+      | _ -> Ok Types.Order_kind.Market
 
     let side (s : Common.Side.t) : Types.Side.t =
       match s with
@@ -266,53 +268,52 @@ module Adapter = struct
       Common.Symbol.Enum_or_string.to_string s
 
     let order_response (r : Native.Order.response) : (Types.Order.t, string) Result.t =
-      try
-        let qty_orig = Float.of_string (Common.Decimal_string.to_string r.original_amount) in
-        let qty_exec = Float.of_string (Common.Decimal_string.to_string r.executed_amount) in
-        let qty_rem = Float.of_string (Common.Decimal_string.to_string r.remaining_amount) in
-        let reason_to_status = function
-          | Some `Invalid_quantity -> Types.Order_status.Rejected "invalid_quantity"
-          | Some `Insufficient_funds -> Types.Order_status.Rejected "insufficient_funds"
-          | Some `Self_cross_prevented -> Types.Order_status.Rejected "self_cross_prevented"
-          | Some `Immediate_or_cancel_would_post -> Types.Order_status.Rejected "ioc_would_post"
-          | None -> Types.Order_status.New
-        in
-        let status : Types.Order_status.t =
-          match r.is_cancelled with
-          | true -> Types.Order_status.Canceled
-          | false ->
-            match r.is_live with
-            | true ->
-              (match Float.(qty_exec = 0.) with
-               | true -> Types.Order_status.New
+      let open Result.Let_syntax in
+      let%bind qty_orig = Fluxum.Normalize_common.Float_conv.qty_of_string
+        (Common.Decimal_string.to_string r.original_amount) in
+      let%bind qty_exec = Fluxum.Normalize_common.Float_conv.qty_of_string
+        (Common.Decimal_string.to_string r.executed_amount) in
+      let%bind qty_rem = Fluxum.Normalize_common.Float_conv.qty_of_string
+        (Common.Decimal_string.to_string r.remaining_amount) in
+      let%bind kind = order_kind r.type_ r.price r.options in
+      let reason_to_status = function
+        | Some `Invalid_quantity -> Types.Order_status.Rejected "invalid_quantity"
+        | Some `Insufficient_funds -> Types.Order_status.Rejected "insufficient_funds"
+        | Some `Self_cross_prevented -> Types.Order_status.Rejected "self_cross_prevented"
+        | Some `Immediate_or_cancel_would_post -> Types.Order_status.Rejected "ioc_would_post"
+        | None -> Types.Order_status.New
+      in
+      let status : Types.Order_status.t =
+        match r.is_cancelled with
+        | true -> Types.Order_status.Canceled
+        | false ->
+          match r.is_live with
+          | true ->
+            (match Float.(qty_exec = 0.) with
+             | true -> Types.Order_status.New
+             | false ->
+               match Float.(qty_exec > 0.) with
+               | true -> Types.Order_status.Partially_filled
                | false ->
-                 match Float.(qty_exec > 0.) with
-                 | true -> Types.Order_status.Partially_filled
-                 | false ->
-                   match Float.(qty_rem = 0.) with
-                   | true -> Types.Order_status.Filled
-                   | false -> reason_to_status r.reason)
-            | false ->
-              match Float.(qty_rem = 0.) with
-              | true -> Types.Order_status.Filled
-              | false -> reason_to_status r.reason
-        in
-        Ok { Types.Order.venue = Venue.t
-        ; id = Common.Int_string.to_string r.order_id
-        ; symbol = symbol_to_string r.symbol
-        ; side = side r.side
-        ; kind = order_kind r.type_ r.price r.options
-        ; qty = qty_orig
-        ; filled = qty_exec
-        ; status
-        ; created_at = time_of_ts_opt (Some r.timestamp)
-        ; updated_at = time_of_ts_opt (Some r.timestamp)
-        }
-      with
-      | Failure msg ->
-        Error (sprintf "Order conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Order unexpected error: %s" (Exn.to_string exn))
+                 match Float.(qty_rem = 0.) with
+                 | true -> Types.Order_status.Filled
+                 | false -> reason_to_status r.reason)
+          | false ->
+            match Float.(qty_rem = 0.) with
+            | true -> Types.Order_status.Filled
+            | false -> reason_to_status r.reason
+      in
+      Ok ({ Types.Order.venue = Venue.t
+      ; id = Common.Int_string.to_string r.order_id
+      ; symbol = symbol_to_string r.symbol
+      ; side = side r.side
+      ; kind
+      ; qty = qty_orig
+      ; filled = qty_exec
+      ; status
+      ; created_at = time_of_ts_opt (Some r.timestamp)
+      ; updated_at = time_of_ts_opt (Some r.timestamp)
+      } : Types.Order.t)
 
     let order_status (r : Native.Order.status) : Types.Order_status.t =
       match order_response r with
@@ -323,53 +324,63 @@ module Adapter = struct
       order_response r
 
     let trade (t : Native.Trade.t) : (Types.Trade.t, string) Result.t =
-      try
-        Ok (match t with
-        | Ws ev ->
-          (match ev.fill with
-           | None ->
-             { venue = Venue.t
-             ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
-             ; side = side ev.side
-             ; price = Option.value_map ev.avg_execution_price ~default:0.0 ~f:(fun d ->
-                 Float.of_string (Common.Decimal_string.to_string d))
-             ; qty = Option.value_map ev.executed_amount ~default:0.0 ~f:(fun d ->
-                 Float.of_string (Common.Decimal_string.to_string d))
-             ; fee = None
-             ; trade_id = None
-             ; ts = time_of_ts_opt (Some ev.timestamp)
-             }
-           | Some f ->
-             let price = Float.of_string (Common.Decimal_string.to_string f.price) in
-             let qty = Float.of_string (Common.Decimal_string.to_string f.amount) in
-             let fee = Float.of_string (Common.Decimal_string.to_string f.fee) in
-             { venue = Venue.t
-             ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
-             ; side = side ev.side
-             ; price
-             ; qty
-             ; fee = Some fee
-             ; trade_id = Some (Common.Int_string.to_string f.trade_id)
-             ; ts = time_of_ts_opt (Some ev.timestamp)
-             })
-        | Rest tr ->
-          let price = Float.of_string (Common.Decimal_string.to_string tr.price) in
-          let qty = Float.of_string (Common.Decimal_string.to_string tr.amount) in
-          let fee = Float.of_string (Common.Decimal_string.to_string tr.fee_amount) in
-          { venue = Venue.t
-          ; symbol = Common.Symbol.Enum_or_string.to_string tr.symbol
-          ; side = side tr.type_
-          ; price
-          ; qty
-          ; fee = Some fee
-          ; trade_id = Some (Common.Int_number.to_string tr.tid)
-          ; ts = Some tr.timestampms
-          })
-      with
-      | Failure msg ->
-        Error (sprintf "Trade conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
+      let open Result.Let_syntax in
+      match t with
+      | Ws ev ->
+        (match ev.fill with
+         | None ->
+           (* Parse optional avg_execution_price and executed_amount *)
+           let price_result = Option.value_map ev.avg_execution_price
+             ~default:(Ok 0.0)
+             ~f:(fun d -> Fluxum.Normalize_common.Float_conv.price_of_string
+               (Common.Decimal_string.to_string d)) in
+           let qty_result = Option.value_map ev.executed_amount
+             ~default:(Ok 0.0)
+             ~f:(fun d -> Fluxum.Normalize_common.Float_conv.qty_of_string
+               (Common.Decimal_string.to_string d)) in
+           let%bind price = price_result in
+           let%bind qty = qty_result in
+           Ok ({ venue = Venue.t
+           ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
+           ; side = side ev.side
+           ; price
+           ; qty
+           ; fee = None
+           ; trade_id = None
+           ; ts = time_of_ts_opt (Some ev.timestamp)
+           } : Types.Trade.t)
+         | Some f ->
+           let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string
+             (Common.Decimal_string.to_string f.price) in
+           let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string
+             (Common.Decimal_string.to_string f.amount) in
+           let%bind fee = Fluxum.Normalize_common.Float_conv.qty_of_string
+             (Common.Decimal_string.to_string f.fee) in
+           Ok ({ venue = Venue.t
+           ; symbol = Common.Symbol.Enum_or_string.to_string ev.symbol
+           ; side = side ev.side
+           ; price
+           ; qty
+           ; fee = Some fee
+           ; trade_id = Some (Common.Int_string.to_string f.trade_id)
+           ; ts = time_of_ts_opt (Some ev.timestamp)
+           } : Types.Trade.t))
+      | Rest tr ->
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string
+          (Common.Decimal_string.to_string tr.price) in
+        let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string
+          (Common.Decimal_string.to_string tr.amount) in
+        let%bind fee = Fluxum.Normalize_common.Float_conv.qty_of_string
+          (Common.Decimal_string.to_string tr.fee_amount) in
+        Ok ({ venue = Venue.t
+        ; symbol = Common.Symbol.Enum_or_string.to_string tr.symbol
+        ; side = side tr.type_
+        ; price
+        ; qty
+        ; fee = Some fee
+        ; trade_id = Some (Common.Int_number.to_string tr.tid)
+        ; ts = Some tr.timestampms
+        } : Types.Trade.t)
 
     let balance (b : Native.Balance.t) : (Types.Balance.t, string) Result.t =
       let open Result.Let_syntax in
@@ -387,14 +398,24 @@ module Adapter = struct
       let ts = time_of_ts_opt ts in
       let levels_of_event = function
         | `Change (c : V1.Market_data.Change_event.t) ->
-          let price = Float.of_string (Common.Decimal_string.to_string c.price) in
-          let qty = Float.of_string (Common.Decimal_string.to_string c.remaining) in
-          let side =
-            match c.side with
-            | `Bid -> Types.Book_update.Side.Bid
-            | `Ask -> Types.Book_update.Side.Ask
-          in
-          Some (side, [{ Types.Book_update.price; qty }])
+          (match (
+            let open Result.Let_syntax in
+            let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string
+              (Common.Decimal_string.to_string c.price) in
+            let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string
+              (Common.Decimal_string.to_string c.remaining) in
+            Ok (price, qty)
+          ) with
+          | Ok (price, qty) ->
+            let side =
+              match c.side with
+              | `Bid -> Types.Book_update.Side.Bid
+              | `Ask -> Types.Book_update.Side.Ask
+            in
+            Some (side, [{ Types.Book_update.price; qty }])
+          | Error err ->
+            Log.Global.error "Gemini: Failed to parse book update level: %s" err;
+            None)
         | `Trade _ -> None
         | `Auction _ | `Auction_open _ | `Block_trade _ -> None
       in
@@ -405,7 +426,7 @@ module Adapter = struct
       match side_levels with
       | Some (side, levels) ->
         { venue = Venue.t
-        ; symbol = "" (* market data update doesn’t include symbol in Update *)
+        ; symbol = "" (* market data update doesn't include symbol in Update *)
         ; side
         ; levels
         ; ts
@@ -420,16 +441,19 @@ module Adapter = struct
         ; is_snapshot = false
         }
 
-    let symbol_info (s : Native.Symbol_info.t) : Types.Symbol_info.t =
-      { venue = Venue.t
+    let symbol_info (s : Native.Symbol_info.t) : (Types.Symbol_info.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind min_order_size = Fluxum.Normalize_common.Float_conv.qty_of_string
+        (Common.Decimal_string.to_string s.min_order_size) in
+      Ok ({ venue = Venue.t
       ; symbol = Common.Symbol.Enum_or_string.to_string s.symbol
       ; base_currency = Common.Currency.Enum_or_string.to_string s.base_currency
       ; quote_currency = Common.Currency.Enum_or_string.to_string s.quote_currency
       ; status = s.status
-      ; min_order_size = Float.of_string (Common.Decimal_string.to_string s.min_order_size)
+      ; min_order_size
       ; tick_size = Some (Common.Decimal_number.to_float s.tick_size)
       ; quote_increment = Some (Common.Decimal_number.to_float s.quote_increment)
-      }
+      } : Types.Symbol_info.t)
 
     let ticker (json : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       try
