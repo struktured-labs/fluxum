@@ -321,8 +321,8 @@ module Adapter = struct
 
     let balance (b : Native.Balance.t) : (Types.Balance.t, string) Result.t =
       let open Result.Let_syntax in
-      let%bind free = Fluxum.Normalize_common.Float_conv.amount_of_string b.free in
-      let%bind locked = Fluxum.Normalize_common.Float_conv.amount_of_string b.locked in
+      let%bind free = Fluxum.Normalize_common.Float_conv.qty_of_string b.free in
+      let%bind locked = Fluxum.Normalize_common.Float_conv.qty_of_string b.locked in
       Ok ({ venue = Venue.t
       ; currency = b.asset
       ; total = free +. locked
