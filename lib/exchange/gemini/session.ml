@@ -249,7 +249,13 @@ module Make (C : Cfg.S) = struct
 
   let min_order_size t symbol =
     let details = symbol_details t symbol in
-    Option.map details ~f:(fun d -> d.min_order_size |> Float.of_string)
+    Option.bind details ~f:(fun d ->
+      match Fluxum.Normalize_common.Float_conv.qty_of_string d.min_order_size with
+      | Ok size -> Some size
+      | Error err ->
+        Log.Global.error "Gemini session: Failed to parse min_order_size for %s: %s"
+          (Symbol.to_string symbol) err;
+        None)
 
   let min_order_size_exn t symbol =
     match min_order_size t symbol with
@@ -415,16 +421,36 @@ module Make (C : Cfg.S) = struct
     Log.Global.info "submit_order[%s]: requested %s" t.session_id
       (New_order_request.sexp_of_t req |> Sexp.to_string_hum);
     let req = match autoformat with
-    | `All ->
-        let formatted_price = format_price t req.symbol (Float.of_string req.price) in
-        let formatted_quantity = format_quantity ~side:req.side t req.symbol (Float.of_string req.amount) in
-        {req with price = formatted_price; amount = formatted_quantity}      
-    | `Price ->
-        let formatted_price = format_price t req.symbol (Float.of_string req.price) in
-        {req with price = formatted_price}
-    | `Quantity -> 
-        let formatted_quantity = format_quantity ~side:req.side t req.symbol (Float.of_string req.amount) in
-        {req with amount = formatted_quantity}
+    | `All -> (
+        match (
+          let open Result.Let_syntax in
+          let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string req.price in
+          let%bind amount = Fluxum.Normalize_common.Float_conv.qty_of_string req.amount in
+          Ok (price, amount)
+        ) with
+        | Ok (price, amount) ->
+          let formatted_price = format_price t req.symbol price in
+          let formatted_quantity = format_quantity ~side:req.side t req.symbol amount in
+          {req with price = formatted_price; amount = formatted_quantity}
+        | Error err ->
+          Log.Global.error "Gemini session: Failed to parse order price/amount: %s" err;
+          req)
+    | `Price -> (
+        match Fluxum.Normalize_common.Float_conv.price_of_string req.price with
+        | Ok price ->
+          let formatted_price = format_price t req.symbol price in
+          {req with price = formatted_price}
+        | Error err ->
+          Log.Global.error "Gemini session: Failed to parse order price: %s" err;
+          req)
+    | `Quantity -> (
+        match Fluxum.Normalize_common.Float_conv.qty_of_string req.amount with
+        | Ok amount ->
+          let formatted_quantity = format_quantity ~side:req.side t req.symbol amount in
+          {req with amount = formatted_quantity}
+        | Error err ->
+          Log.Global.error "Gemini session: Failed to parse order amount: %s" err;
+          req)
     | `None -> req in
     Log.Global.info "submit_order[%s]: formatted %s" t.session_id
       (New_order_request.sexp_of_t req |> Sexp.to_string_hum);

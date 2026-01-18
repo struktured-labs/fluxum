@@ -198,38 +198,51 @@ module T = struct
           let fee_usd =
             match event.fill with
             | Some Order_events.Fill.{ fee; fee_currency; price; _ } -> (
-                try
-                  let fee_amount = Float.of_string fee in
+                let open Result.Let_syntax in
+                match (
+                  let%bind fee_amount = Fluxum.Normalize_common.Float_conv.qty_of_string fee in
                   let base_currency =
                     Symbol.enum_or_string_to_currency event.symbol ~side:`Buy
                   in
                   let quote_currency =
                     Symbol.enum_or_string_to_currency event.symbol ~side:`Sell
                   in
-                  let fee_usd =
+                  let%bind fee_usd =
                     if Currency.Enum_or_string.equal fee_currency quote_currency
-                    then fee_amount
+                    then Ok fee_amount
                     else if Currency.Enum_or_string.equal fee_currency base_currency
-                    then fee_amount *. Float.of_string price
-                    else 0.
+                    then
+                      let%bind price_val = Fluxum.Normalize_common.Float_conv.price_of_string price in
+                      Ok (fee_amount *. price_val)
+                    else Ok 0.
                   in
-                  Some fee_usd
-                with _ -> None )
+                  Ok fee_usd
+                ) with
+                | Ok fee -> Some fee
+                | Error _ -> None )
             | None -> None
           in
           (match event.fill with
            | Some (Order_events.Fill.{amount; price; _}) ->
                let summary = Order_tracker.summary order_tracker in
                let timestamp = event.timestampms in
-               let qty = Float.of_string amount in
-               let price = Float.of_string price in
-               let side = event.side in
-               let fee_usd = Option.value fee_usd ~default:0. in
-               let t =
-                 on_trade t ~timestamp ~side ~price ~qty ~fee_usd
-                 |> fun t -> on_summary t summary
-               in
-               ((t, order_tracker), t)
+               (match (
+                 let open Result.Let_syntax in
+                 let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string amount in
+                 let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price in
+                 Ok (qty, price)
+               ) with
+               | Ok (qty, price) ->
+                 let side = event.side in
+                 let fee_usd = Option.value fee_usd ~default:0. in
+                 let t =
+                   on_trade t ~timestamp ~side ~price ~qty ~fee_usd
+                   |> fun t -> on_summary t summary
+                 in
+                 ((t, order_tracker), t)
+               | Error err ->
+                 Log.Global.error "Gemini ledger: Failed to parse fill qty/price: %s" err;
+                 ((t, order_tracker), t))
            | None ->
                (let summary = Order_tracker.summary order_tracker in
                 on_summary t summary |> fun t ->
@@ -252,19 +265,28 @@ module T = struct
         (trade : Mytrades.trade) =
       let symbol : Symbol.Enum_or_string.t = trade.symbol in
       let update (t, reader, writer) =
-        let price = Float.of_string trade.price in
-        let side = trade.type_ in
-        let qty = Float.of_string trade.amount in
-        let avg_trade_price =
-          Option.value ~default:Symbol.Enum_or_string.Map.empty avg_trade_prices
-          |> fun avg_trade_prices -> Map.find avg_trade_prices symbol
-        in
-        let timestamp = trade.timestamp in
-        let t' = on_trade ?avg_trade_price t ~timestamp ~price ~side ~qty in
-        ( t',
-          reader,
-          ( Pipe.write_without_pushback writer t';
-            writer ) )
+        match (
+          let open Result.Let_syntax in
+          let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string trade.price in
+          let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string trade.amount in
+          Ok (price, qty)
+        ) with
+        | Ok (price, qty) ->
+          let side = trade.type_ in
+          let avg_trade_price =
+            Option.value ~default:Symbol.Enum_or_string.Map.empty avg_trade_prices
+            |> fun avg_trade_prices -> Map.find avg_trade_prices symbol
+          in
+          let timestamp = trade.timestamp in
+          let t' = on_trade ?avg_trade_price t ~timestamp ~price ~side ~qty in
+          ( t',
+            reader,
+            ( Pipe.write_without_pushback writer t';
+              writer ) )
+        | Error err ->
+          Log.Global.error "Gemini ledger: Failed to parse mytrade price/qty for %s: %s"
+            (Symbol.Enum_or_string.to_string symbol) err;
+          (t, reader, writer)
       in
       let f = function
         | None ->
@@ -314,23 +336,28 @@ module T = struct
       t Symbol.Enum_or_string.Map.t =
     List.fold response ~init:Symbol.Enum_or_string.Map.empty ~f:(fun acc balance ->
       let currency = balance.currency in
-      let position = Float.of_string balance.amount in
-      (* Only create entries for non-zero positions *)
-      match Float.(position > 0.) with
-      | false -> acc
-      | true ->
-        (* For each currency, try to map it to a trading pair with notional_currency *)
-        let open Option.Let_syntax in
-        let symbol_opt = 
-          let%bind currency_enum = Currency.Enum_or_string.to_enum currency in
-          let%map symbol = Symbol.of_currency_pair currency_enum notional_currency in
-          Symbol.Enum_or_string.of_enum symbol
-        in
-        match symbol_opt with
-        | None -> acc
-        | Some symbol ->
-          let entry = create ~symbol ~position () in
-          Map.set acc ~key:symbol ~data:entry)
+      match Fluxum.Normalize_common.Float_conv.amount_of_string balance.amount with
+      | Error err ->
+        Log.Global.error "Gemini ledger: Failed to parse balance amount for %s: %s"
+          (Currency.Enum_or_string.to_string currency) err;
+        acc
+      | Ok position ->
+        (* Only create entries for non-zero positions *)
+        match Float.(position > 0.) with
+        | false -> acc
+        | true ->
+          (* For each currency, try to map it to a trading pair with notional_currency *)
+          let open Option.Let_syntax in
+          let symbol_opt =
+            let%bind currency_enum = Currency.Enum_or_string.to_enum currency in
+            let%map symbol = Symbol.of_currency_pair currency_enum notional_currency in
+            Symbol.Enum_or_string.of_enum symbol
+          in
+          match symbol_opt with
+          | None -> acc
+          | Some symbol ->
+            let entry = create ~symbol ~position () in
+            Map.set acc ~key:symbol ~data:entry)
 
 end
 
@@ -388,13 +415,21 @@ module Ledger (*: S *) = struct
           Order_events.Order_event_type.equal event.type_ `Fill )
     in
     List.fold events ~init:t ~f:(fun t event ->
-        let price =
-          Option.value_exn event.avg_execution_price |> Float.of_string
-        in
-        let qty = Option.value_exn event.executed_amount |> Float.of_string in
-        let symbol = event.symbol in
-        let side = event.side in
-        on_trade' t ~symbol ~timestamp:event.timestampms ~side ~price ~qty )
+        match (
+          let open Result.Let_syntax in
+          let price_str = Option.value_exn event.avg_execution_price in
+          let qty_str = Option.value_exn event.executed_amount in
+          let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+          let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+          Ok (price, qty)
+        ) with
+        | Ok (price, qty) ->
+          let symbol = event.symbol in
+          let side = event.side in
+          on_trade' t ~symbol ~timestamp:event.timestampms ~side ~price ~qty
+        | Error err ->
+          Log.Global.error "Gemini ledger: Failed to parse order event price/qty: %s" err;
+          t )
 
   let on_order_event_response t response =
     on_order_events t (Order_events.order_events_of_response response)

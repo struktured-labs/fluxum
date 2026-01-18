@@ -387,12 +387,11 @@ let test_public_trade_negative_quantity () =
     ("tid", `Int 999)
   ] in
   match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
-  | Ok trade ->
-    (* Gemini doesn't validate negative - it's parsed as-is *)
-    ignore (assert_float_equal (-1.5) trade.qty "Negative quantity parsed (no validation)");
-    ()
+  | Ok _trade ->
+    fail "Should reject negative quantity"
   | Error msg ->
-    fail (sprintf "Unexpected error: %s" msg);
+    (* Now correctly validates that quantities must be non-negative *)
+    pass (sprintf "Correctly rejected negative quantity: %s" msg);
     ()
 
 (* ============================================================ *)
