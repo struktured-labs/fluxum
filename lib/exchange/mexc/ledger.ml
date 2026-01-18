@@ -299,22 +299,30 @@ module Entry = struct
           entry_ref := update_from_book !entry_ref book;
           Pipe.write writer !entry_ref
         | `Trade trade ->
-          (* Parse Coinbase trade *)
-          let side = match trade.isBuyer with
-            | true -> Fluxum.Types.Side.Buy
-            | false -> Fluxum.Types.Side.Sell
-          in
-          let price = Float.of_string trade.price in
-          let qty = Float.of_string trade.qty in
+          (* Parse MEXC trade *)
+          (match (
+            let open Result.Let_syntax in
+            let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string trade.price in
+            let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string trade.qty in
+            Ok (price, qty)
+          ) with
+          | Error err ->
+            Log.Global.error "MEXC ledger: Failed to parse trade price/qty: %s" err;
+            Deferred.unit
+          | Ok (price, qty) ->
+            let side = match trade.isBuyer with
+              | true -> Fluxum.Types.Side.Buy
+              | false -> Fluxum.Types.Side.Sell
+            in
 
-          (* Coinbase doesn't provide fee info in trade data *)
-          let fee_usd = 0. in
+            (* MEXC doesn't provide fee info in trade data *)
+            let fee_usd = 0. in
 
-          (* Parse timestamp if available *)
-          let timestamp = Time_float_unix.now () in
+            (* Parse timestamp if available *)
+            let timestamp = Time_float_unix.now () in
 
-          entry_ref := on_trade !entry_ref ~timestamp ~price ~side ~qty ~fee_usd;
-          Pipe.write writer !entry_ref
+            entry_ref := on_trade !entry_ref ~timestamp ~price ~side ~qty ~fee_usd;
+            Pipe.write writer !entry_ref)
       )
       >>| fun () ->
       Pipe.close writer
@@ -329,15 +337,20 @@ type t = Entry.t Fluxum.Types.Symbol.Map.t [@@deriving sexp, compare, equal]
 (** Bootstrap from account balances *)
 let from_balances ?(notional_currency = "USD") (balances : V1.Account.balance list) : t =
   List.fold balances ~init:Fluxum.Types.Symbol.Map.empty ~f:(fun acc account ->
-    let position = Float.of_string account.free in
-    (* Only create entries for non-zero positions *)
-    match Float.(position > 0.) with
-    | false -> acc
-    | true ->
-      (* Map currency to trading pair with notional currency
-         For Coinbase, symbols are like "BTC-USD" *)
-      let symbol = account.asset ^ "-" ^ notional_currency in
-      let entry = Entry.create ~symbol ~position () in
+    match Fluxum.Normalize_common.Float_conv.amount_of_string account.free with
+    | Error err ->
+      Log.Global.error "MEXC ledger: Failed to parse balance for %s: %s"
+        account.asset err;
+      acc
+    | Ok position ->
+      (* Only create entries for non-zero positions *)
+      match Float.(position > 0.) with
+      | false -> acc
+      | true ->
+        (* Map currency to trading pair with notional currency
+           For MEXC, symbols are like "BTC-USD" *)
+        let symbol = account.asset ^ "-" ^ notional_currency in
+        let entry = Entry.create ~symbol ~position () in
       Map.set acc ~key:symbol ~data:entry
   )
 
@@ -355,22 +368,31 @@ let from_trades
     ~init:Fluxum.Types.Symbol.Map.empty
     ~f:(fun acc trade ->
       let symbol = trade.symbol in
-      let side = match trade.isBuyer with
-        | true -> Fluxum.Types.Side.Buy
-        | false -> Fluxum.Types.Side.Sell
-      in
-      let price = Float.of_string trade.price in
-      let qty = Float.of_string trade.qty in
-      let timestamp = Time_float_unix.now () in  (* TODO: parse trade.time *)
+      (* Parse price and qty *)
+      match (
+        let open Result.Let_syntax in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string trade.price in
+        let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string trade.qty in
+        Ok (price, qty)
+      ) with
+      | Error err ->
+        Log.Global.error "MEXC ledger: Failed to parse trade for %s: %s" symbol err;
+        acc
+      | Ok (price, qty) ->
+        let side = match trade.isBuyer with
+          | true -> Fluxum.Types.Side.Buy
+          | false -> Fluxum.Types.Side.Sell
+        in
+        let timestamp = Time_float_unix.now () in  (* TODO: parse trade.time *)
 
-      let fee_usd = 0. in  (* Coinbase doesn't provide fee in trade data *)
+        let fee_usd = 0. in  (* MEXC doesn't provide fee in trade data *)
 
-      let avg_trade_price = match avg_trade_prices with
-        | Some prices -> Map.find prices symbol
-        | None -> None
-      in
+        let avg_trade_price = match avg_trade_prices with
+          | Some prices -> Map.find prices symbol
+          | None -> None
+        in
 
-      (* Get or create entry with pipe *)
+        (* Get or create entry with pipe *)
       let entry, reader, writer = match Map.find acc symbol with
         | Some (e, r, w) -> (e, r, w)
         | None ->
