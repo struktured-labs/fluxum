@@ -49,17 +49,31 @@ module Book = struct
     (* Process bid updates *)
     let t_with_bids =
       List.fold update.bids ~init:t ~f:(fun acc level ->
-        let price = Float.of_string level.Ws.Public.Price_level.price in
-        let volume = Float.of_string level.Ws.Public.Price_level.volume in
-        set acc ~side:`Bid ~price ~size:volume
+        let open Result.Let_syntax in
+        match (
+          let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.Ws.Public.Price_level.price in
+          let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string level.Ws.Public.Price_level.volume in
+          Ok (price, volume)
+        ) with
+        | Ok (price, volume) -> set acc ~side:`Bid ~price ~size:volume
+        | Error err ->
+          Log.Global.error "Kraken WS: Failed to parse bid level: %s" err;
+          acc
       )
     in
     (* Process ask updates *)
     let t_with_asks =
       List.fold update.asks ~init:t_with_bids ~f:(fun acc level ->
-        let price = Float.of_string level.Ws.Public.Price_level.price in
-        let volume = Float.of_string level.Ws.Public.Price_level.volume in
-        set acc ~side:`Ask ~price ~size:volume
+        let open Result.Let_syntax in
+        match (
+          let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.Ws.Public.Price_level.price in
+          let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string level.Ws.Public.Price_level.volume in
+          Ok (price, volume)
+        ) with
+        | Ok (price, volume) -> set acc ~side:`Ask ~price ~size:volume
+        | Error err ->
+          Log.Global.error "Kraken WS: Failed to parse ask level: %s" err;
+          acc
       )
     in
     t_with_asks
