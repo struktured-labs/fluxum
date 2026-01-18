@@ -1,7 +1,7 @@
 (library
  (name mexc)
  (public_name fluxum.mexc)
- (modules cfg signature common rest v1 order_book ws mexc fluxum_adapter)
+ (modules cfg signature common rest v1 order_book ws ledger session mexc fluxum_adapter)
  (libraries core async cohttp cohttp-async fluxum exchange_common yojson digestif uri websocket_curl)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async)

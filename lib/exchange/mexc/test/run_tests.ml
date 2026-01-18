@@ -688,6 +688,165 @@ let test_normalize_edge_cases () =
   ()
 
 (* ============================================================ *)
+(* Comprehensive Error Path Tests - Phase: MEXC Production-Ready *)
+(* ============================================================ *)
+
+let test_normalize_comprehensive_error_paths () =
+  printf "\n[Normalize] Comprehensive error path tests\n";
+
+  (* Test order_status with invalid status *)
+  let order_status : Mexc.V1.Open_orders.order = {
+    symbol = "BTC_USDT";
+    orderId = "123456";
+    orderListId = -1L;
+    clientOrderId = "client123";
+    price = "50000.0";
+    origQty = "1.0";
+    executedQty = "0.5";
+    cummulativeQuoteQty = "25000.0";
+    status = "INVALID_STATUS";  (* Invalid *)
+    timeInForce = "GTC";
+    type_ = "LIMIT";
+    side = "BUY";
+    stopPrice = "0.0";
+    time = 1234567890000L;
+    updateTime = 1234567890000L;
+    isWorking = true;
+    origQuoteOrderQty = "50000.0";
+  } in
+  (match Mexc.Fluxum_adapter.Adapter.Normalize.order_status order_status with
+   | Error msg ->
+     printf "  * Rejected invalid order status: %s\n" msg;
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject invalid status\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test book_update with invalid price *)
+  let bad_depth : Mexc.V1.Depth.response = {
+    bids = [("invalid_price", "1.0")];  (* Invalid price *)
+    asks = [("51000.0", "2.0")];
+    timestamp = 0L;
+    lastUpdateId = 123L;
+  } in
+  (match Mexc.Fluxum_adapter.Adapter.Normalize.book_update bad_depth with
+   | Error msg ->
+     printf "  * Rejected malformed book update: %s\n" msg;
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject non-numeric price\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test symbol_info (always succeeds but test structure) *)
+  let symbol_info : Mexc.V1.Exchange_info.symbol_info = {
+    symbol = "BTC_USDT";
+    status = "TRADING";
+    baseAsset = "BTC";
+    quoteAsset = "USDT";
+    baseAssetPrecision = 8;
+    quotePrecision = 8;
+    quoteAssetPrecision = 8;
+    baseCommissionPrecision = 8;
+    quoteCommissionPrecision = 8;
+    isSpotTradingAllowed = true;
+    isMarginTradingAllowed = false;
+  } in
+  (match Mexc.Fluxum_adapter.Adapter.Normalize.symbol_info symbol_info with
+   | Ok info ->
+     ignore (assert_string_equal "BTC_USDT" info.symbol "Symbol preserved");
+     ()
+   | Error msg ->
+     printf "  X FAIL: Valid symbol_info should succeed: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test ticker with NaN price *)
+  let bad_ticker : Mexc.V1.Ticker_24hr.ticker = {
+    symbol = "BTC_USDT";
+    priceChange = "100.0";
+    priceChangePercent = "0.2";
+    prevClosePrice = "49900.0";
+    lastPrice = "NaN";  (* Invalid *)
+    bidPrice = "50000.0";
+    askPrice = "50100.0";
+    openPrice = "49900.0";
+    highPrice = "50500.0";
+    lowPrice = "49500.0";
+    volume = "1000.0";
+    quoteVolume = "50000000.0";
+    openTime = 1234567890000L;
+    closeTime = 1234567900000L;
+    count = Some 1000;
+    bidQty = "1.0";
+    askQty = "1.0";
+  } in
+  (match Mexc.Fluxum_adapter.Adapter.Normalize.ticker bad_ticker with
+   | Error msg ->
+     printf "  * Rejected NaN last price: %s\n" msg;
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject NaN price\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test order_book with negative price *)
+  let bad_book : Mexc.V1.Depth.response = {
+    bids = [("-50000.0", "1.0")];  (* Negative price *)
+    asks = [("51000.0", "2.0")];
+    timestamp = 1234567890000L;
+    lastUpdateId = 123L;
+  } in
+  (match Mexc.Fluxum_adapter.Adapter.Normalize.order_book bad_book with
+   | Error msg ->
+     printf "  * Rejected negative price in order book: %s\n" msg;
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject negative price\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test public_trade with zero quantity *)
+  let zero_qty_trade : Mexc.V1.Recent_trades.trade = {
+    id = Some 123L;
+    price = "50000.0";
+    qty = "0.0";  (* Zero quantity - should be accepted *)
+    time = 1234567890000L;
+    isBuyerMaker = true;
+    quoteQty = "0.0";
+    isBestMatch = true;
+    tradeType = "REGULAR";
+  } in
+  (match Mexc.Fluxum_adapter.Adapter.Normalize.public_trade zero_qty_trade with
+   | Ok trade ->
+     ignore (assert_float_equal 0.0 trade.qty "Zero quantity accepted");
+     ()
+   | Error msg ->
+     printf "  X FAIL: Zero quantity should be valid: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test order_response with invalid side *)
+  let bad_order_resp : Mexc.V1.New_order.response = {
+    symbol = "BTC_USDT";
+    orderId = "123456";
+    transactTime = 1234567890000L;
+    price = "50000.0";
+    origQty = "1.0";
+    executedQty = "0.0";
+    cummulativeQuoteQty = "0.0";
+    type_ = "LIMIT";
+    side = "INVALID_SIDE";  (* Invalid *)
+    status = "NEW";
+    timeInForce = "GTC";
+    orderListId = -1L;
+  } in
+  (match Mexc.Fluxum_adapter.Adapter.Normalize.order_response bad_order_resp with
+   | Error msg ->
+     printf "  * Rejected invalid side: %s\n" msg;
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject invalid side\n";
+     incr tests_run; incr tests_failed);
+
+  ()
+
+(* ============================================================ *)
 (* Main Test Runner *)
 (* ============================================================ *)
 
@@ -750,6 +909,9 @@ let () =
   (* Phase 2 Priority 2: Additional error path tests *)
   test_normalize_float_conversion_errors ();
   test_normalize_edge_cases ();
+
+  (* Phase: MEXC Production-Ready - Comprehensive error path tests *)
+  test_normalize_comprehensive_error_paths ();
 
   (* Summary *)
   printf "\n===========================================\n";

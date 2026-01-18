@@ -236,34 +236,29 @@ module Adapter = struct
 
   module Normalize = struct
     let order_response (resp : Native.Order.response) : (Types.Order.t, string) Result.t =
-      try
-        let side =
-          match resp.side with
-          | "BUY" -> Types.Side.Buy
-          | _ -> Types.Side.Sell
-        in
-        let kind =
-          match resp.type_ with
-          | "LIMIT" ->
-            Types.Order_kind.Limit (Float.of_string resp.price)
-          | "MARKET" -> Types.Order_kind.Market
-          | _ -> Types.Order_kind.Market
-        in
-        let status =
-          match resp.status with
-          | "FILLED" -> Types.Order_status.Filled
-          | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
-          | "CANCELED" -> Types.Order_status.Canceled
-          | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
-          | _ -> Types.Order_status.New
-        in
-        Ok { venue = Venue.t
+      let open Result.Let_syntax in
+      let%bind side = Fluxum.Normalize_common.Side.of_string resp.side in
+      let%bind kind =
+        let%bind order_type = Fluxum.Normalize_common.Order_type.of_string resp.type_ in
+        match order_type with
+        | Types.Order_kind.Limit _ ->
+          let%map price = Fluxum.Normalize_common.Float_conv.price_of_string resp.price in
+          Types.Order_kind.Limit price
+        | Types.Order_kind.Post_only_limit _ ->
+          let%map price = Fluxum.Normalize_common.Float_conv.price_of_string resp.price in
+          Types.Order_kind.Post_only_limit price
+        | Types.Order_kind.Market -> Ok Types.Order_kind.Market
+      in
+      let%bind status = Fluxum.Normalize_common.Order_status.of_string resp.status in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string resp.origQty in
+      let%bind filled = Fluxum.Normalize_common.Float_conv.qty_of_string resp.executedQty in
+      Ok ({ venue = Venue.t
         ; id = resp.orderId
         ; symbol = resp.symbol
         ; side
         ; kind
-        ; qty = Float.of_string resp.origQty
-        ; filled = Float.of_string resp.executedQty
+        ; qty
+        ; filled
         ; status
         ; created_at =
             (if Int64.(resp.transactTime > 0L)
@@ -273,47 +268,37 @@ module Adapter = struct
                    (Time_float_unix.Span.of_ms (Int64.to_float resp.transactTime)))
             else None)
         ; updated_at = None
-        }
-      with
-      | Failure msg -> Error (sprintf "Order response conversion failed: %s" msg)
-      | exn -> Error (sprintf "Order response unexpected error: %s" (Exn.to_string exn))
+        } : Types.Order.t)
 
-    let order_status (status : Native.Order.status) : Types.Order_status.t =
-      match status.status with
-      | "FILLED" -> Types.Order_status.Filled
-      | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
-      | "CANCELED" -> Types.Order_status.Canceled
-      | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
-      | _ -> Types.Order_status.New
+    let order_status (status : Native.Order.status) : (Types.Order_status.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind status_t = Fluxum.Normalize_common.Order_status.of_string status.status in
+      Ok status_t
 
     let order_from_status (status : Native.Order.status) : (Types.Order.t, string) Result.t =
-      try
-        let side =
-          match status.side with
-          | "BUY" -> Types.Side.Buy
-          | _ -> Types.Side.Sell
-        in
-        let kind =
-          match status.type_ with
-          | "LIMIT" -> Types.Order_kind.Limit (Float.of_string status.price)
-          | "MARKET" -> Types.Order_kind.Market
-          | _ -> Types.Order_kind.Market
-        in
-        let order_status =
-          match status.status with
-          | "FILLED" -> Types.Order_status.Filled
-          | "PARTIALLY_FILLED" -> Types.Order_status.Partially_filled
-          | "CANCELED" -> Types.Order_status.Canceled
-          | "REJECTED" -> Types.Order_status.Rejected "Order rejected"
-          | _ -> Types.Order_status.New
-        in
-        Ok { venue = Venue.t
+      let open Result.Let_syntax in
+      let%bind side = Fluxum.Normalize_common.Side.of_string status.side in
+      let%bind kind =
+        let%bind order_type = Fluxum.Normalize_common.Order_type.of_string status.type_ in
+        match order_type with
+        | Types.Order_kind.Limit _ ->
+          let%map price = Fluxum.Normalize_common.Float_conv.price_of_string status.price in
+          Types.Order_kind.Limit price
+        | Types.Order_kind.Post_only_limit _ ->
+          let%map price = Fluxum.Normalize_common.Float_conv.price_of_string status.price in
+          Types.Order_kind.Post_only_limit price
+        | Types.Order_kind.Market -> Ok Types.Order_kind.Market
+      in
+      let%bind order_status = Fluxum.Normalize_common.Order_status.of_string status.status in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string status.origQty in
+      let%bind filled = Fluxum.Normalize_common.Float_conv.qty_of_string status.executedQty in
+      Ok ({ venue = Venue.t
         ; id = status.orderId
         ; symbol = status.symbol
         ; side
         ; kind
-        ; qty = Float.of_string status.origQty
-        ; filled = Float.of_string status.executedQty
+        ; qty
+        ; filled
         ; status = order_status
         ; created_at =
             (if Int64.(status.time > 0L)
@@ -329,62 +314,58 @@ module Adapter = struct
                 (Time_float_unix.of_span_since_epoch
                    (Time_float_unix.Span.of_ms (Int64.to_float status.updateTime)))
             else None)
-        }
-      with
-      | Failure msg -> Error (sprintf "Order from status conversion failed: %s" msg)
-      | exn -> Error (sprintf "Order from status unexpected error: %s" (Exn.to_string exn))
+        } : Types.Order.t)
 
     let trade (t : Native.Trade.t) : (Types.Trade.t, string) Result.t =
-      try
-        let side = match t.isBuyer with true -> Types.Side.Buy | false -> Types.Side.Sell in
-        Ok { venue = Venue.t
+      let open Result.Let_syntax in
+      let side = match t.isBuyer with true -> Types.Side.Buy | false -> Types.Side.Sell in
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string t.price in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string t.qty in
+      let%bind commission = Fluxum.Normalize_common.Float_conv.of_string t.commission in
+      Ok ({ venue = Venue.t
         ; symbol = t.symbol
         ; side
-        ; price = Float.of_string t.price
-        ; qty = Float.of_string t.qty
-        ; fee = Some (Float.of_string t.commission)
+        ; price
+        ; qty
+        ; fee = Some commission
         ; trade_id = Some (Int64.to_string t.id)
         ; ts =
             Some
               (Time_float_unix.of_span_since_epoch
                  (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
-        }
-      with
-      | Failure msg -> Error (sprintf "Trade conversion failed: %s" msg)
-      | exn -> Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
+        } : Types.Trade.t)
 
     let balance (b : Native.Balance.t) : (Types.Balance.t, string) Result.t =
-      try
-        let free = Float.of_string b.free in
-        let locked = Float.of_string b.locked in
-        Ok { venue = Venue.t
+      let open Result.Let_syntax in
+      let%bind free = Fluxum.Normalize_common.Float_conv.of_string b.free in
+      let%bind locked = Fluxum.Normalize_common.Float_conv.of_string b.locked in
+      Ok ({ venue = Venue.t
         ; currency = b.asset
         ; total = free +. locked
         ; available = free
         ; locked
-        }
-      with
-      | Failure msg -> Error (sprintf "Balance conversion failed: %s" msg)
-      | exn -> Error (sprintf "Balance unexpected error: %s" (Exn.to_string exn))
+        } : Types.Balance.t)
 
-    let book_update (depth : Native.Book.update) : Types.Book_update.t =
+    let book_update (depth : Native.Book.update) : (Types.Book_update.t, string) Result.t =
       (* Return bid side update - caller should handle both sides *)
-      let levels =
+      let open Result.Let_syntax in
+      let%bind levels =
         List.map depth.bids ~f:(fun (price, qty) ->
-          { Types.Book_update.price = Float.of_string price
-          ; qty = Float.of_string qty
-          })
+          let%bind price_f = Fluxum.Normalize_common.Float_conv.price_of_string price in
+          let%bind qty_f = Fluxum.Normalize_common.Float_conv.qty_of_string qty in
+          Ok { Types.Book_update.price = price_f; qty = qty_f })
+        |> Fluxum.Normalize_common.Result_util.transpose
       in
-      { venue = Venue.t
+      Ok ({ venue = Venue.t
       ; symbol = "" (* Symbol not included in depth response *)
       ; side = Types.Book_update.Side.Bid
       ; levels
       ; ts = None
       ; is_snapshot = true
-      }
+      } : Types.Book_update.t)
 
-    let symbol_info (s : Native.Symbol_info.t) : Types.Symbol_info.t =
-      { venue = Venue.t
+    let symbol_info (s : Native.Symbol_info.t) : (Types.Symbol_info.t, string) Result.t =
+      Ok ({ venue = Venue.t
       ; symbol = s.symbol
       ; base_currency = s.baseAsset
       ; quote_currency = s.quoteAsset
@@ -392,41 +373,51 @@ module Adapter = struct
       ; min_order_size = 0.0  (* MEXC doesn't provide this in exchange_info *)
       ; tick_size = None
       ; quote_increment = None
-      }
+      } : Types.Symbol_info.t)
 
     let ticker (t : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
-      try
-        Ok { venue = Venue.t
+      let open Result.Let_syntax in
+      let%bind last_price = Fluxum.Normalize_common.Float_conv.price_of_string t.lastPrice in
+      let%bind bid_price = Fluxum.Normalize_common.Float_conv.price_of_string t.bidPrice in
+      let%bind ask_price = Fluxum.Normalize_common.Float_conv.price_of_string t.askPrice in
+      let%bind high_24h = Fluxum.Normalize_common.Float_conv.price_of_string t.highPrice in
+      let%bind low_24h = Fluxum.Normalize_common.Float_conv.price_of_string t.lowPrice in
+      let%bind volume_24h = Fluxum.Normalize_common.Float_conv.qty_of_string t.volume in
+      let%bind quote_volume = Fluxum.Normalize_common.Float_conv.of_string t.quoteVolume in
+      let%bind price_change = Fluxum.Normalize_common.Float_conv.of_string t.priceChange in
+      let%bind price_change_pct = Fluxum.Normalize_common.Float_conv.of_string t.priceChangePercent in
+      Ok ({ venue = Venue.t
         ; symbol = t.symbol
-        ; last_price = Float.of_string t.lastPrice
-        ; bid_price = Float.of_string t.bidPrice
-        ; ask_price = Float.of_string t.askPrice
-        ; high_24h = Float.of_string t.highPrice
-        ; low_24h = Float.of_string t.lowPrice
-        ; volume_24h = Float.of_string t.volume
-        ; quote_volume = Some (Float.of_string t.quoteVolume)
-        ; price_change = Some (Float.of_string t.priceChange)
-        ; price_change_pct = Some (Float.of_string t.priceChangePercent)
+        ; last_price
+        ; bid_price
+        ; ask_price
+        ; high_24h
+        ; low_24h
+        ; volume_24h
+        ; quote_volume = Some quote_volume
+        ; price_change = Some price_change
+        ; price_change_pct = Some price_change_pct
         ; ts = Some (Time_float_unix.of_span_since_epoch
                       (Time_float_unix.Span.of_ms (Int64.to_float t.closeTime)))
-        }
-      with
-      | Failure msg -> Error (sprintf "Ticker conversion failed: %s" msg)
-      | exn -> Error (sprintf "Ticker unexpected error: %s" (Exn.to_string exn))
+        } : Types.Ticker.t)
 
     let order_book (depth : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
-      try
-        let bids = List.map depth.bids ~f:(fun (price, qty) ->
-          { Types.Order_book.Price_level.price = Float.of_string price
-          ; volume = Float.of_string qty
-          })
-        in
-        let asks = List.map depth.asks ~f:(fun (price, qty) ->
-          { Types.Order_book.Price_level.price = Float.of_string price
-          ; volume = Float.of_string qty
-          })
-        in
-        Ok { venue = Venue.t
+      let open Result.Let_syntax in
+      let%bind bids =
+        List.map depth.bids ~f:(fun (price, qty) ->
+          let%bind price_f = Fluxum.Normalize_common.Float_conv.price_of_string price in
+          let%bind volume_f = Fluxum.Normalize_common.Float_conv.qty_of_string qty in
+          Ok { Types.Order_book.Price_level.price = price_f; volume = volume_f })
+        |> Fluxum.Normalize_common.Result_util.transpose
+      in
+      let%bind asks =
+        List.map depth.asks ~f:(fun (price, qty) ->
+          let%bind price_f = Fluxum.Normalize_common.Float_conv.price_of_string price in
+          let%bind volume_f = Fluxum.Normalize_common.Float_conv.qty_of_string qty in
+          Ok { Types.Order_book.Price_level.price = price_f; volume = volume_f })
+        |> Fluxum.Normalize_common.Result_util.transpose
+      in
+      Ok ({ venue = Venue.t
         ; symbol = ""  (* Symbol not in depth response *)
         ; bids
         ; asks
@@ -435,27 +426,23 @@ module Adapter = struct
                | ts -> Some (Time_float_unix.of_span_since_epoch
                               (Time_float_unix.Span.of_ms (Int64.to_float ts))))
         ; epoch = Int64.to_int_trunc depth.lastUpdateId
-        }
-      with
-      | Failure msg -> Error (sprintf "Order book conversion failed: %s" msg)
-      | exn -> Error (sprintf "Order book unexpected error: %s" (Exn.to_string exn))
+        } : Types.Order_book.t)
 
     let public_trade (t : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
-      try
-        Ok { venue = Venue.t
+      let open Result.Let_syntax in
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string t.price in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string t.qty in
+      Ok ({ venue = Venue.t
         ; symbol = ""  (* Symbol not in trade response *)
-        ; price = Float.of_string t.price
-        ; qty = Float.of_string t.qty
+        ; price
+        ; qty
         ; side = Some (match t.isBuyerMaker with
                       | true -> Types.Side.Sell  (* Buyer is maker = sell order filled *)
                       | false -> Types.Side.Buy) (* Seller is maker = buy order filled *)
         ; trade_id = Option.map t.id ~f:Int64.to_string
         ; ts = Some (Time_float_unix.of_span_since_epoch
                       (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
-        }
-      with
-      | Failure msg -> Error (sprintf "Public trade conversion failed: %s" msg)
-      | exn -> Error (sprintf "Public trade unexpected error: %s" (Exn.to_string exn))
+        } : Types.Public_trade.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with
