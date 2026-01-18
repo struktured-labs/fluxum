@@ -46,14 +46,22 @@ module Book = struct
     (* Coinbase sends updates with events containing price_level and new_quantity *)
     List.fold msg.events ~init:t ~f:(fun acc event ->
       List.fold event.updates ~init:acc ~f:(fun acc2 update ->
-        let price = Float.of_string update.price_level in
-        let size = Float.of_string update.new_quantity in
-        let side = match event.side with
-          | "bid" -> `Bid
-          | "offer" | "ask" -> `Ask
-          | _ -> `Bid  (* Default, shouldn't happen *)
-        in
-        set acc2 ~side ~price ~size ~metadata:new_metadata
+        match (
+          let open Result.Let_syntax in
+          let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string update.price_level in
+          let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string update.new_quantity in
+          Ok (price, size)
+        ) with
+        | Error err ->
+          Log.Global.error "Coinbase WS: Failed to parse level2 update: %s" err;
+          acc2
+        | Ok (price, size) ->
+          let side = match event.side with
+            | "bid" -> `Bid
+            | "offer" | "ask" -> `Ask
+            | _ -> `Bid  (* Default, shouldn't happen *)
+          in
+          set acc2 ~side ~price ~size ~metadata:new_metadata
       )
     )
 
@@ -61,14 +69,30 @@ module Book = struct
   let apply_product_book t (book : Rest.Types.product_book) =
     (* Build level list from REST response *)
     let bid_levels = List.filter_map book.bids ~f:(fun level ->
-      let price = Float.of_string level.price in
-      let size = Float.of_string level.size in
-      match Float.(size > 0.) with true -> Some (`Bid, price, size) | false -> None
+      match (
+        let open Result.Let_syntax in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.price in
+        let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string level.size in
+        Ok (price, size)
+      ) with
+      | Ok (price, size) when Float.(size > 0.) -> Some (`Bid, price, size)
+      | Ok _ -> None
+      | Error err ->
+        Log.Global.error "Coinbase REST: Failed to parse bid level: %s" err;
+        None
     ) in
     let ask_levels = List.filter_map book.asks ~f:(fun level ->
-      let price = Float.of_string level.price in
-      let size = Float.of_string level.size in
-      match Float.(size > 0.) with true -> Some (`Ask, price, size) | false -> None
+      match (
+        let open Result.Let_syntax in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.price in
+        let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string level.size in
+        Ok (price, size)
+      ) with
+      | Ok (price, size) when Float.(size > 0.) -> Some (`Ask, price, size)
+      | Ok _ -> None
+      | Error err ->
+        Log.Global.error "Coinbase REST: Failed to parse ask level: %s" err;
+        None
     ) in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in
