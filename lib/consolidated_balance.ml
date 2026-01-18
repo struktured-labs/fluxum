@@ -240,7 +240,10 @@ let query_exchange (config : Query_config.exchange_config) : Exchange_result.t D
     let adapter = Coinbase.Fluxum_adapter.Adapter.create ~cfg () in
     Coinbase.Fluxum_adapter.Adapter.balances adapter >>| (function
     | Ok balances ->
-      let normalized = List.map balances ~f:Coinbase.Fluxum_adapter.Adapter.Normalize.balance in
+      let normalized = List.filter_map balances ~f:(fun b ->
+        match Coinbase.Fluxum_adapter.Adapter.Normalize.balance b with
+        | Ok bal -> Some bal
+        | Error _ -> None) in
       Exchange_result.success ~venue:Types.Venue.Coinbase ~balances:normalized ~latency_ms:(calc_latency ())
     | Error e ->
       let error = Sexp.to_string (Coinbase.Rest.Error.sexp_of_t e) in

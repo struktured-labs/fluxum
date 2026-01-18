@@ -364,7 +364,10 @@ module Unified = struct
     | "mexc" ->
       mexc_adapter ~symbols:[] >>= fun adapter ->
       Mexc.Fluxum_adapter.Adapter.get_symbols adapter ()
-      >>| Result.map ~f:(List.map ~f:Mexc.Fluxum_adapter.Adapter.Normalize.symbol_info)
+      >>| Result.map ~f:(List.filter_map ~f:(fun s ->
+        match Mexc.Fluxum_adapter.Adapter.Normalize.symbol_info s with
+        | Ok info -> Some info
+        | Error _ -> None))
       >>| Result.map_error ~f:Mexc.Fluxum_adapter.Adapter.Normalize.error
     | _ ->
       Deferred.return (Error (Fluxum.Types.Error.Exchange_specific

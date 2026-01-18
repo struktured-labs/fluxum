@@ -126,7 +126,10 @@ let test_coinbase_balance_normalization () =
     }
   in
 
-  let normalized = Coinbase.Fluxum_adapter.Adapter.Normalize.balance native_balance in
+  let normalized = match Coinbase.Fluxum_adapter.Adapter.Normalize.balance native_balance with
+    | Ok bal -> bal
+    | Error e -> failwith (sprintf "Balance normalization failed: %s" e)
+  in
 
   let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
     "BTC" normalized.currency "Currency is BTC" in

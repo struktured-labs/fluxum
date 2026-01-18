@@ -182,10 +182,13 @@ let test_adapter_symbols () =
   let adapter = Mexc.Fluxum_adapter.Adapter.create ~cfg ~symbols:[] () in
   Mexc.Fluxum_adapter.Adapter.get_symbols adapter () >>| function
   | Ok symbols_native ->
-    let symbols = List.map symbols_native ~f:Mexc.Fluxum_adapter.Adapter.Normalize.symbol_info in
+    let symbols = List.filter_map symbols_native ~f:(fun s ->
+      match Mexc.Fluxum_adapter.Adapter.Normalize.symbol_info s with
+      | Ok info -> Some info
+      | Error _ -> None) in
     pass (sprintf "Total symbols: %d" (List.length symbols));
     (* Find BTCUSDT *)
-    let btc = List.find symbols ~f:(fun s -> String.equal s.symbol "BTCUSDT") in
+    let btc = List.find symbols ~f:(fun s -> String.equal s.symbol "BTC_USDT") in
     (match btc with
      | Some info ->
        pass (sprintf "Found: %s (%s/%s) status=%s"
