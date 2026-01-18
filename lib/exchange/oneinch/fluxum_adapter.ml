@@ -221,15 +221,16 @@ module Adapter = struct
       ; quote_increment = None
       }
 
-    let ticker (quote : Native.Ticker.t) : Types.Ticker.t =
+    let ticker (quote : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       (* Calculate price from amounts and decimals *)
+      let open Result.Let_syntax in
+      let%bind to_amount = Fluxum.Normalize_common.Float_conv.qty_of_string quote.toAmount in
       let from_decimals = Float.of_int quote.fromToken.decimals in
       let to_decimals = Float.of_int quote.toToken.decimals in
-      let to_amount = Float.of_string quote.toAmount in
       let from_amount = Float.(10. ** from_decimals) in  (* 1 unit of from token *)
       let price = to_amount /. Float.(10. ** to_decimals) /. (from_amount /. Float.(10. ** from_decimals)) in
       let symbol = sprintf "%s-%s" quote.fromToken.symbol quote.toToken.symbol in
-      { venue = Venue.t
+      Ok ({ venue = Venue.t
       ; symbol
       ; last_price = price
       ; bid_price = price
@@ -241,18 +242,17 @@ module Adapter = struct
       ; price_change = None
       ; price_change_pct = None
       ; ts = None
-      }
+      } : Types.Ticker.t)
 
-    let order_book ((sell_quote, buy_quote) : Native.Book.snapshot) : Types.Order_book.t =
+    let order_book ((sell_quote, buy_quote) : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind sell_to_amt = Fluxum.Normalize_common.Float_conv.qty_of_string sell_quote.toAmount in
+      let%bind buy_to_amt = Fluxum.Normalize_common.Float_conv.qty_of_string buy_quote.toAmount in
       let from_dec = Float.of_int sell_quote.fromToken.decimals in
       let to_dec = Float.of_int sell_quote.toToken.decimals in
-      let sell_price =
-        Float.of_string sell_quote.toAmount /. Float.(10. ** to_dec)
-      in
+      let sell_price = sell_to_amt /. Float.(10. ** to_dec) in
       let buy_dec = Float.of_int buy_quote.toToken.decimals in
-      let buy_price =
-        Float.(10. ** buy_dec) /. Float.of_string buy_quote.toAmount
-      in
+      let buy_price = Float.(10. ** buy_dec) /. buy_to_amt in
       let _ = from_dec in  (* Suppress unused warning *)
       let bid = { Types.Order_book.Price_level.
         price = buy_price;
@@ -262,13 +262,13 @@ module Adapter = struct
         price = sell_price;
         volume = 1.0;
       } in
-      { venue = Venue.t
+      Ok ({ venue = Venue.t
       ; symbol = ""
       ; bids = [bid]
       ; asks = [ask]
       ; ts = None
       ; epoch = 0
-      }
+      } : Types.Order_book.t)
 
     let public_trade (() : Native.Public_trade.t) : Types.Public_trade.t =
       { venue = Venue.t

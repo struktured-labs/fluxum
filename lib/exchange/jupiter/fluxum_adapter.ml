@@ -214,16 +214,17 @@ module Adapter = struct
       ; quote_increment = None
       }
 
-    let ticker (quote : Native.Ticker.t) : Types.Ticker.t =
+    let ticker (quote : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       (* Calculate price from quote amounts *)
-      let in_amount = Float.of_string quote.inAmount in
-      let out_amount = Float.of_string quote.outAmount in
+      let open Result.Let_syntax in
+      let%bind in_amount = Fluxum.Normalize_common.Float_conv.qty_of_string quote.inAmount in
+      let%bind out_amount = Fluxum.Normalize_common.Float_conv.qty_of_string quote.outAmount in
       let price = out_amount /. in_amount in
       let symbol = sprintf "%s-%s"
         (String.prefix quote.inputMint 4)
         (String.prefix quote.outputMint 4)
       in
-      { venue = Venue.t
+      Ok ({ venue = Venue.t
       ; symbol
       ; last_price = price
       ; bid_price = price  (* Same as mid in aggregator *)
@@ -235,31 +236,32 @@ module Adapter = struct
       ; price_change = None
       ; price_change_pct = None
       ; ts = None
-      }
+      } : Types.Ticker.t)
 
-    let order_book ((sell_quote, buy_quote) : Native.Book.snapshot) : Types.Order_book.t =
+    let order_book ((sell_quote, buy_quote) : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
       (* Convert quotes to synthetic order book *)
-      let sell_price =
-        Float.of_string sell_quote.outAmount /. Float.of_string sell_quote.inAmount
-      in
-      let buy_price =
-        Float.of_string buy_quote.inAmount /. Float.of_string buy_quote.outAmount
-      in
+      let open Result.Let_syntax in
+      let%bind sell_out = Fluxum.Normalize_common.Float_conv.qty_of_string sell_quote.outAmount in
+      let%bind sell_in = Fluxum.Normalize_common.Float_conv.qty_of_string sell_quote.inAmount in
+      let%bind buy_in = Fluxum.Normalize_common.Float_conv.qty_of_string buy_quote.inAmount in
+      let%bind buy_out = Fluxum.Normalize_common.Float_conv.qty_of_string buy_quote.outAmount in
+      let sell_price = sell_out /. sell_in in
+      let buy_price = buy_in /. buy_out in
       let bid = { Types.Order_book.Price_level.
         price = buy_price;
-        volume = Float.of_string buy_quote.outAmount;
+        volume = buy_out;
       } in
       let ask = { Types.Order_book.Price_level.
         price = sell_price;
-        volume = Float.of_string sell_quote.inAmount;
+        volume = sell_in;
       } in
-      { venue = Venue.t
+      Ok ({ venue = Venue.t
       ; symbol = ""
       ; bids = [bid]
       ; asks = [ask]
       ; ts = None
       ; epoch = 0
-      }
+      } : Types.Order_book.t)
 
     let public_trade (() : Native.Public_trade.t) : Types.Public_trade.t =
       { venue = Venue.t
