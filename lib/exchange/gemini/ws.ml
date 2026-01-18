@@ -173,28 +173,101 @@ module Impl (Channel : CHANNEL) :
       return (Pipe.of_list [`Json_parse_error "WebSocket connection failed"])
     | Ok ws ->
       let r, w = Pipe.create () in
-      (* Background task to receive messages *)
+      (* Background task to receive messages with JSON buffering *)
       don't_wait_for (
+        let buffer = ref "" in
         let rec receive_loop () =
           let%bind msg_opt = Websocket_curl.receive ws in
           match msg_opt with
           | None ->
             (* Connection closed *)
+            (if String.length !buffer > 0 then
+              Log.Global.error "WebSocket closed with incomplete JSON buffer: %d bytes"
+                (String.length !buffer));
             Pipe.close w;
             return ()
           | Some s ->
-            let parsed_msg =
-              Log.Global.debug "json of event: %s" s;
-              ( try `Ok (Yojson.Safe.from_string s) with
-              | Yojson.Json_error e -> `Json_parse_error e )
-              |> function
-              | #Error.t as e -> e
-              | `Ok json -> (
-                match Channel.response_of_yojson json with
-                | Ok response -> `Ok response
-                | Error e -> `Channel_parse_error e )
+            (* Append to buffer *)
+            buffer := !buffer ^ s;
+
+            (* Try to extract complete JSON messages from buffer *)
+            let rec process_buffer () =
+              match String.length !buffer with
+              | 0 -> return ()
+              | _ ->
+                (* Check if we have a complete JSON message *)
+                let complete_json_opt =
+                  try
+                    (* Attempt to parse from start of buffer *)
+                    let json = Yojson.Safe.from_string !buffer in
+                    (* If successful, we have complete JSON *)
+                    Some (Yojson.Safe.to_string json, String.length (Yojson.Safe.to_string json))
+                  with
+                  | Yojson.Json_error _ ->
+                    (* Try to find first complete JSON object/array *)
+                    let rec find_complete idx depth in_string escape =
+                      if idx >= String.length !buffer then None
+                      else
+                        let c = !buffer.[idx] in
+                        match in_string, escape, c with
+                        | true, true, _ ->
+                          (* In string, was escaped, consume and continue *)
+                          find_complete (idx + 1) depth true false
+                        | true, false, '\\' ->
+                          (* In string, found escape char *)
+                          find_complete (idx + 1) depth true true
+                        | true, false, '"' ->
+                          (* In string, found closing quote *)
+                          find_complete (idx + 1) depth false false
+                        | false, _, '"' ->
+                          (* Not in string, found opening quote *)
+                          find_complete (idx + 1) depth true false
+                        | false, _, '{' | false, _, '[' ->
+                          (* Opening brace/bracket *)
+                          find_complete (idx + 1) (depth + 1) false false
+                        | false, _, '}' | false, _, ']' ->
+                          (* Closing brace/bracket *)
+                          let new_depth = depth - 1 in
+                          if new_depth = 0 then
+                            (* Found complete JSON *)
+                            let json_str = String.sub !buffer ~pos:0 ~len:(idx + 1) in
+                            Some (json_str, idx + 1)
+                          else
+                            find_complete (idx + 1) new_depth false false
+                        | _, _, _ ->
+                          (* Other character *)
+                          find_complete (idx + 1) depth in_string false
+                    in
+                    find_complete 0 0 false false
+                in
+
+                match complete_json_opt with
+                | None ->
+                  (* No complete JSON yet, wait for more data *)
+                  Log.Global.debug "Buffering incomplete JSON: %d bytes" (String.length !buffer);
+                  return ()
+                | Some (json_str, consumed_len) ->
+                  (* We have complete JSON, parse and emit it *)
+                  Log.Global.debug "Complete JSON message: %d bytes" consumed_len;
+                  let parsed_msg =
+                    ( try `Ok (Yojson.Safe.from_string json_str) with
+                    | Yojson.Json_error e -> `Json_parse_error e )
+                    |> function
+                    | #Error.t as e -> e
+                    | `Ok json -> (
+                      match Channel.response_of_yojson json with
+                      | Ok response -> `Ok response
+                      | Error e -> `Channel_parse_error e )
+                  in
+                  (* Remove consumed JSON from buffer *)
+                  buffer := String.sub !buffer ~pos:consumed_len
+                    ~len:(String.length !buffer - consumed_len);
+                  (* Emit parsed message *)
+                  let%bind () = Pipe.write w parsed_msg in
+                  (* Process remaining buffer *)
+                  process_buffer ()
             in
-            let%bind () = Pipe.write w parsed_msg in
+            process_buffer () >>= fun () ->
             receive_loop ()
         in
         receive_loop ()
