@@ -29,17 +29,31 @@ module Book = struct
   (** Create order book from WebSocket orderbook message *)
   let update_from_message book (data : Ws.channel_data) (contents : Ws.orderbook_contents) =
     (* Parse bids *)
-    let bid_updates = List.map contents.bids ~f:(fun level ->
-      let price = Float.of_string level.price in
-      let size = Float.of_string level.size in
-      (`Bid, price, size)
+    let bid_updates = List.filter_map contents.bids ~f:(fun level ->
+      match (
+        let open Result.Let_syntax in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.price in
+        let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string level.size in
+        Ok (price, size)
+      ) with
+      | Ok (price, size) -> Some (`Bid, price, size)
+      | Error err ->
+        Log.Global.error "dYdX WS: Failed to parse bid level: %s" err;
+        None
     ) in
 
     (* Parse asks *)
-    let ask_updates = List.map contents.asks ~f:(fun level ->
-      let price = Float.of_string level.price in
-      let size = Float.of_string level.size in
-      (`Ask, price, size)
+    let ask_updates = List.filter_map contents.asks ~f:(fun level ->
+      match (
+        let open Result.Let_syntax in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.price in
+        let%bind size = Fluxum.Normalize_common.Float_conv.qty_of_string level.size in
+        Ok (price, size)
+      ) with
+      | Ok (price, size) -> Some (`Ask, price, size)
+      | Error err ->
+        Log.Global.error "dYdX WS: Failed to parse ask level: %s" err;
+        None
     ) in
 
     (* Create metadata *)
