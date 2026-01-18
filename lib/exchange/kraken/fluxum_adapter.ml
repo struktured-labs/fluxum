@@ -235,13 +235,29 @@ module Adapter = struct
               (* Convert Book_data to Book_update for each side *)
               let now = Time_float_unix.now () in
               let symbol = book_data.pair in
-              let bids = List.map book_data.update.bids ~f:(fun l ->
-                (Float.of_string l.Ws.Public.Price_level.price,
-                 Float.of_string l.volume))
+              let bids = List.filter_map book_data.update.bids ~f:(fun l ->
+                match (
+                  let open Result.Let_syntax in
+                  let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string l.Ws.Public.Price_level.price in
+                  let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string l.volume in
+                  Ok (price, volume)
+                ) with
+                | Ok (price, volume) -> Some (price, volume)
+                | Error err ->
+                  Log.Global.error "Kraken WS: Failed to parse book level: %s" err;
+                  None)
               in
-              let asks = List.map book_data.update.asks ~f:(fun l ->
-                (Float.of_string l.Ws.Public.Price_level.price,
-                 Float.of_string l.volume))
+              let asks = List.filter_map book_data.update.asks ~f:(fun l ->
+                match (
+                  let open Result.Let_syntax in
+                  let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string l.Ws.Public.Price_level.price in
+                  let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string l.volume in
+                  Ok (price, volume)
+                ) with
+                | Ok (price, volume) -> Some (price, volume)
+                | Error err ->
+                  Log.Global.error "Kraken WS: Failed to parse book level: %s" err;
+                  None)
               in
               let%bind () =
                 match bids with
@@ -389,12 +405,13 @@ module Adapter = struct
       ; is_snapshot = u.is_snapshot
       }
 
-    let symbol_info ((name, info) : Native.Symbol_info.t) : Types.Symbol_info.t =
-      let min_order_size = match info.ordermin with
-        | Some s -> Float.of_string s
-        | None -> 0.0
+    let symbol_info ((name, info) : Native.Symbol_info.t) : (Types.Symbol_info.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind min_order_size = match info.ordermin with
+        | Some s -> Fluxum.Normalize_common.Float_conv.qty_of_string s
+        | None -> Ok 0.0
       in
-      { venue = Venue.t
+      Ok ({ venue = Venue.t
       ; symbol = name
       ; base_currency = info.base
       ; quote_currency = info.quote
@@ -402,7 +419,7 @@ module Adapter = struct
       ; min_order_size
       ; tick_size = None  (* Kraken uses pair_decimals instead *)
       ; quote_increment = None
-      }
+      } : Types.Symbol_info.t)
 
     let ticker ((pair, data) : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       let open Result.Let_syntax in
