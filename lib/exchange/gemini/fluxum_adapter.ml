@@ -372,20 +372,15 @@ module Adapter = struct
         Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
 
     let balance (b : Native.Balance.t) : (Types.Balance.t, string) Result.t =
-      try
-        let total = Float.of_string (Common.Decimal_string.to_string b.amount) in
-        let available = Float.of_string (Common.Decimal_string.to_string b.available) in
-        Ok { venue = Venue.t
-        ; currency = Common.Currency.Enum_or_string.to_string b.currency
-        ; total
-        ; available
-        ; locked = total -. available
-        }
-      with
-      | Failure msg ->
-        Error (sprintf "Balance conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Balance unexpected error: %s" (Exn.to_string exn))
+      let open Result.Let_syntax in
+      let%bind total = Fluxum.Normalize_common.Float_conv.qty_of_string (Common.Decimal_string.to_string b.amount) in
+      let%bind available = Fluxum.Normalize_common.Float_conv.qty_of_string (Common.Decimal_string.to_string b.available) in
+      Ok ({ venue = Venue.t
+      ; currency = Common.Currency.Enum_or_string.to_string b.currency
+      ; total
+      ; available
+      ; locked = total -. available
+      } : Types.Balance.t)
 
     let book_update (u : Native.Book.update) : Types.Book_update.t =
       let ts = Option.first_some u.timestamp u.timestampms in
@@ -439,15 +434,22 @@ module Adapter = struct
     let ticker (json : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       try
         let open Yojson.Safe.Util in
-        let bid = json |> member "bid" |> to_string |> Float.of_string in
-        let ask = json |> member "ask" |> to_string |> Float.of_string in
-        let last = json |> member "last" |> to_string |> Float.of_string in
+        let open Result.Let_syntax in
+        let bid_str = json |> member "bid" |> to_string in
+        let ask_str = json |> member "ask" |> to_string in
+        let last_str = json |> member "last" |> to_string in
+        let%bind bid = Fluxum.Normalize_common.Float_conv.price_of_string bid_str in
+        let%bind ask = Fluxum.Normalize_common.Float_conv.price_of_string ask_str in
+        let%bind last = Fluxum.Normalize_common.Float_conv.price_of_string last_str in
         let volume = json |> member "volume" in
-        let symbol_vol = match volume |> to_assoc |> List.hd with
-          | Some (symbol, vol) -> (symbol, vol |> to_string |> Float.of_string)
-          | None -> ("", 0.)
+        let%bind symbol_vol = match volume |> to_assoc |> List.hd with
+          | Some (symbol, vol) ->
+            let vol_str = vol |> to_string in
+            let%bind vol_float = Fluxum.Normalize_common.Float_conv.qty_of_string vol_str in
+            Ok (symbol, vol_float)
+          | None -> Ok ("", 0.)
         in
-        Ok { venue = Venue.t
+        Ok ({ venue = Venue.t
         ; symbol = String.uppercase (fst symbol_vol)
         ; last_price = last
         ; bid_price = bid
@@ -459,7 +461,7 @@ module Adapter = struct
         ; price_change = None
         ; price_change_pct = None
         ; ts = None
-        }
+        } : Types.Ticker.t)
       with
       | Yojson.Safe.Util.Type_error (msg, _) ->
         Error (sprintf "Ticker JSON type error: %s" msg)
@@ -471,21 +473,28 @@ module Adapter = struct
     let order_book (json : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
       try
         let open Yojson.Safe.Util in
-        let parse_levels levels_json =
-          levels_json |> to_list |> List.map ~f:(fun level ->
-            let price = level |> member "price" |> to_string |> Float.of_string in
-            let volume = level |> member "amount" |> to_string |> Float.of_string in
-            { Types.Order_book.Price_level.price; volume })
+        let open Result.Let_syntax in
+        let parse_level level =
+          let price_str = level |> member "price" |> to_string in
+          let volume_str = level |> member "amount" |> to_string in
+          let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+          let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string volume_str in
+          Ok { Types.Order_book.Price_level.price; volume }
         in
-        let bids = json |> member "bids" |> parse_levels in
-        let asks = json |> member "asks" |> parse_levels in
-        Ok { venue = Venue.t
+        let parse_levels levels_json =
+          levels_json |> to_list
+          |> List.map ~f:parse_level
+          |> Fluxum.Normalize_common.Result_util.transpose
+        in
+        let%bind bids = json |> member "bids" |> parse_levels in
+        let%bind asks = json |> member "asks" |> parse_levels in
+        Ok ({ venue = Venue.t
         ; symbol = ""  (* Symbol not in response, caller must track *)
         ; bids
         ; asks
         ; ts = None
         ; epoch = 0
-        }
+        } : Types.Order_book.t)
       with
       | Yojson.Safe.Util.Type_error (msg, _) ->
         Error (sprintf "Order book JSON type error: %s" msg)
@@ -497,20 +506,25 @@ module Adapter = struct
     let public_trade (json : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
       try
         let open Yojson.Safe.Util in
+        let open Result.Let_syntax in
         let timestamp = json |> member "timestampms" |> to_int in
         let ts = Time_float_unix.of_span_since_epoch
           (Time_float_unix.Span.of_ms (Float.of_int timestamp)) in
-        Ok { venue = Venue.t
+        let price_str = json |> member "price" |> to_string in
+        let qty_str = json |> member "amount" |> to_string in
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+        let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        Ok ({ venue = Venue.t
         ; symbol = ""  (* Symbol not in response, caller must track *)
-        ; price = json |> member "price" |> to_string |> Float.of_string
-        ; qty = json |> member "amount" |> to_string |> Float.of_string
+        ; price
+        ; qty
         ; side = Some (match json |> member "type" |> to_string with
             | "buy" -> Types.Side.Buy
             | "sell" -> Types.Side.Sell
             | _ -> Types.Side.Buy)
         ; trade_id = Some (json |> member "tid" |> to_int |> Int.to_string)
         ; ts = Some ts
-        }
+        } : Types.Public_trade.t)
       with
       | Yojson.Safe.Util.Type_error (msg, _) ->
         Error (sprintf "Public trade JSON type error: %s" msg)
