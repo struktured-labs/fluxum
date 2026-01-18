@@ -126,6 +126,7 @@ module Impl (Channel : CHANNEL) :
 
   let client (module Cfg : Cfg.S) ?query ?uri_args ?nonce () :
       [ `Ok of response | Error.t ] Pipe.Reader.t Deferred.t =
+    Core.Printf.eprintf "!!!WS_ML_CLIENT_CALLED for channel=%s!!!\n%!" Channel.name;
     Log.Global.error "[WS_CLIENT_ENTRY] Starting WebSocket client for channel: %s" Channel.name;
     let query =
       Option.map query ~f:(fun l ->
@@ -144,7 +145,9 @@ module Impl (Channel : CHANNEL) :
              @ Option.(map ~f:Channel.encode_uri_args uri_args |> to_list) ) )
         ()
     in
+    Core.Printf.eprintf "!!!BEFORE_URI_LOG channel=%s uri=%s!!!\n%!" Channel.name (Uri.to_string uri);
     Log.Global.info "Ws.client: uri=%s" (Uri.to_string uri);
+    Core.Printf.eprintf "!!!AFTER_URI_LOG!!!\n%!";
     let payload = `Null in
     let path = Path.to_string Channel.path in
     let%bind payload =
@@ -188,9 +191,15 @@ module Impl (Channel : CHANNEL) :
             Pipe.close w;
             return ()
           | Some s ->
-            (* Append to buffer *)
-            Log.Global.info "[WS_RECEIVE] Got %d bytes, buffer now %d bytes" (String.length s) (String.length (!buffer ^ s));
-            buffer := !buffer ^ s;
+            (* Skip empty frames (keepalive/heartbeat) *)
+            (match String.length s with
+             | 0 ->
+               Log.Global.debug "Received empty WebSocket frame (keepalive), ignoring";
+               receive_loop ()
+             | _ ->
+               (* Append to buffer *)
+               Log.Global.debug "[WS_RECEIVE] Got %d bytes, buffer now %d bytes" (String.length s) (String.length (!buffer ^ s));
+               buffer := !buffer ^ s;
 
             (* Try to extract complete JSON messages from buffer *)
             let rec process_buffer () =
@@ -304,6 +313,7 @@ module Impl (Channel : CHANNEL) :
             in
             process_buffer () >>= fun () ->
             receive_loop ()
+            )
         in
         receive_loop ()
       );
