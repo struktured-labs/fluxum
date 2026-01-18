@@ -44,14 +44,30 @@ module Book = struct
   let apply_depth_update t (depth : Ws.Message.depth) =
     (* Build level lists from depth message *)
     let bid_levels = List.filter_map depth.tick.buys ~f:(fun (price_str, qty_str) ->
-      let price = Float.of_string price_str in
-      let volume = Float.of_string qty_str in
-      match Float.(volume > 0.) with true -> Some (`Bid, price, volume) | false -> None
+      let open Result.Let_syntax in
+      match (
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+        let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        Ok (price, volume)
+      ) with
+      | Ok (price, volume) when Float.(volume > 0.) -> Some (`Bid, price, volume)
+      | Ok _ -> None
+      | Error err ->
+        Log.Global.error "Bitrue WS: Failed to parse bid level: %s" err;
+        None
     ) in
     let ask_levels = List.filter_map depth.tick.asks ~f:(fun (price_str, qty_str) ->
-      let price = Float.of_string price_str in
-      let volume = Float.of_string qty_str in
-      match Float.(volume > 0.) with true -> Some (`Ask, price, volume) | false -> None
+      let open Result.Let_syntax in
+      match (
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+        let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        Ok (price, volume)
+      ) with
+      | Ok (price, volume) when Float.(volume > 0.) -> Some (`Ask, price, volume)
+      | Ok _ -> None
+      | Error err ->
+        Log.Global.error "Bitrue WS: Failed to parse ask level: %s" err;
+        None
     ) in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in
@@ -62,14 +78,30 @@ module Book = struct
     let new_metadata = { last_update_id = book.lastUpdateId } in
     (* Build level lists from REST response *)
     let bid_levels = List.filter_map book.bids ~f:(fun (price_str, qty_str) ->
-      let price = Float.of_string price_str in
-      let volume = Float.of_string qty_str in
-      match Float.(volume > 0.) with true -> Some (`Bid, price, volume) | false -> None
+      let open Result.Let_syntax in
+      match (
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+        let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        Ok (price, volume)
+      ) with
+      | Ok (price, volume) when Float.(volume > 0.) -> Some (`Bid, price, volume)
+      | Ok _ -> None
+      | Error err ->
+        Log.Global.error "Bitrue REST: Failed to parse bid level: %s" err;
+        None
     ) in
     let ask_levels = List.filter_map book.asks ~f:(fun (price_str, qty_str) ->
-      let price = Float.of_string price_str in
-      let volume = Float.of_string qty_str in
-      match Float.(volume > 0.) with true -> Some (`Ask, price, volume) | false -> None
+      let open Result.Let_syntax in
+      match (
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
+        let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        Ok (price, volume)
+      ) with
+      | Ok (price, volume) when Float.(volume > 0.) -> Some (`Ask, price, volume)
+      | Ok _ -> None
+      | Error err ->
+        Log.Global.error "Bitrue REST: Failed to parse ask level: %s" err;
+        None
     ) in
     let all_levels = bid_levels @ ask_levels in
     let new_book = create ~symbol:(symbol t) in
