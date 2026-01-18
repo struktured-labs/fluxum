@@ -195,67 +195,89 @@ module Impl (Channel : CHANNEL) :
               match String.length !buffer with
               | 0 -> return ()
               | _ ->
-                (* Find first complete JSON object/array using depth tracking *)
-                let rec find_complete idx depth in_string escape =
+                (* First, find where valid JSON starts (skip any garbage prefix) *)
+                let rec find_json_start idx =
                   if idx >= String.length !buffer then None
                   else
-                    let c = !buffer.[idx] in
-                    match in_string, escape, c with
-                    | true, true, _ ->
-                      (* In string, was escaped, consume and continue *)
-                      find_complete (idx + 1) depth true false
-                    | true, false, '\\' ->
-                      (* In string, found escape char *)
-                      find_complete (idx + 1) depth true true
-                    | true, false, '"' ->
-                      (* In string, found closing quote *)
-                      find_complete (idx + 1) depth false false
-                    | false, _, '"' ->
-                      (* Not in string, found opening quote *)
-                      find_complete (idx + 1) depth true false
-                    | false, _, '{' | false, _, '[' ->
-                      (* Opening brace/bracket *)
-                      find_complete (idx + 1) (depth + 1) false false
-                    | false, _, '}' | false, _, ']' ->
-                      (* Closing brace/bracket *)
-                      let new_depth = depth - 1 in
-                      if new_depth = 0 then
-                        (* Found complete JSON *)
-                        let json_str = String.sub !buffer ~pos:0 ~len:(idx + 1) in
-                        Some (json_str, idx + 1)
-                      else
-                        find_complete (idx + 1) new_depth false false
-                    | _, _, _ ->
-                      (* Other character *)
-                      find_complete (idx + 1) depth in_string false
+                    match !buffer.[idx] with
+                    | '{' | '[' -> Some idx  (* Found start of JSON *)
+                    | _ -> find_json_start (idx + 1)  (* Skip garbage *)
                 in
-                let complete_json_opt = find_complete 0 0 false false in
 
-                match complete_json_opt with
+                match find_json_start 0 with
                 | None ->
-                  (* No complete JSON yet, wait for more data *)
-                  Log.Global.debug "Buffering incomplete JSON: %d bytes" (String.length !buffer);
+                  (* No JSON delimiter found in buffer, discard and wait for more data *)
+                  Log.Global.debug "No JSON delimiter in %d byte buffer, discarding" (String.length !buffer);
+                  buffer := "";
                   return ()
-                | Some (json_str, consumed_len) ->
-                  (* We have complete JSON, parse and emit it *)
-                  Log.Global.debug "Complete JSON message: %d bytes" consumed_len;
-                  let parsed_msg =
-                    ( try `Ok (Yojson.Safe.from_string json_str) with
-                    | Yojson.Json_error e -> `Json_parse_error e )
-                    |> function
-                    | #Error.t as e -> e
-                    | `Ok json -> (
-                      match Channel.response_of_yojson json with
-                      | Ok response -> `Ok response
-                      | Error e -> `Channel_parse_error e )
+                | Some start_pos ->
+                  (* Now find the matching close delimiter using depth tracking *)
+                  let rec find_complete idx depth in_string escape =
+                    if idx >= String.length !buffer then None
+                    else
+                      let c = !buffer.[idx] in
+                      match in_string, escape, c with
+                      | true, true, _ ->
+                        (* In string, was escaped, consume and continue *)
+                        find_complete (idx + 1) depth true false
+                      | true, false, '\\' ->
+                        (* In string, found escape char *)
+                        find_complete (idx + 1) depth true true
+                      | true, false, '"' ->
+                        (* In string, found closing quote *)
+                        find_complete (idx + 1) depth false false
+                      | false, _, '"' ->
+                        (* Not in string, found opening quote *)
+                        find_complete (idx + 1) depth true false
+                      | false, _, '{' | false, _, '[' ->
+                        (* Opening brace/bracket *)
+                        find_complete (idx + 1) (depth + 1) false false
+                      | false, _, '}' | false, _, ']' ->
+                        (* Closing brace/bracket *)
+                        let new_depth = depth - 1 in
+                        if new_depth = 0 then
+                          (* Found complete JSON - extract from start_pos to idx *)
+                          let json_len = idx - start_pos + 1 in
+                          let json_str = String.sub !buffer ~pos:start_pos ~len:json_len in
+                          (* Return json_str and total bytes consumed (including garbage prefix) *)
+                          Some (json_str, idx + 1, start_pos)
+                        else
+                          find_complete (idx + 1) new_depth false false
+                      | _, _, _ ->
+                        (* Other character *)
+                        find_complete (idx + 1) depth in_string false
                   in
-                  (* Remove consumed JSON from buffer *)
-                  buffer := String.sub !buffer ~pos:consumed_len
-                    ~len:(String.length !buffer - consumed_len);
-                  (* Emit parsed message *)
-                  let%bind () = Pipe.write w parsed_msg in
-                  (* Process remaining buffer *)
-                  process_buffer ()
+
+                  (* Start depth tracking from start_pos+1 with depth 1 (already saw opening delimiter) *)
+                  let complete_json_opt = find_complete (start_pos + 1) 1 false false in
+
+                  match complete_json_opt with
+                  | None ->
+                    (* Incomplete JSON, keep buffering *)
+                    Log.Global.debug "Buffering incomplete JSON: %d bytes" (String.length !buffer);
+                    return ()
+                  | Some (json_str, consumed_len, prefix_len) ->
+                    (* We have complete JSON, parse and emit it *)
+                    (if prefix_len > 0 then
+                      Log.Global.debug "Complete JSON: %d bytes (discarded %d prefix garbage bytes)"
+                        (String.length json_str) prefix_len);
+                    let parsed_msg =
+                      ( try `Ok (Yojson.Safe.from_string json_str) with
+                      | Yojson.Json_error e -> `Json_parse_error e )
+                      |> function
+                      | #Error.t as e -> e
+                      | `Ok json -> (
+                        match Channel.response_of_yojson json with
+                        | Ok response -> `Ok response
+                        | Error e -> `Channel_parse_error e )
+                    in
+                    (* Remove consumed bytes (including prefix garbage) from buffer *)
+                    buffer := String.sub !buffer ~pos:consumed_len
+                      ~len:(String.length !buffer - consumed_len);
+                    (* Emit parsed message *)
+                    let%bind () = Pipe.write w parsed_msg in
+                    (* Process remaining buffer *)
+                    process_buffer ()
             in
             process_buffer () >>= fun () ->
             receive_loop ()
