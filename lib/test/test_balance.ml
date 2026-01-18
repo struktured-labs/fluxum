@@ -154,7 +154,10 @@ let test_bitrue_balance_normalization () =
     }
   in
 
-  let normalized = Bitrue.Fluxum_adapter.Adapter.Normalize.balance native_balance in
+  let normalized = match Bitrue.Fluxum_adapter.Adapter.Normalize.balance native_balance with
+    | Ok bal -> bal
+    | Error msg -> failwith (sprintf "Failed to normalize balance: %s" msg)
+  in
 
   let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
     "USDT" normalized.currency "Currency is USDT" in
