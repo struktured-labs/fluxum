@@ -127,9 +127,12 @@ let test_adapter_symbols () =
       String.equal ticker "BTC-USD") in
     (match btc with
      | Some (ticker, market) ->
-       let info = Dydx.Fluxum_adapter.Adapter.Normalize.symbol_info (ticker, market) in
-       pass (sprintf "Found: %s (%s/%s) status=%s"
-         info.symbol info.base_currency info.quote_currency info.status)
+       (match Dydx.Fluxum_adapter.Adapter.Normalize.symbol_info (ticker, market) with
+        | Ok info ->
+          pass (sprintf "Found: %s (%s/%s) status=%s"
+            info.symbol info.base_currency info.quote_currency info.status)
+        | Error msg ->
+          fail (sprintf "Normalize error: %s" msg))
      | None -> fail "BTC-USD not found")
   | Error err ->
     let e = Dydx.Fluxum_adapter.Adapter.Normalize.error err in
@@ -141,12 +144,15 @@ let test_adapter_ticker () =
     ~cfg:(module Dydx.Cfg.Production) ~symbols:[] () in
   Dydx.Fluxum_adapter.Adapter.get_ticker adapter ~symbol:"ETH-USD" () >>| function
   | Ok ticker_native ->
-    let ticker = Dydx.Fluxum_adapter.Adapter.Normalize.ticker ticker_native in
-    pass (sprintf "Symbol: %s" ticker.symbol);
-    pass (sprintf "Last (oracle): %.2f" ticker.last_price);
-    pass (sprintf "Volume 24h: %.2f" ticker.volume_24h);
-    Option.iter ticker.price_change ~f:(fun c ->
-      pass (sprintf "Price change: %.4f" c))
+    (match Dydx.Fluxum_adapter.Adapter.Normalize.ticker ticker_native with
+     | Ok ticker ->
+       pass (sprintf "Symbol: %s" ticker.symbol);
+       pass (sprintf "Last (oracle): %.2f" ticker.last_price);
+       pass (sprintf "Volume 24h: %.2f" ticker.volume_24h);
+       Option.iter ticker.price_change ~f:(fun c ->
+         pass (sprintf "Price change: %.4f" c))
+     | Error msg ->
+       fail (sprintf "Normalize error: %s" msg))
   | Error err ->
     let e = Dydx.Fluxum_adapter.Adapter.Normalize.error err in
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))
@@ -157,12 +163,15 @@ let test_adapter_order_book () =
     ~cfg:(module Dydx.Cfg.Production) ~symbols:[] () in
   Dydx.Fluxum_adapter.Adapter.get_order_book adapter ~symbol:"BTC-USD" () >>| function
   | Ok book_native ->
-    let book = Dydx.Fluxum_adapter.Adapter.Normalize.order_book book_native in
-    pass (sprintf "Bids: %d | Asks: %d" (List.length book.bids) (List.length book.asks));
-    let spread = Fluxum.Types.Order_book.spread book in
-    pass (sprintf "Spread: %.4f" spread);
-    let mid = Fluxum.Types.Order_book.mid_price book in
-    pass (sprintf "Mid price: %.2f" mid)
+    (match Dydx.Fluxum_adapter.Adapter.Normalize.order_book book_native with
+     | Ok book ->
+       pass (sprintf "Bids: %d | Asks: %d" (List.length book.bids) (List.length book.asks));
+       let spread = Fluxum.Types.Order_book.spread book in
+       pass (sprintf "Spread: %.4f" spread);
+       let mid = Fluxum.Types.Order_book.mid_price book in
+       pass (sprintf "Mid price: %.2f" mid)
+     | Error msg ->
+       fail (sprintf "Normalize error: %s" msg))
   | Error err ->
     let e = Dydx.Fluxum_adapter.Adapter.Normalize.error err in
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))
@@ -173,8 +182,10 @@ let test_adapter_recent_trades () =
     ~cfg:(module Dydx.Cfg.Production) ~symbols:[] () in
   Dydx.Fluxum_adapter.Adapter.get_recent_trades adapter ~symbol:"ETH-USD" ~limit:5 () >>| function
   | Ok trades_native ->
-    let trades = List.map trades_native
-      ~f:Dydx.Fluxum_adapter.Adapter.Normalize.public_trade in
+    let trades = List.filter_map trades_native ~f:(fun t ->
+      match Dydx.Fluxum_adapter.Adapter.Normalize.public_trade t with
+      | Ok trade -> Some trade
+      | Error _ -> None) in
     pass (sprintf "Trades: %d" (List.length trades));
     (match List.hd trades with
      | Some trade ->

@@ -179,16 +179,17 @@ module Adapter = struct
     let order_from_status (() : Native.Order.status) : Types.Order.t =
       order_response ()
 
-    let trade (tr : Native.Trade.t) : Types.Trade.t =
+    let trade (tr : Native.Trade.t) : (Types.Trade.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string tr.price in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string tr.size in
       let side = side_of_string tr.side in
-      let price = Float.of_string tr.price in
-      let qty = Float.of_string tr.size in
       let ts =
         try
           Some (Time_float_unix.of_string tr.createdAt)
         with _ -> None
       in
-      { venue = Venue.t
+      Ok ({ venue = Venue.t
       ; symbol = ""  (* market is not in trade struct *)
       ; side
       ; price
@@ -196,7 +197,7 @@ module Adapter = struct
       ; fee = None
       ; trade_id = Some tr.id
       ; ts
-      }
+      } : Types.Trade.t)
 
     let balance (() : Native.Balance.t) : Types.Balance.t =
       { venue = Venue.t
@@ -206,50 +207,68 @@ module Adapter = struct
       ; locked = 0.
       }
 
-    let book_update (u : Native.Book.update) : Types.Book_update.t =
+    let book_update (u : Native.Book.update) : (Types.Book_update.t, string) Result.t =
+      let open Result.Let_syntax in
       (* Convert orderbook contents to book update *)
-      let bid_levels = List.map u.bids ~f:(fun level ->
-        { Types.Book_update.price = Float.of_string level.price
-        ; qty = Float.of_string level.size
-        })
+      let parse_level (lvl : Ws.price_level) =
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string lvl.price in
+        let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string lvl.size in
+        Ok { Types.Book_update.price; qty }
       in
-      let ask_levels = List.map u.asks ~f:(fun level ->
-        { Types.Book_update.price = Float.of_string level.price
-        ; qty = Float.of_string level.size
-        })
+      let%bind bid_levels =
+        u.bids
+        |> List.map ~f:parse_level
+        |> Fluxum.Normalize_common.Result_util.transpose
+      in
+      let%bind ask_levels =
+        u.asks
+        |> List.map ~f:parse_level
+        |> Fluxum.Normalize_common.Result_util.transpose
       in
       (* Return bids as the update - full book is in snapshot *)
-      { venue = Venue.t
+      Ok ({ venue = Venue.t
       ; symbol = ""
       ; side = Types.Book_update.Side.Bid
-      ; levels = bid_levels @ List.map ask_levels ~f:(fun l ->
-          { Types.Book_update.price = l.price; qty = l.qty })
+      ; levels = bid_levels @ ask_levels
       ; ts = None
       ; is_snapshot = true
-      }
+      } : Types.Book_update.t)
 
-    let symbol_info ((ticker, market) : Native.Symbol_info.t) : Types.Symbol_info.t =
-      { venue = Venue.t
+    let symbol_info ((ticker, market) : Native.Symbol_info.t) : (Types.Symbol_info.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind min_order_size = Fluxum.Normalize_common.Float_conv.qty_of_string market.stepSize in
+      let%bind tick_size = Fluxum.Normalize_common.Float_conv.price_of_string market.tickSize in
+      Ok ({ venue = Venue.t
       ; symbol = ticker
       ; base_currency = Rest.Types.base_asset_of_ticker ticker
       ; quote_currency = Rest.Types.quote_asset_of_ticker ticker
       ; status = market.status
-      ; min_order_size = Float.of_string market.stepSize
-      ; tick_size = Some (Float.of_string market.tickSize)
+      ; min_order_size
+      ; tick_size = Some tick_size
       ; quote_increment = None
-      }
+      } : Types.Symbol_info.t)
 
-    let ticker ((tick, market) : Native.Ticker.t) : Types.Ticker.t =
-      let oracle_price =
-        Option.value_map market.oraclePrice ~default:0.0 ~f:Float.of_string
+    let ticker ((tick, market) : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
+      let open Result.Let_syntax in
+      let parse_opt_price opt_str =
+        match opt_str with
+        | None -> Ok 0.0
+        | Some s -> Fluxum.Normalize_common.Float_conv.price_of_string s
       in
-      let volume_24h =
-        Option.value_map market.volume24H ~default:0.0 ~f:Float.of_string
+      let%bind oracle_price = parse_opt_price market.oraclePrice in
+      let%bind volume_24h =
+        match market.volume24H with
+        | None -> Ok 0.0
+        | Some s -> Fluxum.Normalize_common.Float_conv.qty_of_string s
       in
-      let price_change =
-        Option.map market.priceChange24H ~f:Float.of_string
+      let%bind price_change =
+        match market.priceChange24H with
+        | None -> Ok None
+        | Some s ->
+          let%bind p = Fluxum.Normalize_common.Float_conv.of_string s in
+          Ok (Some p)
       in
-      { venue = Venue.t
+      Ok ({ venue = Venue.t
       ; symbol = tick
       ; last_price = oracle_price  (* Use oracle price as proxy *)
       ; bid_price = 0.0  (* Not available in market info *)
@@ -258,31 +277,40 @@ module Adapter = struct
       ; low_24h = 0.0
       ; volume_24h
       ; quote_volume = None
-      ; price_change = price_change
+      ; price_change
       ; price_change_pct = None
       ; ts = None
-      }
+      } : Types.Ticker.t)
 
-    let order_book (book : Native.Book.snapshot) : Types.Order_book.t =
-      let bids = List.map book.bids ~f:(fun level ->
-        { Types.Order_book.Price_level.price = Float.of_string level.price
-        ; volume = Float.of_string level.size
-        })
+    let order_book (book : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
+      let open Result.Let_syntax in
+      let parse_level (lvl : Rest.Types.price_level) =
+        let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string lvl.price in
+        let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string lvl.size in
+        Ok { Types.Order_book.Price_level.price; volume }
       in
-      let asks = List.map book.asks ~f:(fun level ->
-        { Types.Order_book.Price_level.price = Float.of_string level.price
-        ; volume = Float.of_string level.size
-        })
+      let%bind bids =
+        book.bids
+        |> List.map ~f:parse_level
+        |> Fluxum.Normalize_common.Result_util.transpose
       in
-      { venue = Venue.t
+      let%bind asks =
+        book.asks
+        |> List.map ~f:parse_level
+        |> Fluxum.Normalize_common.Result_util.transpose
+      in
+      Ok ({ venue = Venue.t
       ; symbol = ""
       ; bids
       ; asks
       ; ts = None
       ; epoch = 0
-      }
+      } : Types.Order_book.t)
 
-    let public_trade (tr : Native.Public_trade.t) : Types.Public_trade.t =
+    let public_trade (tr : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string tr.price in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string tr.size in
       let side = match String.uppercase tr.side with
         | "BUY" -> Some Types.Side.Buy
         | "SELL" -> Some Types.Side.Sell
@@ -293,14 +321,14 @@ module Adapter = struct
           Some (Time_float_unix.of_string tr.createdAt)
         with _ -> None
       in
-      { venue = Venue.t
+      Ok ({ venue = Venue.t
       ; symbol = ""
-      ; price = Float.of_string tr.price
-      ; qty = Float.of_string tr.size
+      ; price
+      ; qty
       ; side
       ; trade_id = Some tr.id
       ; ts
-      }
+      } : Types.Public_trade.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with
