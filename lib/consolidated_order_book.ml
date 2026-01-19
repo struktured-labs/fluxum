@@ -127,6 +127,21 @@ module Book = struct
         let volume = get_volume level in
         (price, { Attributed_level.price; volume; exchange }))
 
+  (** Helper for exchanges using Exchange_common.Order_book_base.Price_level.t *)
+  let extract_common_levels
+    (type book)
+    ~(book_opt : book option)
+    ~(extract_levels : book -> Exchange_common.Order_book_base.Price_level.t list)
+    ~(exchange : exchange_source)
+    : (float * Attributed_level.t) list
+    =
+    extract_levels_generic
+      ~book_opt
+      ~extract_levels
+      ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
+      ~get_volume:(fun level -> level.volume)
+      ~exchange
+
   (** Rebuild consolidated book from exchange books *)
   let rebuild t =
     let update_time = Time_float_unix.now () in
@@ -134,6 +149,7 @@ module Book = struct
 
     (* Collect all bid levels with exchange attribution *)
     let all_bids =
+      (* Gemini uses its own Price_level type *)
       let gemini_bids = extract_levels_generic
         ~book_opt:t.gemini_book
         ~extract_levels:(fun book -> Gemini.Order_book.Book.best_n_bids book ~n:100 ())
@@ -141,39 +157,30 @@ module Book = struct
         ~get_volume:(fun level -> level.volume)
         ~exchange:Gemini
       in
-      let kraken_bids = extract_levels_generic
+      (* Most exchanges use Exchange_common.Order_book_base.Price_level.t *)
+      let kraken_bids = extract_common_levels
         ~book_opt:t.kraken_book
         ~extract_levels:(fun book -> Kraken.Order_book.Book.best_n_bids book ~n:100 ())
-        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-        ~get_volume:(fun level -> level.volume)
         ~exchange:Kraken
       in
-      let hyperliquid_bids = extract_levels_generic
+      let hyperliquid_bids = extract_common_levels
         ~book_opt:t.hyperliquid_book
         ~extract_levels:(fun book -> Hyperliquid.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
-        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-        ~get_volume:(fun level -> level.volume)
         ~exchange:Hyperliquid
       in
-      let bitrue_bids = extract_levels_generic
+      let bitrue_bids = extract_common_levels
         ~book_opt:t.bitrue_book
         ~extract_levels:(fun book -> Bitrue.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
-        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-        ~get_volume:(fun level -> level.volume)
         ~exchange:Bitrue
       in
-      let binance_bids = extract_levels_generic
+      let binance_bids = extract_common_levels
         ~book_opt:t.binance_book
         ~extract_levels:(fun book -> Binance.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
-        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-        ~get_volume:(fun level -> level.volume)
         ~exchange:Binance
       in
-      let coinbase_bids = extract_levels_generic
+      let coinbase_bids = extract_common_levels
         ~book_opt:t.coinbase_book
         ~extract_levels:(fun book -> Coinbase.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
-        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-        ~get_volume:(fun level -> level.volume)
         ~exchange:Coinbase
       in
       gemini_bids @ kraken_bids @ hyperliquid_bids @ bitrue_bids @ binance_bids @ coinbase_bids
@@ -189,6 +196,7 @@ module Book = struct
 
     (* Collect all ask levels with exchange attribution *)
     let all_asks =
+      (* Gemini uses its own Price_level type *)
       let gemini_asks = extract_levels_generic
         ~book_opt:t.gemini_book
         ~extract_levels:(fun book -> Gemini.Order_book.Book.best_n_asks book ~n:100 ())
@@ -196,39 +204,30 @@ module Book = struct
         ~get_volume:(fun level -> level.volume)
         ~exchange:Gemini
       in
-      let kraken_asks = extract_levels_generic
+      (* Most exchanges use Exchange_common.Order_book_Base.Price_level.t *)
+      let kraken_asks = extract_common_levels
         ~book_opt:t.kraken_book
         ~extract_levels:(fun book -> Kraken.Order_book.Book.best_n_asks book ~n:100 ())
-        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-        ~get_volume:(fun level -> level.volume)
         ~exchange:Kraken
       in
-      let hyperliquid_asks = extract_levels_generic
+      let hyperliquid_asks = extract_common_levels
         ~book_opt:t.hyperliquid_book
         ~extract_levels:(fun book -> Hyperliquid.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
-        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-        ~get_volume:(fun level -> level.volume)
         ~exchange:Hyperliquid
       in
-      let bitrue_asks = extract_levels_generic
+      let bitrue_asks = extract_common_levels
         ~book_opt:t.bitrue_book
         ~extract_levels:(fun book -> Bitrue.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
-        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-        ~get_volume:(fun level -> level.volume)
         ~exchange:Bitrue
       in
-      let binance_asks = extract_levels_generic
+      let binance_asks = extract_common_levels
         ~book_opt:t.binance_book
         ~extract_levels:(fun book -> Binance.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
-        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-        ~get_volume:(fun level -> level.volume)
         ~exchange:Binance
       in
-      let coinbase_asks = extract_levels_generic
+      let coinbase_asks = extract_common_levels
         ~book_opt:t.coinbase_book
         ~extract_levels:(fun book -> Coinbase.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
-        ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-        ~get_volume:(fun level -> level.volume)
         ~exchange:Coinbase
       in
       gemini_asks @ kraken_asks @ hyperliquid_asks @ bitrue_asks @ binance_asks @ coinbase_asks
