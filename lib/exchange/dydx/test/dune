@@ -5,3 +5,14 @@
  (libraries core async dydx fluxum)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async))
+
+(executable
+ (name run_tests)
+ (modules run_tests)
+ (libraries core dydx fluxum exchange_common)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
+
+(rule
+ (alias runtest)
+ (action (run ./run_tests.exe)))
