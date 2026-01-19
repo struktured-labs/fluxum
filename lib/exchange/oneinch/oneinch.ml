@@ -27,6 +27,10 @@
 
 module Cfg = Cfg
 module Rest = Rest
+module Order_book = Order_book
+module Ledger = Ledger
+module Session = Session
+module Unified_adapter = Unified_adapter
 module Fluxum_adapter = Fluxum_adapter
 
 (** Common EVM token addresses *)
@@ -34,4 +38,5 @@ module Tokens = Rest.Tokens
 
 let command =
   Core.Command.group ~summary:"1inch EVM DEX Aggregator Commands"
-    []
+    [ Ledger.command
+    ]
