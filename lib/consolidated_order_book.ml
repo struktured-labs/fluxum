@@ -92,11 +92,12 @@ module Book = struct
     match levels with
     | [] -> Attributed_level.empty
     | [single] -> single
-    | multiple ->
+    | first :: _ as multiple ->
+      (* Safe to use first: pattern match ensures non-empty *)
       let total_volume = List.fold multiple ~init:0. ~f:(fun acc level ->
         acc +. level.Attributed_level.volume) in
       let exchanges = List.map multiple ~f:(fun l -> l.Attributed_level.exchange) in
-      let price = (List.hd_exn multiple).Attributed_level.price in
+      let price = first.Attributed_level.price in
       { Attributed_level.price; volume = total_volume; exchange = Multiple exchanges }
 
   (** Generic level extraction from any exchange book
@@ -179,6 +180,7 @@ module Book = struct
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p2 p1) (* Descending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
       |> List.map ~f:(fun group ->
+        (* Safe: List.group guarantees non-empty groups *)
         let price = fst (List.hd_exn group) in
         let levels = List.map group ~f:snd in
         (price, merge_levels levels))
@@ -233,6 +235,7 @@ module Book = struct
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2) (* Ascending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
       |> List.map ~f:(fun group ->
+        (* Safe: List.group guarantees non-empty groups *)
         let price = fst (List.hd_exn group) in
         let levels = List.map group ~f:snd in
         (price, merge_levels levels))

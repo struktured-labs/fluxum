@@ -92,7 +92,7 @@ module State = struct
 end
 
 (** Process a fill and update state *)
-let process_fill state (fill : Fill_model.Fill.t) ~config =
+let process_fill state (fill : Fill_model.Fill.t) ~symbol ~config =
   let position = state.State.position in
 
   match fill.side with
@@ -113,7 +113,7 @@ let process_fill state (fill : Fill_model.Fill.t) ~config =
             Some (Backtest_result.Trade_record.create
                     ~entry_time:entry.entry_time
                     ~exit_time:fill.timestamp
-                    ~symbol:(List.hd_exn state.history).symbol
+                    ~symbol
                     ~side:`Short
                     ~entry_price:entry.entry_price
                     ~exit_price:fill.price
@@ -213,7 +213,7 @@ let process_fill state (fill : Fill_model.Fill.t) ~config =
             Some (Backtest_result.Trade_record.create
                     ~entry_time:entry.entry_time
                     ~exit_time:fill.timestamp
-                    ~symbol:(List.hd_exn state.history).symbol
+                    ~symbol
                     ~side:`Long
                     ~entry_price:entry.entry_price
                     ~exit_price:fill.price
@@ -321,7 +321,7 @@ let run
               | Some l -> Fill_model.fill_limit ~config:config.fill_model ~side:`Buy ~qty ~limit:l candle
             in
             (match fill_result with
-             | `Filled fill -> process_fill state fill ~config
+             | `Filled fill -> process_fill state fill ~symbol ~config
              | `Pending | `Rejected _ -> state)
 
           | Strategy_intf.Signal.Sell { qty; limit } ->
@@ -331,7 +331,7 @@ let run
               | Some l -> Fill_model.fill_limit ~config:config.fill_model ~side:`Sell ~qty ~limit:l candle
             in
             (match fill_result with
-             | `Filled fill -> process_fill state fill ~config
+             | `Filled fill -> process_fill state fill ~symbol ~config
              | `Pending | `Rejected _ -> state)
 
           | Strategy_intf.Signal.Close_long { qty } ->
@@ -344,7 +344,7 @@ let run
              | true ->
                let fill_result = Fill_model.fill_market ~config:config.fill_model ~side:`Sell ~qty:close_qty candle in
                (match fill_result with
-                | `Filled fill -> process_fill state fill ~config
+                | `Filled fill -> process_fill state fill ~symbol ~config
                 | `Pending | `Rejected _ -> state)
              | false -> state)
 
@@ -358,7 +358,7 @@ let run
              | true ->
                let fill_result = Fill_model.fill_market ~config:config.fill_model ~side:`Buy ~qty:close_qty candle in
                (match fill_result with
-                | `Filled fill -> process_fill state fill ~config
+                | `Filled fill -> process_fill state fill ~symbol ~config
                 | `Pending | `Rejected _ -> state)
              | false -> state)
         in
@@ -380,7 +380,7 @@ let run
         let qty = Float.abs final_state.position.qty in
         let fill_result = Fill_model.simulate_close ~config:config.fill_model ~side ~qty last_candle in
         match fill_result with
-        | `Filled fill -> process_fill final_state fill ~config
+        | `Filled fill -> process_fill final_state fill ~symbol ~config
         | _ -> final_state
     in
 

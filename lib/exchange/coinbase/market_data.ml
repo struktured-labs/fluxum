@@ -82,11 +82,13 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.exchange) () : (t,
       (* Check if API credentials are available for authentication *)
       match Sys.getenv "COINBASE_API_KEY", Sys.getenv "COINBASE_API_SECRET" with
       | Some api_key, Some api_secret ->
-        (* Generate authentication signature *)
+        (* Generate authentication signature
+           Note: streams is guaranteed non-empty by validation at line 25-26 *)
         let timestamp = Int63.to_string (Time_ns.to_int63_ns_since_epoch (Time_ns.now ())) in
-        let channel = List.hd_exn streams |> Ws.Stream.channel_name in
+        let first_stream = List.hd_exn streams in  (* Safe: validated non-empty above *)
+        let channel = Ws.Stream.channel_name first_stream in
         let product_ids_str =
-          List.hd_exn streams
+          first_stream
           |> Ws.Stream.product_ids
           |> String.concat ~sep:","
         in

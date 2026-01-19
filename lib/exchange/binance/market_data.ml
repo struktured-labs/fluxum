@@ -20,9 +20,9 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.data_stream) () : 
   (* Build WebSocket URL with stream names *)
   let stream_names = List.map streams ~f:Ws.Stream.to_stream_name in
   let full_url =
-    match List.length stream_names = 1 with
-    | true -> sprintf "%s/ws/%s" url (List.hd_exn stream_names)
-    | false -> sprintf "%s/stream?streams=%s" url (String.concat ~sep:"/" stream_names)
+    match stream_names with
+    | [single] -> sprintf "%s/ws/%s" url single
+    | multiple -> sprintf "%s/stream?streams=%s" url (String.concat ~sep:"/" multiple)
   in
 
   let uri = Uri.of_string full_url in
