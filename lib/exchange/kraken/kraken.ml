@@ -11,6 +11,7 @@ module Market_data = Market_data
 module Order_book = Order_book
 module Ledger = Ledger
 module Session = Session
+module Unified_adapter = Unified_adapter
 module Unified_cmd = Unified_cmd
 module Fluxum_adapter = Fluxum_adapter
 
