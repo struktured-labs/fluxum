@@ -1,17 +1,48 @@
-(** Bitrue Unified Adapter - Implements Exchange_intf.S
+(** Bitrue Exchange Adapter
 
-    STATUS: PRODUCTION-READY
+    Complete implementation of Exchange_intf.S for Bitrue Global exchange.
 
-    This adapter provides full exchange functionality:
-    - ✅ Account balances (authenticated)
-    - ✅ Order placement and cancellation
-    - ✅ Order status and history
-    - ✅ Order book snapshots
-    - ✅ Ticker data
-    - ✅ Recent trades
-    - ✅ Exchange info/symbols
+    {b Status:} PRODUCTION-READY
 
-    Bitrue uses a Binance-compatible API structure.
+    {b Features:}
+    - ✅ REST trading (spot only)
+    - ✅ Account balances and order management
+    - ✅ Order placement, cancellation, and status queries
+    - ✅ Order book snapshots and ticker data
+    - ✅ Recent trades and exchange info
+    - ✅ Binance-compatible API structure
+
+    {b Authentication:}
+    - API key/secret via environment variables or config
+    - HMAC-SHA256 signature (Binance-compatible)
+    - Timestamp-based request signing
+    - Supports recv window for clock skew tolerance
+
+    {b Rate Limits:}
+    - Public endpoints: 1200 requests/minute per IP
+    - Private endpoints: 1200 requests/minute per API key
+    - Order placement: Rate limited per symbol
+    - WebSocket: Not yet implemented
+
+    {b Symbol Format:}
+    - Uppercase, no separator: ["BTCUSDT"], ["ETHUSDT"]
+    - Compatible with Binance format
+    - Use normalize functions for conversion
+
+    {b Known Limitations:}
+    - Spot trading only (no margin, futures)
+    - WebSocket support not yet implemented
+    - No cancel-all endpoint (must cancel individually)
+    - Order history endpoint not available in API
+    - My trades endpoint not available in API
+
+    {b API Compatibility:}
+    - Based on Binance Spot API v3
+    - Nearly identical REST endpoints and parameters
+    - Response formats fully compatible
+    - Signature method identical
+
+    @see <https://www.bitrue.com/api-docs> Bitrue API Documentation
 *)
 
 open Core

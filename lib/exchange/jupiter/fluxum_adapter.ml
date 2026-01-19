@@ -1,18 +1,53 @@
-(** Jupiter Solana DEX Aggregator Fluxum Adapter
+(** Jupiter Solana DEX Aggregator Adapter
 
-    Jupiter is a DEX aggregator, not a traditional exchange.
-    Key differences:
-    - No persistent order book (quotes are computed on-demand)
-    - Swaps route through multiple DEXs for best pricing
-    - Trading requires Solana wallet signing (not API keys)
+    Partial implementation of Exchange_intf.S for Jupiter DEX aggregator.
 
-    Public market data:
-    - get_ticker: Uses quote API to get current prices
-    - get_order_book: Synthetic from quote (best bid/ask)
+    {b Status:} MARKET DATA ONLY
 
-    Trading:
-    - Requires Solana wallet and transaction signing
-    - Use quote + swap endpoints to build transactions
+    {b Features:}
+    - ✅ REST market data (ticker via quote API)
+    - ✅ Synthetic order book from quotes
+    - ✅ Token list and routing information
+    - ❌ Trading operations (requires Solana wallet signing)
+
+    {b Architecture:}
+    - DEX aggregator, not traditional exchange
+    - Routes through 20+ Solana DEXs (Raydium, Orca, Whirlpool, etc.)
+    - No persistent order book - quotes computed on-demand
+    - Split trades across multiple routes for best execution
+    - Solana blockchain for settlement
+
+    {b Authentication:}
+    - Public endpoints: No authentication required
+    - Trading: Requires Solana wallet private key (not implemented)
+    - No traditional API keys
+
+    {b Rate Limits:}
+    - Free tier: 600 requests/minute
+    - Pro tier: Higher limits available
+    - No documented WebSocket rate limits
+
+    {b Symbol Format:}
+    - Solana mint addresses: ["So11111..."] (SOL), ["EPjFW..."] (USDC)
+    - Trading pairs represented as (input_mint, output_mint)
+    - Use token list API for human-readable symbols
+
+    {b Known Limitations:}
+    - ❌ No REST trading (requires blockchain integration)
+    - ❌ No WebSocket support (REST only)
+    - ❌ No order book depth (only top of book from quotes)
+    - Quotes expire quickly (5-30 seconds)
+    - Slippage varies with liquidity depth
+    - Price impact calculation required for large orders
+
+    {b Trading Implementation Plan:}
+    - Phase 1: Market data ✅ (complete)
+    - Phase 2: Solana wallet integration (pending)
+    - Phase 3: Transaction building and signing (pending)
+    - Phase 4: Swap execution and monitoring (pending)
+
+    @see <https://station.jup.ag/docs/apis/swap-api> Jupiter Swap API Documentation
+    @see <https://station.jup.ag/docs/apis/price-api-v2> Jupiter Price API Documentation
 *)
 
 open Core

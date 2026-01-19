@@ -1,19 +1,59 @@
-(** 1inch EVM DEX Aggregator Fluxum Adapter
+(** 1inch EVM DEX Aggregator Adapter
 
-    1inch is a DEX aggregator across EVM chains.
-    Key differences from traditional exchanges:
-    - No persistent order book (quotes are computed on-demand)
-    - Swaps route through 400+ liquidity sources
-    - Trading requires wallet signing (not API keys)
+    Partial implementation of Exchange_intf.S for 1inch DEX aggregator.
 
-    Public market data:
-    - get_ticker: Uses quote API
-    - get_order_book: Synthetic from quote
-    - get_symbols: Token list from API
+    {b Status:} MARKET DATA ONLY
 
-    Trading:
-    - Requires EVM wallet and transaction signing
-    - Use quote + swap endpoints to build transactions
+    {b Features:}
+    - ✅ REST market data (ticker via quote API)
+    - ✅ Synthetic order book from quotes
+    - ✅ Token list for supported chains
+    - ❌ Trading operations (requires wallet signing)
+
+    {b Architecture:}
+    - DEX aggregator across 15+ EVM chains
+    - Routes through 400+ liquidity sources (Uniswap, Curve, Balancer, etc.)
+    - No persistent order book - quotes computed on-demand
+    - Pathfinder algorithm for optimal routing
+    - Smart contract execution on target chain
+
+    {b Supported Chains:}
+    - Ethereum, BSC, Polygon, Arbitrum, Optimism
+    - Avalanche, Fantom, Gnosis, Base, zkSync Era
+    - And more (check API for full list)
+
+    {b Authentication:}
+    - Public endpoints: API key recommended but optional
+    - Trading: Requires wallet private key (not implemented)
+    - Rate limits higher with API key
+
+    {b Rate Limits:}
+    - Free tier: 1 request/second
+    - With API key: 10 requests/second
+    - Enterprise: Custom limits
+
+    {b Symbol Format:}
+    - EVM token addresses: ["0xEeeee..."] (ETH), ["0xA0b86..."] (USDC)
+    - Trading pairs represented as (src_token, dst_token)
+    - Chain ID required for multi-chain support
+
+    {b Known Limitations:}
+    - ❌ No REST trading (requires blockchain integration)
+    - ❌ No WebSocket support (REST only)
+    - ❌ No order book depth (only top of book from quotes)
+    - Quotes expire in 30 seconds
+    - Gas estimation required for transaction execution
+    - Price impact varies significantly with liquidity
+    - Different token standards (ERC-20, native ETH) require special handling
+
+    {b Trading Implementation Plan:}
+    - Phase 1: Market data ✅ (complete)
+    - Phase 2: EVM wallet integration (pending)
+    - Phase 3: Transaction building with gas estimation (pending)
+    - Phase 4: Swap execution and monitoring (pending)
+
+    @see <https://docs.1inch.io/docs/aggregation-protocol/api/> 1inch Aggregation API Documentation
+    @see <https://docs.1inch.io/docs/aggregation-protocol/introduction> 1inch Protocol Overview
 *)
 
 open Core
