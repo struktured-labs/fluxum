@@ -1,0 +1,127 @@
+(** Bybit Order Book - Uses common Order_book_base *)
+
+open Core
+open Async
+
+module Price_level = Exchange_common.Order_book_base.Price_level
+module Bid_ask = Fluxum.Order_book_intf.Bid_ask
+
+(** Bybit-specific metadata - none beyond base *)
+type metadata = unit [@@deriving sexp]
+
+let default_metadata () = ()
+
+module Book_base = Exchange_common.Order_book_base.Make (struct
+  type symbol = string
+  let sexp_of_symbol = String.sexp_of_t
+  let symbol_of_sexp = String.t_of_sexp
+  let compare_symbol = String.compare
+
+  type nonrec metadata = metadata
+  let sexp_of_metadata = sexp_of_metadata
+  let metadata_of_sexp = metadata_of_sexp
+  let default_metadata = default_metadata
+end)
+
+module Book = struct
+  include Book_base.Book
+
+  let empty ?timestamp:_ ?epoch:_ symbol =
+    create ~symbol
+
+  (** Update (add or remove) price level *)
+  let update t ~side ~price ~size =
+    let levels = match Poly.(side = `Bid) with true -> bids_alist t | false -> asks_alist t in
+    let current =
+      match List.Assoc.find levels ~equal:Float.equal price with
+      | Some level -> Price_level.volume level
+      | None -> 0.
+    in
+    set t ~side ~price ~size:(current +. size)
+
+  (** Remove from price level *)
+  let remove t ~side ~price ~size =
+    update t ~side ~price ~size:(-.size)
+
+  (** Apply book update from Bybit WebSocket
+
+      Note: This is a placeholder implementation until Bybit WebSocket client is implemented.
+      When the WS client is ready, this should parse Bybit's specific update format.
+  *)
+  let apply_book_update t (update : Yojson.Safe.t) : t =
+    try
+      let open Yojson.Safe.Util in
+      (* Bybit format: {"b": [[price, size], ...], "a": [[price, size], ...]} *)
+      let bids = update |> member "b" |> to_list_option |> Option.value ~default:[] in
+      let asks = update |> member "a" |> to_list_option |> Option.value ~default:[] in
+
+      (* Process bid updates *)
+      let t_with_bids =
+        List.fold bids ~init:t ~f:(fun acc level ->
+          let open Result.Let_syntax in
+          match (
+            let level_list = to_list level in
+            match level_list with
+            | [price_json; size_json] ->
+              let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string (to_string price_json) in
+              let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string (to_string size_json) in
+              Ok (price, volume)
+            | _ -> Error "Invalid bid level format"
+          ) with
+          | Ok (price, volume) -> set acc ~side:`Bid ~price ~size:volume
+          | Error err ->
+            Log.Global.error "Bybit WS: Failed to parse bid level: %s" err;
+            acc
+        )
+      in
+
+      (* Process ask updates *)
+      let t_with_asks =
+        List.fold asks ~init:t_with_bids ~f:(fun acc level ->
+          let open Result.Let_syntax in
+          match (
+            let level_list = to_list level in
+            match level_list with
+            | [price_json; size_json] ->
+              let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string (to_string price_json) in
+              let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string (to_string size_json) in
+              Ok (price, volume)
+            | _ -> Error "Invalid ask level format"
+          ) with
+          | Ok (price, volume) -> set acc ~side:`Ask ~price ~size:volume
+          | Error err ->
+            Log.Global.error "Bybit WS: Failed to parse ask level: %s" err;
+            acc
+        )
+      in
+      t_with_asks
+    with
+    | _ -> t
+
+  (** Create live order book pipe from Bybit WebSocket
+
+      Note: This is a placeholder implementation that returns an empty pipe.
+      When Bybit WebSocket client is implemented, this should:
+      1. Connect to Bybit WebSocket
+      2. Subscribe to orderbook channel for the symbol
+      3. Apply updates using apply_book_update
+      4. Return a pipe that emits book snapshots
+  *)
+  let pipe ~symbol ?(depth = 10) () : (t, string) Result.t Pipe.Reader.t Deferred.t =
+    ignore depth;
+    Log.Global.info "Bybit order book pipe for %s (placeholder - WebSocket not yet implemented)" symbol;
+    let reader, writer = Pipe.create () in
+
+    (* Start with empty book *)
+    let init_book = empty symbol in
+    don't_wait_for (Pipe.write writer (Ok init_book));
+
+    (* Close immediately for now - real implementation will keep connection open *)
+    Pipe.close writer;
+    return reader
+end
+
+module Books = struct
+  include Book_base.Books
+  type book = Book.t
+end
