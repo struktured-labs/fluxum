@@ -538,14 +538,17 @@ module Adapter = struct
         let qty_str = json |> member "amount" |> to_string in
         let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
         let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
+        let side_str = json |> member "type" |> to_string in
+        let side =
+          match Fluxum.Normalize_common.Side.of_string side_str with
+          | Ok s -> Some s
+          | Error _ -> Some Types.Side.Buy  (* Default for unknown *)
+        in
         Ok ({ venue = Venue.t
         ; symbol = ""  (* Symbol not in response, caller must track *)
         ; price
         ; qty
-        ; side = Some (match json |> member "type" |> to_string with
-            | "buy" -> Types.Side.Buy
-            | "sell" -> Types.Side.Sell
-            | _ -> Types.Side.Buy)
+        ; side
         ; trade_id = Some (json |> member "tid" |> to_int |> Int.to_string)
         ; ts = Some ts
         } : Types.Public_trade.t)

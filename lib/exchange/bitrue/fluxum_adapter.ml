@@ -156,11 +156,10 @@ module Adapter = struct
       let%bind side = Side.of_string resp.side in
       let%bind status = Order_status.of_string resp.status in
       let%bind kind =
-        match String.lowercase resp.type_ with
-        | "limit" -> Ok (Types.Order_kind.Limit price)
-        | "market" -> Ok Types.Order_kind.Market
-        | "limit_maker" -> Ok (Types.Order_kind.Post_only_limit price)
-        | t -> Error (sprintf "Unrecognized order type: %s" t)
+        match%bind Order_type.of_string resp.type_ with
+        | Types.Order_kind.Limit _ -> Ok (Types.Order_kind.Limit price)
+        | Types.Order_kind.Post_only_limit _ -> Ok (Types.Order_kind.Post_only_limit price)
+        | Types.Order_kind.Market -> Ok Types.Order_kind.Market
       in
       let created_at = Some (Time_float_unix.of_span_since_epoch
         (Time_float_unix.Span.of_ms (Int64.to_float resp.transactTime))) in
@@ -187,11 +186,10 @@ module Adapter = struct
       let%bind side = Side.of_string status_resp.side in
       let%bind status = Order_status.of_string status_resp.status in
       let%bind kind =
-        match String.lowercase status_resp.type_ with
-        | "limit" -> Ok (Types.Order_kind.Limit price)
-        | "market" -> Ok Types.Order_kind.Market
-        | "limit_maker" -> Ok (Types.Order_kind.Post_only_limit price)
-        | t -> Error (sprintf "Unrecognized order type: %s" t)
+        match%bind Order_type.of_string status_resp.type_ with
+        | Types.Order_kind.Limit _ -> Ok (Types.Order_kind.Limit price)
+        | Types.Order_kind.Post_only_limit _ -> Ok (Types.Order_kind.Post_only_limit price)
+        | Types.Order_kind.Market -> Ok Types.Order_kind.Market
       in
       let created_at = Some (Time_float_unix.of_span_since_epoch
         (Time_float_unix.Span.of_ms (Int64.to_float status_resp.time))) in

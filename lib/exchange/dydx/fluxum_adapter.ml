@@ -311,10 +311,10 @@ module Adapter = struct
       let open Result.Let_syntax in
       let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string tr.price in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string tr.size in
-      let side = match String.uppercase tr.side with
-        | "BUY" -> Some Types.Side.Buy
-        | "SELL" -> Some Types.Side.Sell
-        | _ -> None
+      let side =
+        match Fluxum.Normalize_common.Side.of_string tr.side with
+        | Ok s -> Some s
+        | Error _ -> None
       in
       let ts =
         try
