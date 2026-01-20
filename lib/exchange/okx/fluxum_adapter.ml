@@ -274,10 +274,14 @@ module Adapter = struct
       ; qty
       ; filled
       ; status = order_status
-      ; created_at = Some (Time_float_unix.of_span_since_epoch
-          (Time_float_unix.Span.of_ms (Float.of_string status.cTime)))
-      ; updated_at = Some (Time_float_unix.of_span_since_epoch
-          (Time_float_unix.Span.of_ms (Float.of_string status.uTime)))
+      ; created_at =
+        (match Fluxum.Normalize_common.Float_conv.of_string status.cTime with
+         | Ok ms -> Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_ms ms))
+         | Error _ -> None)  (* Fallback to None on parse failure *)
+      ; updated_at =
+        (match Fluxum.Normalize_common.Float_conv.of_string status.uTime with
+         | Ok ms -> Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_ms ms))
+         | Error _ -> None)  (* Fallback to None on parse failure *)
       } : Types.Order.t)
 
     let trade (t : Native.Trade.t) : (Types.Trade.t, string) Result.t =
@@ -292,8 +296,10 @@ module Adapter = struct
       ; qty
       ; fee = None
       ; trade_id = Some t.tradeId
-      ; ts = Some (Time_float_unix.of_span_since_epoch
-          (Time_float_unix.Span.of_ms (Float.of_string t.ts)))
+      ; ts =
+        (match Fluxum.Normalize_common.Float_conv.of_string t.ts with
+         | Ok ms -> Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_ms ms))
+         | Error _ -> None)  (* Fallback to None on parse failure *)
       } : Types.Trade.t)
 
     let balance (b : Native.Balance.t) : (Types.Balance.t, string) Result.t =
@@ -352,8 +358,10 @@ module Adapter = struct
       ; symbol
       ; bids
       ; asks
-      ; ts = Some (Time_float_unix.of_span_since_epoch
-          (Time_float_unix.Span.of_ms (Float.of_string book.ts)))
+      ; ts =
+        (match Fluxum.Normalize_common.Float_conv.of_string book.ts with
+         | Ok ms -> Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_ms ms))
+         | Error _ -> None)  (* Fallback to None on parse failure *)
       ; epoch = 0  (* OKX doesn't provide update ID in same format *)
       } : Types.Order_book.t)
 
@@ -368,8 +376,10 @@ module Adapter = struct
       ; price
       ; qty
       ; trade_id = Some trade.tradeId
-      ; ts = Some (Time_float_unix.of_span_since_epoch
-          (Time_float_unix.Span.of_ms (Float.of_string trade.ts)))
+      ; ts =
+        (match Fluxum.Normalize_common.Float_conv.of_string trade.ts with
+         | Ok ms -> Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_ms ms))
+         | Error _ -> None)  (* Fallback to None on parse failure *)
       } : Types.Public_trade.t)
 
     let symbol_info (info : Native.Symbol_info.t) : (Types.Symbol_info.t, string) Result.t =
