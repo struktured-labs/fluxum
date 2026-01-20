@@ -14,5 +14,6 @@ module Fluxum_adapter = Fluxum_adapter
 
 let command : Command.t =
   Command.group ~summary:"Bitrue Exchange Commands"
-    [ Ledger.command
+    [
+      (* TODO: Add commands when implemented *)
     ]

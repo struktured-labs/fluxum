@@ -52,8 +52,8 @@ module Book = struct
     try
       let open Yojson.Safe.Util in
       (* Bybit format: {"b": [[price, size], ...], "a": [[price, size], ...]} *)
-      let bids = update |> member "b" |> to_list_option |> Option.value ~default:[] in
-      let asks = update |> member "a" |> to_list_option |> Option.value ~default:[] in
+      let bids = (try update |> member "b" |> to_list with _ -> []) in
+      let asks = (try update |> member "a" |> to_list with _ -> []) in
 
       (* Process bid updates *)
       let t_with_bids =

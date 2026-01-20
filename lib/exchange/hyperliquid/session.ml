@@ -82,7 +82,7 @@ module Events = struct
           let name = sprintf "order_book[%s]" symbol in
           let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
             Log.Global.info "Creating order book for %s" symbol;
-            Order_book.Book.pipe ~symbol ~depth:10 ()
+            Order_book.Book.pipe ~symbol ()
           ) () in
           (symbol, pipe)
         )

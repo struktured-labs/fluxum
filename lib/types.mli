@@ -34,6 +34,7 @@ module Venue : sig
     | Mexc          (** MEXC - Asian CEX *)
     | Coinbase      (** Coinbase - US-based CEX *)
     | Binance       (** Binance - Global CEX *)
+    | Bybit         (** Bybit - Global CEX (derivatives leader) *)
     | Hyperliquid   (** Hyperliquid - L1 derivatives DEX *)
     | Bitrue        (** Bitrue - Global CEX *)
     | Dydx          (** dYdX v4 - DeFi perpetuals *)
