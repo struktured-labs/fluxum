@@ -30,14 +30,14 @@ end
 
 (** Multi-stream event container *)
 module Events = struct
-  (** Type aliases for Coinbase-specific types *)
+  (** Type aliases for MEXC-specific types *)
   type balance = V1.Account.balance
   type trade = V1.My_trades.trade
   type market_event = string  (* Raw WebSocket message *)
   type book = Order_book.Book.t
   type ledger_entry = Ledger.Entry.t
-  type order_event = unit  (* Coinbase doesn't support order events in Advanced Trade API *)
-  type order_id = string
+  type order_event = V1.New_order.response  (* Order execution updates *)
+  type order_id = int64
 
   type t =
     { symbols : Fluxum.Types.Symbol.t list;
