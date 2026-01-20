@@ -1,7 +1,7 @@
 (library
  (name okx)
  (public_name fluxum.okx)
- (modules cfg rest v5 ws order_book ledger session unified_adapter okx)
+ (modules cfg rest v5 ws order_book ledger session fluxum_adapter unified_adapter okx)
  (libraries core async cohttp cohttp-async digestif fluxum exchange_common yojson uri websocket_curl base64)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async)

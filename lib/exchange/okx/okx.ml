@@ -9,9 +9,8 @@ module Ws = Ws
 module Order_book = Order_book
 module Ledger = Ledger
 module Session = Session
-(* TODO: Uncomment when implemented *)
-(* module Fluxum_adapter = Fluxum_adapter *)
-(* module Unified_adapter = Unified_adapter *)
+module Fluxum_adapter = Fluxum_adapter
+module Unified_adapter = Unified_adapter
 
 (** Main OKX command group *)
 let command : Command.t =
