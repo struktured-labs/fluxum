@@ -206,110 +206,89 @@ module Impl (Channel : CHANNEL) :
               match String.length !buffer with
               | 0 -> return ()
               | _ ->
-                (* Find and parse valid JSON: try parsing from each '{' or '[' until one succeeds *)
-                let rec find_and_parse_json idx =
+                (* First, find where valid JSON starts (skip any garbage prefix) *)
+                let rec find_json_start idx =
                   if idx >= String.length !buffer then None
                   else
                     match !buffer.[idx] with
-                    | '{' | '[' ->
-                      (* Try parsing from here *)
-                      let substring = String.sub !buffer ~pos:idx ~len:(String.length !buffer - idx) in
-                      let preview_len = min 50 (String.length substring) in
-                      let preview = String.sub substring ~pos:0 ~len:preview_len in
-                      Log.Global.info "[JSON_PARSE] Trying offset %d (buffer_len=%d): %s..." idx (String.length !buffer) preview;
-                      (try
-                        let json = Yojson.Safe.from_string substring in
-                        (* Parse succeeded! But verify it's a response object (has socket_sequence AND type) *)
-                        match json with
-                        | `Assoc fields ->
-                          (match (List.Assoc.find fields ~equal:String.equal "socket_sequence",
-                                  List.Assoc.find fields ~equal:String.equal "type") with
-                           | (Some _, Some _) ->
-                             (* Valid response object with both socket_sequence and type! *)
-                             Log.Global.error "[JSON_PARSE] FOUND VALID RESPONSE at offset %d, buffer_len=%d" idx (String.length !buffer);
-                             (* Calculate actual consumed bytes by finding the end *)
-                             let json_str = Yojson.Safe.to_string json in
-                             Some (json, idx, String.length json_str)
-                           | _ ->
-                             (* Missing required fields, keep searching *)
-                             Log.Global.error "[JSON_PARSE] Skipping JSON at %d - missing socket_sequence or type" idx;
-                             find_and_parse_json (idx + 1))
-                        | _ ->
-                          (* Not an object, keep searching *)
-                          find_and_parse_json (idx + 1)
-                       with
-                       | Yojson.Json_error err ->
-                         (* Parse failed, try next position *)
-                         Log.Global.error "[JSON_PARSE] Yojson parse error at offset %d: %s" idx err;
-                         find_and_parse_json (idx + 1)
-                       | exn ->
-                         Log.Global.error "[JSON_PARSE] Unexpected exception at offset %d: %s" idx (Exn.to_string exn);
-                         find_and_parse_json (idx + 1))
-                    | _ ->
-                      (* Not a JSON delimiter, skip *)
-                      find_and_parse_json (idx + 1)
+                    | '{' | '[' -> Some idx  (* Found start of JSON *)
+                    | _ -> find_json_start (idx + 1)  (* Skip garbage *)
                 in
 
-                match find_and_parse_json 0 with
+                match find_json_start 0 with
                 | None ->
-                  (* No valid JSON found, discard buffer *)
-                  let preview_len = min 100 (String.length !buffer) in
-                  let preview = String.sub !buffer ~pos:0 ~len:preview_len in
-                  Log.Global.error "[BUFFER_DISCARD] No valid JSON in %d byte buffer: %s" (String.length !buffer) preview;
+                  (* No JSON delimiter found in buffer, discard and wait for more data *)
+                  Log.Global.debug "No JSON delimiter in %d byte buffer, discarding" (String.length !buffer);
                   buffer := "";
                   return ()
-                | Some (json, start_pos, _end_pos) ->
-                  (* We already successfully parsed JSON - now convert and emit it *)
-                  (if start_pos > 0 then
-                    Log.Global.debug "Found valid JSON at offset %d (discarded %d garbage bytes)"
-                      start_pos start_pos);
-
-                  (* Convert parsed JSON to response *)
-                  let parsed_msg =
-                    match Channel.response_of_yojson json with
-                    | Ok response -> `Ok response
-                    | Error e ->
-                      let json_preview = Yojson.Safe.to_string json in
-                      let preview_len = min 200 (String.length json_preview) in
-                      let preview = String.sub json_preview ~pos:0 ~len:preview_len in
-                      Log.Global.error "[CHANNEL_PARSE_FAIL] Error: %s | JSON: %s" e preview;
-                      `Channel_parse_error e
-                  in
-
-                  (* Need to figure out how many bytes the JSON consumed *)
-                  (* Use depth tracker to find exact end position *)
-                  let rec find_json_end idx depth in_string escape =
-                    if idx >= String.length !buffer then idx
+                | Some start_pos ->
+                  (* Now find the matching close delimiter using depth tracking *)
+                  let rec find_complete idx depth in_string escape =
+                    if idx >= String.length !buffer then None
                     else
                       let c = !buffer.[idx] in
                       match in_string, escape, c with
                       | true, true, _ ->
-                        find_json_end (idx + 1) depth true false
+                        (* In string, was escaped, consume and continue *)
+                        find_complete (idx + 1) depth true false
                       | true, false, '\\' ->
-                        find_json_end (idx + 1) depth true true
+                        (* In string, found escape char *)
+                        find_complete (idx + 1) depth true true
                       | true, false, '"' ->
-                        find_json_end (idx + 1) depth false false
+                        (* In string, found closing quote *)
+                        find_complete (idx + 1) depth false false
                       | false, _, '"' ->
-                        find_json_end (idx + 1) depth true false
-                      | false, _, ('{' | '[') ->
-                        find_json_end (idx + 1) (depth + 1) false false
-                      | false, _, ('}' | ']') ->
+                        (* Not in string, found opening quote *)
+                        find_complete (idx + 1) depth true false
+                      | false, _, '{' | false, _, '[' ->
+                        (* Opening brace/bracket *)
+                        find_complete (idx + 1) (depth + 1) false false
+                      | false, _, '}' | false, _, ']' ->
+                        (* Closing brace/bracket *)
                         let new_depth = depth - 1 in
-                        if new_depth = 0 then idx + 1  (* Found end! *)
-                        else find_json_end (idx + 1) new_depth false false
+                        if new_depth = 0 then
+                          (* Found complete JSON - extract from start_pos to idx *)
+                          let json_len = idx - start_pos + 1 in
+                          let json_str = String.sub !buffer ~pos:start_pos ~len:json_len in
+                          (* Return json_str and total bytes consumed (including garbage prefix) *)
+                          Some (json_str, idx + 1, start_pos)
+                        else
+                          find_complete (idx + 1) new_depth false false
                       | _, _, _ ->
-                        find_json_end (idx + 1) depth in_string false
+                        (* Other character *)
+                        find_complete (idx + 1) depth in_string false
                   in
-                  let consumed_len = find_json_end (start_pos + 1) 1 false false in
 
-                  (* Remove consumed bytes from buffer *)
-                  buffer := String.sub !buffer ~pos:consumed_len
-                    ~len:(String.length !buffer - consumed_len);
+                  (* Start depth tracking from start_pos+1 with depth 1 (already saw opening delimiter) *)
+                  let complete_json_opt = find_complete (start_pos + 1) 1 false false in
 
-                  (* Emit parsed message *)
-                  let%bind () = Pipe.write w parsed_msg in
-                  (* Process remaining buffer *)
-                  process_buffer ()
+                  match complete_json_opt with
+                  | None ->
+                    (* Incomplete JSON, keep buffering *)
+                    Log.Global.debug "Buffering incomplete JSON: %d bytes" (String.length !buffer);
+                    return ()
+                  | Some (json_str, consumed_len, prefix_len) ->
+                    (* We have complete JSON, parse and emit it *)
+                    (if prefix_len > 0 then
+                      Log.Global.debug "Complete JSON: %d bytes (discarded %d prefix garbage bytes)"
+                        (String.length json_str) prefix_len);
+                    let parsed_msg =
+                      ( try `Ok (Yojson.Safe.from_string json_str) with
+                      | Yojson.Json_error e -> `Json_parse_error e )
+                      |> function
+                      | #Error.t as e -> e
+                      | `Ok json -> (
+                        match Channel.response_of_yojson json with
+                        | Ok response -> `Ok response
+                        | Error e -> `Channel_parse_error e )
+                    in
+                    (* Remove consumed bytes (including prefix garbage) from buffer *)
+                    buffer := String.sub !buffer ~pos:consumed_len
+                      ~len:(String.length !buffer - consumed_len);
+                    (* Emit parsed message *)
+                    let%bind () = Pipe.write w parsed_msg in
+                    (* Process remaining buffer *)
+                    process_buffer ()
             in
             process_buffer () >>= fun () ->
             receive_loop ()
