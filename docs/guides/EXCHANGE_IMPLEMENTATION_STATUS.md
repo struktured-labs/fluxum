@@ -4,7 +4,7 @@
 
 Fluxum supports 10 exchanges with varying levels of integration. This document provides a comprehensive status matrix of implemented features for each exchange.
 
-**Last Updated:** 2026-01-20 (Bybit production-ready)
+**Last Updated:** 2026-01-20 (Bybit and OKX production-ready)
 
 ## Feature Matrix
 
@@ -14,6 +14,7 @@ Fluxum supports 10 exchanges with varying levels of integration. This document p
 | **Kraken** | CEX | ✅ REST | ✅ REST | ✅ v2 Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
 | **MEXC** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
 | **Bybit** | CEX | ✅ V5 REST | ✅ V5 REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
+| **OKX** | CEX | ✅ V5 REST | ✅ V5 REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
 | **Hyperliquid** | L1 DEX | ❌ Blockchain | ✅ REST | ✅ Curl | ✅ L2 | ❌ | ❌ | ✅ Phase 1 | **Market Data Only** |
 | **Binance** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
 | **Coinbase** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ❌ | ❌ | ⚠️ Partial | **Partial** |
@@ -200,6 +201,64 @@ Fluxum supports 10 exchanges with varying levels of integration. This document p
 
 ---
 
+### OKX (Production Ready) ✅
+
+**Implementation:** Complete implementation with unified V5 API across all products
+
+**Features:**
+- ✅ REST trading (SPOT, FUTURES, SWAP, OPTION via V5 API)
+- ✅ WebSocket market data (books, trades, tickers, candles)
+- ✅ Order book tracking with incremental updates
+- ✅ P&L ledger with comprehensive accounting (28 fields)
+- ✅ Session management with auto-reconnecting streams
+- ✅ Fallible normalization (Phase 1 complete)
+- ✅ Unified V5 API across all products (spot + derivatives)
+
+**Authentication:**
+- API key/secret/passphrase via environment variables (OKX_API_KEY, OKX_SECRET, OKX_PASSPHRASE)
+- HMAC-SHA256 signatures with Base64 encoding
+- OK-ACCESS-* header authentication (KEY, SIGN, TIMESTAMP, PASSPHRASE)
+- ISO timestamp format: 2020-12-08T09:08:57.715Z
+
+**Rate Limits:**
+- Public endpoints: 20 requests/second per IP
+- Private endpoints: 10 requests/second per API key
+- WebSocket: 100 subscriptions per connection
+- Order placement: 60 orders/2 seconds per instrument
+
+**Symbol Format:** Hyphenated uppercase (`BTC-USDT`, `ETH-USDT`)
+- Different from most exchanges (Binance/Bybit use no separator)
+- InstType parameter distinguishes product type (SPOT/FUTURES/SWAP/OPTION)
+
+**V5 API Product Types (instType):**
+- **SPOT**: Spot trading
+- **FUTURES**: Delivery futures
+- **SWAP**: Perpetual swaps
+- **OPTION**: Options trading
+
+**V5 API Trade Modes (tdMode):**
+- **cash**: Spot and futures (simple mode)
+- **cross**: Cross-margin
+- **isolated**: Isolated margin
+
+**Known Limitations:**
+- Passphrase required (in addition to API key/secret)
+- ISO timestamp format more strict than other exchanges
+- Different symbol format requires conversion for cross-exchange strategies
+- WebSocket channel subscriptions use different structure than Bybit
+
+**Production Readiness:**
+- Top 5 global derivatives exchange
+- All normalize functions return Result.t
+- Comprehensive P&L tracking
+- Auto-reconnecting session management
+- Complete V5 API implementation (9 endpoints)
+- Base64-encoded signature authentication
+
+**Documentation:** See [fluxum_adapter.ml](../../lib/exchange/okx/fluxum_adapter.ml) module docstring
+
+---
+
 ### Hyperliquid (Market Data Only) 🔷
 
 **Implementation:** L1 blockchain DEX with read-only market data access
@@ -376,6 +435,7 @@ Fluxum supports 10 exchanges with varying levels of integration. This document p
 | Hyperliquid | All ✅ | ✅ Yes | Market data only |
 | MEXC | All ✅ | ✅ Yes | Complete with safe conversions |
 | Bybit | All ✅ | ✅ Yes | Complete with safe conversions |
+| OKX | All ✅ | ✅ Yes | Complete with safe conversions |
 | Binance | All ✅ | ✅ Yes | Complete with safe conversions |
 | Coinbase | Partial ⚠️ | ❌ No | ~60% complete |
 | Bitrue | Partial ⚠️ | ❌ No | ~50% complete |
@@ -401,6 +461,7 @@ All exchanges now use `websocket_curl` for WebSocket connections. The old `cohtt
 | Kraken | websocket_curl | ✅ Native | v2 API support |
 | MEXC | websocket_curl | ✅ Native | Binance-compatible |
 | Bybit | websocket_curl | ✅ Native | V5 API with 20s heartbeat |
+| OKX | websocket_curl | ✅ Native | V5 API with ping/pong |
 | Hyperliquid | websocket_curl | ✅ Native | L1 blockchain feeds |
 | Binance | websocket_curl | ✅ Migrated | Use Market_data module |
 | Coinbase | websocket_curl | ✅ Migrated | Use Market_data module |
@@ -414,39 +475,44 @@ All exchanges now use `websocket_curl` for WebSocket connections. The old `cohtt
 ## Recommended Exchanges by Use Case
 
 ### Production Trading
-**Binance**, **Bybit**, **Gemini**, or **Kraken**
+**Binance**, **Bybit**, **OKX**, **Gemini**, or **Kraken**
 - Complete feature set (trading, market data, P&L tracking, session management)
 - Fallible normalization (robust error handling)
 - Well-tested and documented
 - **Binance**: Largest exchange by volume (best liquidity)
 - **Bybit**: 2nd largest derivatives exchange (unified V5 API, spot + derivatives)
+- **OKX**: Top 5 global derivatives exchange (unified V5 API, comprehensive product types)
 
 ### Derivatives Trading
-**Bybit** or **Binance**
-- **Bybit**: Unified V5 API across spot, linear, inverse, option
-- 2nd largest derivatives exchange globally
-- Category-based routing for all product types
+**Bybit**, **OKX**, or **Binance**
+- **Bybit**: Unified V5 API across spot, linear, inverse, option - 2nd largest derivatives exchange globally
+- **OKX**: Unified V5 API across SPOT, FUTURES, SWAP, OPTION - Top 5 global derivatives exchange
+- **Binance**: Largest overall volume, strong derivatives offering
+- Category/InstType-based routing for all product types
 - Lower maker fees on derivatives than most exchanges
 
 ### Market Data Only
-**MEXC**, **Bybit**, or **Hyperliquid**
+**MEXC**, **Bybit**, **OKX**, or **Hyperliquid**
 - Reliable WebSocket feeds
 - Good order book tracking
 - No trading required
 - **Bybit**: V5 API with unified data streams
+- **OKX**: V5 API with comprehensive market data channels
 
 ### High-Frequency Trading
-**Kraken** or **Bybit**
+**Kraken**, **Bybit**, or **OKX**
 - **Kraken**: Lowest latency (WebSocket v2), high rate limits (60+ req/s on Pro tier)
 - **Bybit**: 50 req/s public, 10 req/s private, 20 orders/s placement
+- **OKX**: 20 req/s public, 10 req/s private, 60 orders/2s per instrument
 
 ### Multi-Exchange Arbitrage
-**Binance + Bybit + Kraken** or **Binance + Gemini + Kraken + Bybit**
+**Binance + Bybit + OKX + Kraken** or **Binance + Gemini + Kraken + Bybit + OKX**
 - Use `Consolidated_order_book` for aggregated L2 data
 - All have complete fallible normalization
 - **Binance**: Critical for arbitrage (largest volume, best liquidity)
 - **Bybit**: Derivatives arbitrage, unified V5 API
-- Compatible symbol formats (BTCUSDT format)
+- **OKX**: Top derivatives volume, diverse product types
+- Note: OKX uses hyphenated symbol format (BTC-USDT) vs Binance/Bybit (BTCUSDT)
 
 ### DEX Integration (Experimental)
 **Hyperliquid** (perpetuals) or **Jupiter** (Solana spot)
