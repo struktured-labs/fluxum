@@ -18,7 +18,7 @@ let event_venue_to_entry_venue (venue : Event.Venue.t) : Unified_ledger.Entry.Ve
     match venue with
     | Event.Venue.Gemini -> Unified_ledger.Entry.Venue.Gemini
     | Kraken -> Kraken | Mexc -> Mexc | Coinbase -> Coinbase
-    | Binance -> Binance | Bybit -> Bybit | Hyperliquid -> Hyperliquid | Bitrue -> Bitrue
+    | Binance -> Binance | Bybit -> Bybit | Okx -> Okx | Hyperliquid -> Hyperliquid | Bitrue -> Bitrue
     | Dydx -> Dydx | Jupiter -> Jupiter | OneInch -> OneInch
     | Other s -> Other s
 

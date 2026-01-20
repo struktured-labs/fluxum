@@ -26,6 +26,7 @@ module Venue = struct
       | Coinbase
       | Binance
       | Bybit
+      | Okx
       | Hyperliquid
       | Bitrue
       | Dydx
@@ -44,6 +45,7 @@ module Venue = struct
     | Coinbase -> Coinbase
     | Binance -> Binance
     | Bybit -> Bybit
+    | Okx -> Okx
     | Hyperliquid -> Hyperliquid
     | Bitrue -> Bitrue
     | Dydx -> Dydx
@@ -60,6 +62,7 @@ module Venue = struct
     | Coinbase -> "Coinbase"
     | Binance -> "Binance"
     | Bybit -> "Bybit"
+    | Okx -> "OKX"
     | Hyperliquid -> "Hyperliquid"
     | Bitrue -> "Bitrue"
     | Dydx -> "dYdX"

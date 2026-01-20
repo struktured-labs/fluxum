@@ -35,6 +35,7 @@ module Venue : sig
     | Coinbase      (** Coinbase - US-based CEX *)
     | Binance       (** Binance - Global CEX *)
     | Bybit         (** Bybit - Global CEX (derivatives leader) *)
+    | Okx           (** OKX - Global CEX (derivatives and spot) *)
     | Hyperliquid   (** Hyperliquid - L1 derivatives DEX *)
     | Bitrue        (** Bitrue - Global CEX *)
     | Dydx          (** dYdX v4 - DeFi perpetuals *)

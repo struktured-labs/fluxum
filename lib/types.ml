@@ -8,6 +8,7 @@ module Venue = struct
     | Coinbase
     | Binance
     | Bybit
+    | Okx
     | Hyperliquid
     | Bitrue
     | Dydx      (** dYdX v4 - DeFi perpetuals *)
@@ -25,6 +26,7 @@ module Venue = struct
     | Coinbase -> "Coinbase"
     | Binance -> "Binance"
     | Bybit -> "Bybit"
+    | Okx -> "OKX"
     | Hyperliquid -> "Hyperliquid"
     | Bitrue -> "Bitrue"
     | Dydx -> "dYdX"
@@ -36,7 +38,7 @@ module Venue = struct
 
   let is_defi = function
     | Dydx | Jupiter | OneInch | Gmx | Aave | Compound -> true
-    | Gemini | Kraken | Mexc | Coinbase | Binance | Bybit | Hyperliquid | Bitrue -> false
+    | Gemini | Kraken | Mexc | Coinbase | Binance | Bybit | Okx | Hyperliquid | Bitrue -> false
 end
 
 module Symbol = struct
