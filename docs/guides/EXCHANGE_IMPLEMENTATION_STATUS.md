@@ -4,7 +4,7 @@
 
 Fluxum supports 10 exchanges with varying levels of integration. This document provides a comprehensive status matrix of implemented features for each exchange.
 
-**Last Updated:** 2026-01-17 (Phase 4, Priority 3 completion)
+**Last Updated:** 2026-01-20 (Bybit production-ready)
 
 ## Feature Matrix
 
@@ -13,6 +13,7 @@ Fluxum supports 10 exchanges with varying levels of integration. This document p
 | **Gemini** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
 | **Kraken** | CEX | ✅ REST | ✅ REST | ✅ v2 Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
 | **MEXC** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
+| **Bybit** | CEX | ✅ V5 REST | ✅ V5 REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
 | **Hyperliquid** | L1 DEX | ❌ Blockchain | ✅ REST | ✅ Curl | ✅ L2 | ❌ | ❌ | ✅ Phase 1 | **Market Data Only** |
 | **Binance** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
 | **Coinbase** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ❌ | ❌ | ⚠️ Partial | **Partial** |
@@ -143,6 +144,59 @@ Fluxum supports 10 exchanges with varying levels of integration. This document p
 - 598-line test suite with full coverage
 
 **Documentation:** See [fluxum_adapter.ml](../../lib/exchange/mexc/fluxum_adapter.ml) module docstring
+
+---
+
+### Bybit (Production Ready) ✅
+
+**Implementation:** Complete implementation with unified V5 API across all products
+
+**Features:**
+- ✅ REST trading (spot, linear, inverse, option via V5 API)
+- ✅ WebSocket market data (orderbook, trades, tickers, klines)
+- ✅ Order book tracking with incremental updates
+- ✅ P&L ledger with comprehensive accounting (28 fields)
+- ✅ Session management with auto-reconnecting streams
+- ✅ Fallible normalization (Phase 1 complete)
+- ✅ Unified V5 API across all products (spot + derivatives)
+
+**Authentication:**
+- API key/secret via environment variables (BYBIT_PRODUCTION_API_KEY, BYBIT_PRODUCTION_SECRET)
+- HMAC-SHA256 signatures
+- X-BAPI-* header authentication
+- 5000ms default recv window for clock skew
+
+**Rate Limits:**
+- Public endpoints: 50 requests/second per IP
+- Private endpoints: 10 requests/second per API key
+- WebSocket: 10 connections per IP
+- Order placement: 20 orders/second per API key
+
+**Symbol Format:** Uppercase with no separator (`BTCUSDT`, `ETHUSDT`)
+- Same format as Binance (unlike MEXC's underscore)
+- Category parameter distinguishes product type (spot/linear/inverse/option)
+
+**V5 API Categories:**
+- **spot**: Spot trading
+- **linear**: USDT/USDC perpetuals and futures
+- **inverse**: Inverse perpetuals and futures (BTC, ETH settled)
+- **option**: Options trading
+
+**Known Limitations:**
+- Some advanced order types require specific categories
+- Historical data depth varies by category
+- WebSocket requires reconnection if no pong received within 20 seconds
+- Different endpoints for spot vs derivatives in some cases
+
+**Production Readiness:**
+- 2nd largest derivatives exchange globally
+- All normalize functions return Result.t
+- Comprehensive P&L tracking
+- Auto-reconnecting session management
+- WebSocket with heartbeat (20s ping interval)
+- Complete V5 API implementation (9 endpoints)
+
+**Documentation:** See [fluxum_adapter.ml](../../lib/exchange/bybit/fluxum_adapter.ml) module docstring
 
 ---
 
@@ -321,6 +375,7 @@ Fluxum supports 10 exchanges with varying levels of integration. This document p
 | Kraken | All ✅ | ✅ Yes | Complete with safe conversions |
 | Hyperliquid | All ✅ | ✅ Yes | Market data only |
 | MEXC | All ✅ | ✅ Yes | Complete with safe conversions |
+| Bybit | All ✅ | ✅ Yes | Complete with safe conversions |
 | Binance | All ✅ | ✅ Yes | Complete with safe conversions |
 | Coinbase | Partial ⚠️ | ❌ No | ~60% complete |
 | Bitrue | Partial ⚠️ | ❌ No | ~50% complete |
@@ -345,6 +400,7 @@ All exchanges now use `websocket_curl` for WebSocket connections. The old `cohtt
 | Gemini | websocket_curl | ✅ Migrated | Auth channels may need header support |
 | Kraken | websocket_curl | ✅ Native | v2 API support |
 | MEXC | websocket_curl | ✅ Native | Binance-compatible |
+| Bybit | websocket_curl | ✅ Native | V5 API with 20s heartbeat |
 | Hyperliquid | websocket_curl | ✅ Native | L1 blockchain feeds |
 | Binance | websocket_curl | ✅ Migrated | Use Market_data module |
 | Coinbase | websocket_curl | ✅ Migrated | Use Market_data module |
@@ -358,30 +414,39 @@ All exchanges now use `websocket_curl` for WebSocket connections. The old `cohtt
 ## Recommended Exchanges by Use Case
 
 ### Production Trading
-**Binance**, **Gemini**, or **Kraken**
+**Binance**, **Bybit**, **Gemini**, or **Kraken**
 - Complete feature set (trading, market data, P&L tracking, session management)
 - Fallible normalization (robust error handling)
 - Well-tested and documented
 - **Binance**: Largest exchange by volume (best liquidity)
+- **Bybit**: 2nd largest derivatives exchange (unified V5 API, spot + derivatives)
+
+### Derivatives Trading
+**Bybit** or **Binance**
+- **Bybit**: Unified V5 API across spot, linear, inverse, option
+- 2nd largest derivatives exchange globally
+- Category-based routing for all product types
+- Lower maker fees on derivatives than most exchanges
 
 ### Market Data Only
-**MEXC** or **Hyperliquid**
+**MEXC**, **Bybit**, or **Hyperliquid**
 - Reliable WebSocket feeds
 - Good order book tracking
 - No trading required
+- **Bybit**: V5 API with unified data streams
 
 ### High-Frequency Trading
-**Kraken**
-- Lowest latency (WebSocket v2)
-- High rate limits (60+ req/s on Pro tier)
-- Batch order support
+**Kraken** or **Bybit**
+- **Kraken**: Lowest latency (WebSocket v2), high rate limits (60+ req/s on Pro tier)
+- **Bybit**: 50 req/s public, 10 req/s private, 20 orders/s placement
 
 ### Multi-Exchange Arbitrage
-**Binance + Gemini + Kraken** or **Binance + Kraken + MEXC**
+**Binance + Bybit + Kraken** or **Binance + Gemini + Kraken + Bybit**
 - Use `Consolidated_order_book` for aggregated L2 data
 - All have complete fallible normalization
 - **Binance**: Critical for arbitrage (largest volume, best liquidity)
-- Compatible symbol formats
+- **Bybit**: Derivatives arbitrage, unified V5 API
+- Compatible symbol formats (BTCUSDT format)
 
 ### DEX Integration (Experimental)
 **Hyperliquid** (perpetuals) or **Jupiter** (Solana spot)
