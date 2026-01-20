@@ -5,9 +5,11 @@ open Core
 module Cfg = Cfg
 module Rest = Rest
 module V5 = V5
+module Ws = Ws
 module Order_book = Order_book
 module Ledger = Ledger
 module Session = Session
+module Fluxum_adapter = Fluxum_adapter
 module Unified_adapter = Unified_adapter
 
 (** Main Bybit command group *)

@@ -1,7 +1,7 @@
 (library
  (name bybit)
  (public_name fluxum.bybit)
- (modules cfg rest v5 ws order_book ledger session unified_adapter bybit)
+ (modules cfg rest v5 ws order_book ledger session fluxum_adapter unified_adapter bybit)
  (libraries core async cohttp cohttp-async digestif fluxum exchange_common yojson uri websocket_curl)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async)
