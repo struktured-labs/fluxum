@@ -15,24 +15,26 @@ let api_secret ?default = param ?default ~name:"API_SECRET"
 module type S = sig
   val api_key : string
   val api_secret : string
+  val base_url : string
 end
 
 (** Create Bybit configuration from environment *)
-let make env =
+let make env ~base_url =
   let module M = struct
     let api_key = api_key ~env ()
     let api_secret = api_secret ~env ()
+    let base_url = base_url
   end in
   (module M : S)
 
 (** Production configuration *)
 module Production () = struct
-  include (val make "production" : S)
+  include (val make "production" ~base_url:"api.bybit.com" : S)
 end
 
 (** Testnet configuration *)
 module Testnet () = struct
-  include (val make "testnet" : S)
+  include (val make "testnet" ~base_url:"api-testnet.bybit.com" : S)
 end
 
 (** Produce configuration from string *)
