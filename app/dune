@@ -1,7 +1,7 @@
 (executable
   (name cli)
   (public_name fluxum)
-  (libraries gemini kraken binance mexc hyperliquid coinbase bitrue dydx jupiter oneinch backtest backtest_strategies bot)
+  (libraries gemini kraken binance bybit mexc hyperliquid coinbase bitrue dydx jupiter oneinch backtest backtest_strategies bot)
   (modules cli)
   (package fluxum)
   (preprocess (pps ppx_jane))

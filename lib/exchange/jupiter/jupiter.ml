@@ -20,6 +20,10 @@
 
 module Cfg = Cfg
 module Rest = Rest
+module Order_book = Order_book
+module Ledger = Ledger
+module Session = Session
+module Unified_adapter = Unified_adapter
 module Fluxum_adapter = Fluxum_adapter
 
 (** Common Solana token mint addresses *)
@@ -27,4 +31,5 @@ module Tokens = Rest.Tokens
 
 let command =
   Core.Command.group ~summary:"Jupiter Solana DEX Aggregator Commands"
-    []
+    [ Ledger.command
+    ]

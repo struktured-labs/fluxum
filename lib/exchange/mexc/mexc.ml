@@ -9,6 +9,9 @@ module Rest = Rest
 module V1 = V1
 module Order_book = Order_book
 module Ws = Ws
+module Ledger = Ledger
+module Session = Session
+module Unified_adapter = Unified_adapter
 module Fluxum_adapter = Fluxum_adapter
 
 let command : Command.t =
