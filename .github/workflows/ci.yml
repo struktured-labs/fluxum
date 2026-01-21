@@ -23,7 +23,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config
+        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config libsecp256k1-dev
 
     - name: Set up OCaml
       uses: ocaml/setup-ocaml@v2
@@ -85,7 +85,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config
+        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config libsecp256k1-dev
 
     - name: Set up OCaml
       uses: ocaml/setup-ocaml@v2
