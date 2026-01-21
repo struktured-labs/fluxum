@@ -444,3 +444,145 @@ let user_fills_by_time cfg ~user ~start_time ?end_time ()
     match Types.user_fills_of_yojson json with
     | Error e -> Error (`Json_parse e)
     | Ok fills -> Ok fills
+
+(* ============================================================ *)
+(* Trading API - /exchange endpoint *)
+(* ============================================================ *)
+
+(** Exchange action response *)
+module ExchangeResponse = struct
+  type status_variant =
+    | Ok_status
+    | Error_status of string
+  [@@deriving sexp]
+
+  type t = {
+    status : status_variant;
+    response : (Yojson.Safe.t [@sexp.opaque]) option; [@default None]
+  }
+
+  let of_yojson json =
+    match json with
+    | `Assoc fields ->
+      let status_result =
+        List.Assoc.find fields ~equal:String.equal "status"
+        |> Option.value ~default:(`String "error")
+      in
+      let status = match status_result with
+        | `String "ok" -> Ok_status
+        | `String err -> Error_status err
+        | _ -> Error_status "Unknown status"
+      in
+      let response = List.Assoc.find fields ~equal:String.equal "response" in
+      Ok { status; response }
+    | _ -> Error "Expected object for exchange response"
+end
+
+(** POST /exchange for order placement and cancellation *)
+let post_exchange ~cfg ~action ~signature ~nonce ?vault_address ()
+    : (ExchangeResponse.t, [> Error.t ]) result Deferred.t =
+  let uri = Uri.of_string (cfg.Cfg.rest_url ^ "/exchange") in
+  let headers =
+    Cohttp.Header.of_list [
+      ("Content-Type", "application/json");
+    ]
+  in
+
+  (* Build request body *)
+  let body_fields = [
+    ("action", action);
+    ("nonce", `Int (Int64.to_int_exn nonce));
+    ("signature", `Assoc [
+      ("r", `String (String.sub signature ~pos:0 ~len:64));
+      ("s", `String (String.sub signature ~pos:64 ~len:64));
+      ("v", `Int (Char.to_int (String.get signature 128)));
+    ]);
+  ] in
+
+  let body_fields_with_vault = match vault_address with
+    | None -> body_fields
+    | Some addr -> ("vaultAddress", `String addr) :: body_fields
+  in
+
+  let body = `Assoc body_fields_with_vault in
+  let body_str = Yojson.Safe.to_string body in
+
+  Monitor.try_with (fun () ->
+    Cohttp_async.Client.post
+      ~headers
+      ~body:(Cohttp_async.Body.of_string body_str)
+      uri
+    >>= fun (response, body) ->
+    Cohttp_async.Body.to_string body
+    >>| fun body_str ->
+    (response, body_str)
+  )
+  >>| function
+  | Error exn ->
+    Error (`Http (0, Exn.to_string exn))
+  | Ok (response, body_str) ->
+    let status = Cohttp.Response.status response in
+    let code = Cohttp.Code.code_of_status status in
+    match code >= 400 with
+    | true -> Error (`Http (code, body_str))
+    | false ->
+      match Yojson.Safe.from_string body_str with
+      | exception _ -> Error (`Json_parse body_str)
+      | json ->
+        match ExchangeResponse.of_yojson json with
+        | Error e -> Error (`Json_parse e)
+        | Ok resp -> Ok resp
+
+(** Place order using signed request *)
+let place_order ~cfg ~private_key ~(orders : Signing.order_request list) ~grouping ()
+    : (ExchangeResponse.t, [> Error.t ]) result Deferred.t =
+  let nonce = Int64.of_int (Int.of_float (Time_float_unix.now () |> Time_float_unix.to_span_since_epoch |> Time_float_unix.Span.to_ms)) in
+
+  (* Sign the order *)
+  match Signing.sign_place_order ~private_key ~orders ~grouping ~nonce with
+  | Error err -> return (Error (`Api_error err))
+  | Ok signature ->
+    (* Serialize action to JSON for the API request *)
+    let action_json = `Assoc [
+      ("type", `String "order");
+      ("orders", `List (List.map orders ~f:(fun o ->
+        `Assoc [
+          ("a", `Int o.asset);
+          ("b", `Bool o.is_buy);
+          ("p", `String o.limit_px);
+          ("s", `String o.sz);
+          ("r", `Bool o.reduce_only);
+          ("t", `Assoc [
+            ("limit", `Assoc [
+              ("tif", `String o.time_in_force)
+            ])
+          ]);
+          ("c", match o.cloid with Some c -> `String c | None -> `Null);
+        ]
+      )));
+      ("grouping", `String grouping);
+    ] in
+
+    post_exchange ~cfg ~action:action_json ~signature ~nonce ()
+
+(** Cancel order using signed request *)
+let cancel_order ~cfg ~private_key ~(cancels : Signing.cancel_request list) ()
+    : (ExchangeResponse.t, [> Error.t ]) result Deferred.t =
+  let nonce = Int64.of_int (Int.of_float (Time_float_unix.now () |> Time_float_unix.to_span_since_epoch |> Time_float_unix.Span.to_ms)) in
+
+  (* Sign the cancel *)
+  match Signing.sign_cancel_order ~private_key ~cancels ~nonce with
+  | Error err -> return (Error (`Api_error err))
+  | Ok signature ->
+    (* Serialize action to JSON *)
+    let action_json = `Assoc [
+      ("type", `String "cancel");
+      ("cancels", `List (List.map cancels ~f:(fun c ->
+        `Assoc [
+          ("a", `Int c.asset);
+          ("o", `Int (Int64.to_int_exn c.oid));
+        ]
+      )));
+    ] in
+
+    post_exchange ~cfg ~action:action_json ~signature ~nonce ()
