@@ -21,6 +21,9 @@ type exchange_source =
   | Bitrue
   | Binance
   | Coinbase
+  | Mexc
+  | Bybit
+  | Okx
   | Multiple of exchange_source list
   [@@deriving sexp, compare, equal]
 
@@ -67,6 +70,9 @@ module Book = struct
     bitrue_book : Bitrue.Order_book.Book.t option;
     binance_book : Binance.Order_book.Book.t option;
     coinbase_book : Coinbase.Order_book.Book.t option;
+    mexc_book : Mexc.Order_book.Book.t option;
+    bybit_book : Bybit.Order_book.Book.t option;
+    okx_book : Okx.Order_book.Book.t option;
     epoch : int;
     update_time : Time_float_unix.t;
   }
@@ -83,6 +89,9 @@ module Book = struct
     bitrue_book = None;
     binance_book = None;
     coinbase_book = None;
+    mexc_book = None;
+    bybit_book = None;
+    okx_book = None;
     epoch = 0;
     update_time = Time_float_unix.now ();
   }
@@ -183,7 +192,22 @@ module Book = struct
         ~extract_levels:(fun book -> Coinbase.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
         ~exchange:Coinbase
       in
-      gemini_bids @ kraken_bids @ hyperliquid_bids @ bitrue_bids @ binance_bids @ coinbase_bids
+      let mexc_bids = extract_common_levels
+        ~book_opt:t.mexc_book
+        ~extract_levels:(fun book -> Mexc.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~exchange:Mexc
+      in
+      let bybit_bids = extract_common_levels
+        ~book_opt:t.bybit_book
+        ~extract_levels:(fun book -> Bybit.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~exchange:Bybit
+      in
+      let okx_bids = extract_common_levels
+        ~book_opt:t.okx_book
+        ~extract_levels:(fun book -> Okx.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~exchange:Okx
+      in
+      gemini_bids @ kraken_bids @ hyperliquid_bids @ bitrue_bids @ binance_bids @ coinbase_bids @ mexc_bids @ bybit_bids @ okx_bids
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p2 p1) (* Descending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
       |> List.map ~f:(fun group ->
@@ -230,7 +254,22 @@ module Book = struct
         ~extract_levels:(fun book -> Coinbase.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
         ~exchange:Coinbase
       in
-      gemini_asks @ kraken_asks @ hyperliquid_asks @ bitrue_asks @ binance_asks @ coinbase_asks
+      let mexc_asks = extract_common_levels
+        ~book_opt:t.mexc_book
+        ~extract_levels:(fun book -> Mexc.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~exchange:Mexc
+      in
+      let bybit_asks = extract_common_levels
+        ~book_opt:t.bybit_book
+        ~extract_levels:(fun book -> Bybit.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~exchange:Bybit
+      in
+      let okx_asks = extract_common_levels
+        ~book_opt:t.okx_book
+        ~extract_levels:(fun book -> Okx.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~exchange:Okx
+      in
+      gemini_asks @ kraken_asks @ hyperliquid_asks @ bitrue_asks @ binance_asks @ coinbase_asks @ mexc_asks @ bybit_asks @ okx_asks
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2) (* Ascending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
       |> List.map ~f:(fun group ->
@@ -271,6 +310,21 @@ module Book = struct
   (** Update Coinbase book *)
   let update_coinbase t coinbase_book =
     let t = { t with coinbase_book = Some coinbase_book } in
+    rebuild t
+
+  (** Update MEXC book *)
+  let update_mexc t mexc_book =
+    let t = { t with mexc_book = Some mexc_book } in
+    rebuild t
+
+  (** Update Bybit book *)
+  let update_bybit t bybit_book =
+    let t = { t with bybit_book = Some bybit_book } in
+    rebuild t
+
+  (** Update OKX book *)
+  let update_okx t okx_book =
+    let t = { t with okx_book = Some okx_book } in
     rebuild t
 
   (** Get best bid *)
