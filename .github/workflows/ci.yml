@@ -23,7 +23,18 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config libsecp256k1-dev
+        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config autoconf automake libtool
+
+    - name: Build libsecp256k1 from source with Schnorr support
+      run: |
+        git clone https://github.com/bitcoin-core/secp256k1.git /tmp/secp256k1
+        cd /tmp/secp256k1
+        git checkout v0.5.1
+        ./autogen.sh
+        ./configure --enable-module-schnorrsig --enable-module-extrakeys --enable-module-ecdh
+        make -j$(nproc)
+        sudo make install
+        sudo ldconfig
 
     - name: Set up OCaml
       uses: ocaml/setup-ocaml@v2
@@ -85,7 +96,18 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config libsecp256k1-dev
+        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config autoconf automake libtool
+
+    - name: Build libsecp256k1 from source with Schnorr support
+      run: |
+        git clone https://github.com/bitcoin-core/secp256k1.git /tmp/secp256k1
+        cd /tmp/secp256k1
+        git checkout v0.5.1
+        ./autogen.sh
+        ./configure --enable-module-schnorrsig --enable-module-extrakeys --enable-module-ecdh
+        make -j$(nproc)
+        sudo make install
+        sudo ldconfig
 
     - name: Set up OCaml
       uses: ocaml/setup-ocaml@v2
