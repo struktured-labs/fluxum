@@ -117,7 +117,7 @@ module Events = struct
               (* Filter for trade messages only *)
               let trade_pipe = Pipe.filter_map (Ws.messages ws) ~f:(fun msg ->
                 match Ws.parse_message msg with
-                | Ws.Message.Trades trades -> Some (List.hd_exn trades)
+                | Ws.Message.Trades trades -> List.hd trades  (* Safe: returns None if empty *)
                 | _ -> None
               ) in
               return trade_pipe
