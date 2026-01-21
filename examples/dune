@@ -107,3 +107,9 @@
  (libraries core async backtest backtest_strategies)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async))
+(executable
+ (name hyperliquid_testnet)
+ (modules hyperliquid_testnet)
+ (libraries core async hyperliquid)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))

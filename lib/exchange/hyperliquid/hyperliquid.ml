@@ -18,6 +18,7 @@ module Session = Session
 module Unified_adapter = Unified_adapter
 module Fluxum_adapter = Fluxum_adapter
 module Market_data = Market_data
+module Signing = Signing
 
 let command : Command.t =
   Command.group ~summary:"Hyperliquid Exchange Commands"
