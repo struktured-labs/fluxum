@@ -365,6 +365,9 @@ module Book = struct
     | Bitrue -> "BTR"
     | Binance -> "BIN"
     | Coinbase -> "CBP"
+    | Mexc -> "MEX"
+    | Bybit -> "BYB"
+    | Okx -> "OKX"
     | Multiple sources ->
       List.map sources ~f:exchange_to_string
       |> String.concat ~sep:"+"

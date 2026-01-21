@@ -28,7 +28,7 @@
  (name consolidated_order_book)
  (public_name fluxum.consolidated_order_book)
  (modules consolidated_order_book)
- (libraries core async fluxum gemini kraken hyperliquid bitrue binance coinbase)
+ (libraries core async fluxum gemini kraken hyperliquid bitrue binance coinbase mexc bybit okx)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async))
 

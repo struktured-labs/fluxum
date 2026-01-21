@@ -34,4 +34,6 @@
   ctypes
   ctypes-foreign
   mirage-crypto
+  (secp256k1 (>= 0.4.4))
+  (msgpck (>= 1.7))
   (odoc :with-doc)))

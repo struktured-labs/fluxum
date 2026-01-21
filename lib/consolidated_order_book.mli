@@ -70,6 +70,9 @@ type exchange_source =
   | Bitrue
   | Binance
   | Coinbase
+  | Mexc
+  | Bybit
+  | Okx
   | Multiple of exchange_source list
       (** Multiple exchanges at the same price (merged) *)
 [@@deriving sexp, compare, equal]
@@ -191,6 +194,15 @@ module Book : sig
     coinbase_book : Coinbase.Order_book.Book.t option;
     (** Coinbase-specific order book *)
 
+    mexc_book : Mexc.Order_book.Book.t option;
+    (** MEXC-specific order book *)
+
+    bybit_book : Bybit.Order_book.Book.t option;
+    (** Bybit-specific order book *)
+
+    okx_book : Okx.Order_book.Book.t option;
+    (** OKX-specific order book *)
+
     epoch : int;
     (** Update counter (increments on every rebuild) *)
 
@@ -224,6 +236,15 @@ module Book : sig
 
   val update_coinbase : t -> Coinbase.Order_book.Book.t -> t
   (** Update Coinbase book and rebuild *)
+
+  val update_mexc : t -> Mexc.Order_book.Book.t -> t
+  (** Update MEXC book and rebuild *)
+
+  val update_bybit : t -> Bybit.Order_book.Book.t -> t
+  (** Update Bybit book and rebuild *)
+
+  val update_okx : t -> Okx.Order_book.Book.t -> t
+  (** Update OKX book and rebuild *)
 
   (** {2 Best Prices} *)
 

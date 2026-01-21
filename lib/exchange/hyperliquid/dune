@@ -1,7 +1,7 @@
 (library
  (name hyperliquid)
  (public_name fluxum.hyperliquid)
- (modules cfg rest ws market_data order_book ledger session unified_adapter fluxum_adapter hyperliquid)
- (libraries core async fluxum exchange_common yojson uri cohttp-async websocket_curl)
+ (modules cfg rest ws market_data order_book ledger session unified_adapter fluxum_adapter hyperliquid signing)
+ (libraries core async fluxum exchange_common yojson uri cohttp-async websocket_curl digestif secp256k1 msgpck hex)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))
