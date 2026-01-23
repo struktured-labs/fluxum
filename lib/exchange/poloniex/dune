@@ -1,0 +1,6 @@
+(library
+ (name poloniex)
+ (public_name fluxum.poloniex)
+ (libraries core async cohttp cohttp-async cryptokit yojson ppx_deriving_yojson.runtime fluxum)
+ (preprocess (pps ppx_jane ppx_deriving_yojson))
+ (flags :standard -open Core -open Async))
