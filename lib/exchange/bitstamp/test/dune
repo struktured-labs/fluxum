@@ -1,0 +1,6 @@
+(test
+ (name run_tests)
+ (modules run_tests)
+ (libraries core bitstamp)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
