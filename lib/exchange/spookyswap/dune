@@ -1,0 +1,6 @@
+(library
+ (name spookyswap)
+ (public_name fluxum.spookyswap)
+ (libraries core async cohttp cohttp-async yojson ppx_deriving_yojson.runtime fluxum)
+ (preprocess (pps ppx_jane ppx_deriving_yojson))
+ (flags :standard -open Core -open Async))
