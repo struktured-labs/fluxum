@@ -607,6 +607,398 @@ let test_normalize_edge_cases () =
   ()
 
 (* ============================================================ *)
+(* EIP-712 Signing Tests *)
+(* ============================================================ *)
+
+let test_keccak256_hashing () =
+  printf "\n[Signing] Keccak-256 hashing\n";
+
+  (* Test vector from Ethereum tests *)
+  let empty_hash = Hyperliquid.Signing.Keccak.hash_string "" in
+  test_assert "Empty string Keccak-256"
+    (String.equal empty_hash "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
+
+  (* Test "hello world" *)
+  let hello_hash = Hyperliquid.Signing.Keccak.hash_string "hello world" in
+  test_assert "Hello world Keccak-256"
+    (String.equal hello_hash "47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad");
+
+  (* Test "The quick brown fox jumps over the lazy dog" *)
+  let fox_hash = Hyperliquid.Signing.Keccak.hash_string "The quick brown fox jumps over the lazy dog" in
+  test_assert "Fox sentence Keccak-256"
+    (String.equal fox_hash "4d741b6f1eb29cb2a9b9911c82f56fa8d73b04959d3d9d222895df6c0b28aa15");
+
+  (* Test bytes hashing *)
+  let test_bytes = Bytes.of_string "test" in
+  let bytes_hash = Hyperliquid.Signing.Keccak.hash_bytes test_bytes in
+  test_assert "Bytes hashing works"
+    (String.equal bytes_hash "9c22ff5f21f0b81b113e63f7db6da94fedef11b2119b4088b89664fb9a3cb658")
+
+let test_eip712_domain_separator () =
+  printf "\n[Signing] EIP-712 Domain Separator\n";
+
+  (* Test Hyperliquid L1 domain separator *)
+  let domain_sep = Hyperliquid.Signing.Domain.domain_separator
+    Hyperliquid.Signing.Domain.hyperliquid_l1 in
+
+  (* Domain separator should be 64 hex characters (32 bytes) *)
+  test_assert "Domain separator is 64 hex chars"
+    (String.length domain_sep = 64);
+
+  (* Should be deterministic *)
+  let domain_sep2 = Hyperliquid.Signing.Domain.domain_separator
+    Hyperliquid.Signing.Domain.hyperliquid_l1 in
+  test_assert "Domain separator is deterministic"
+    (String.equal domain_sep domain_sep2);
+
+  (* Test custom domain *)
+  let custom_domain : Hyperliquid.Signing.Domain.t = {
+    name = "Test";
+    version = "1";
+    chain_id = 1;
+    verifying_contract = "0x1111111111111111111111111111111111111111";
+  } in
+  let custom_sep = Hyperliquid.Signing.Domain.domain_separator custom_domain in
+  test_assert "Custom domain separator differs from Hyperliquid"
+    (not (String.equal domain_sep custom_sep))
+
+let test_address_normalization () =
+  printf "\n[Signing] Address normalization\n";
+
+  (* Test lowercase address *)
+  let addr1 = Hyperliquid.Signing.Address.normalize "0xabcdef1234567890abcdef1234567890abcdef12" in
+  test_assert "Lowercase address preserved"
+    (String.equal addr1 "0xabcdef1234567890abcdef1234567890abcdef12");
+
+  (* Test uppercase address *)
+  let addr2 = Hyperliquid.Signing.Address.normalize "0xABCDEF1234567890ABCDEF1234567890ABCDEF12" in
+  test_assert "Uppercase address lowercased"
+    (String.equal addr2 "0xabcdef1234567890abcdef1234567890abcdef12");
+
+  (* Test address without 0x prefix *)
+  let addr3 = Hyperliquid.Signing.Address.normalize "abcdef1234567890abcdef1234567890abcdef12" in
+  test_assert "Address without 0x gets prefix"
+    (String.equal addr3 "0xabcdef1234567890abcdef1234567890abcdef12")
+
+let test_address_derivation_from_public_key () =
+  printf "\n[Signing] Address derivation from public key\n";
+
+  (* Test with known private key -> address mapping *)
+  (* Private key: 0x0000000000000000000000000000000000000000000000000000000000000001 *)
+  (* Expected address: 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf *)
+  let ctx = Secp256k1.Context.create [Sign; Verify] in
+
+  (* Create private key from bytes *)
+  let privkey_hex = "0000000000000000000000000000000000000000000000000000000000000001" in
+  let privkey_bytes = Hex.to_string (`Hex privkey_hex) |> Bytes.of_string in
+  let privkey_buf = Bigarray.Array1.create Bigarray.Char Bigarray.c_layout 32 in
+  for i = 0 to 31 do
+    Bigarray.Array1.set privkey_buf i (Bytes.get privkey_bytes i)
+  done;
+
+  (try
+    let privkey = Secp256k1.Key.read_sk_exn ctx privkey_buf in
+    let pubkey = Secp256k1.Key.neuterize_exn ctx privkey in
+    let derived_addr = Hyperliquid.Signing.Address.from_public_key ctx pubkey in
+
+    (* Known Ethereum address for private key 0x01 *)
+    let expected_addr = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf" in
+    test_assert "Derived address matches expected"
+      (String.equal (String.lowercase derived_addr) expected_addr)
+  with e ->
+    printf "  X FAIL: Address derivation failed: %s\n" (Exn.to_string e);
+    incr tests_run; incr tests_failed)
+
+let test_msgpack_order_serialization () =
+  printf "\n[Signing] MessagePack order serialization\n";
+
+  (* Test single order serialization *)
+  let order : Hyperliquid.Signing.order_request = {
+    asset = 0;
+    is_buy = true;
+    limit_px = "42000.0";
+    sz = "1.5";
+    reduce_only = false;
+    time_in_force = "Gtc";
+    cloid = None;
+  } in
+
+  let msgpack_bytes = Hyperliquid.Signing.Msgpack.serialize_order_action
+    ~orders:[order] ~grouping:"na" in
+
+  (* Msgpack should produce non-empty bytes *)
+  test_assert "Msgpack serialization produces bytes"
+    (Bytes.length msgpack_bytes > 0);
+
+  (* Test with client order ID *)
+  let order_with_cloid : Hyperliquid.Signing.order_request = {
+    asset = 1;
+    is_buy = false;
+    limit_px = "2500.0";
+    sz = "10.0";
+    reduce_only = true;
+    time_in_force = "Ioc";
+    cloid = Some "test-order-123";
+  } in
+
+  let msgpack_with_cloid = Hyperliquid.Signing.Msgpack.serialize_order_action
+    ~orders:[order_with_cloid] ~grouping:"na" in
+
+  test_assert "Msgpack with cloid is different"
+    (not (Bytes.equal msgpack_bytes msgpack_with_cloid));
+
+  (* Test multiple orders *)
+  let multi_orders = Hyperliquid.Signing.Msgpack.serialize_order_action
+    ~orders:[order; order_with_cloid] ~grouping:"na" in
+
+  test_assert "Multiple orders produce larger msgpack"
+    (Bytes.length multi_orders > Bytes.length msgpack_bytes)
+
+let test_msgpack_cancel_serialization () =
+  printf "\n[Signing] MessagePack cancel serialization\n";
+
+  (* Test cancel request *)
+  let cancel : Hyperliquid.Signing.cancel_request = {
+    asset = 0;
+    oid = 12345L;
+  } in
+
+  let msgpack_bytes = Hyperliquid.Signing.Msgpack.serialize_cancel_action
+    ~cancels:[cancel] in
+
+  test_assert "Cancel msgpack produces bytes"
+    (Bytes.length msgpack_bytes > 0);
+
+  (* Test multiple cancels *)
+  let cancel2 : Hyperliquid.Signing.cancel_request = {
+    asset = 1;
+    oid = 67890L;
+  } in
+
+  let multi_cancel = Hyperliquid.Signing.Msgpack.serialize_cancel_action
+    ~cancels:[cancel; cancel2] in
+
+  test_assert "Multiple cancels produce larger msgpack"
+    (Bytes.length multi_cancel > Bytes.length msgpack_bytes)
+
+let test_phantom_agent_construction () =
+  printf "\n[Signing] Phantom agent construction\n";
+
+  (* Test phantom agent hash generation *)
+  let connection_id = "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0" in  (* Valid 40-char address *)
+  let action_hash = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890" in  (* 64 chars = 32 bytes *)
+
+  let phantom_hash = Hyperliquid.Signing.PhantomAgent.construct
+    ~connection_id ~action_hash in
+
+  (* Should produce 64 hex character hash *)
+  test_assert "Phantom agent hash is 64 hex chars"
+    (String.length phantom_hash = 64);
+
+  (* Should be deterministic *)
+  let phantom_hash2 = Hyperliquid.Signing.PhantomAgent.construct
+    ~connection_id ~action_hash in
+  test_assert "Phantom agent hash is deterministic"
+    (String.equal phantom_hash phantom_hash2);
+
+  (* Different connection ID should produce different hash *)
+  let phantom_hash3 = Hyperliquid.Signing.PhantomAgent.construct
+    ~connection_id:"0x0000000000000000000000000000000000000000" ~action_hash in
+  test_assert "Different connection ID changes phantom hash"
+    (not (String.equal phantom_hash phantom_hash3))
+
+let test_eip712_digest_creation () =
+  printf "\n[Signing] EIP-712 digest creation\n";
+
+  (* Test digest creation with known values *)
+  let domain_sep = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" in
+  let struct_hash = "fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321" in
+
+  let digest = Hyperliquid.Signing.Signature.create_digest
+    ~domain_separator:domain_sep ~struct_hash in
+
+  (* Digest should be 64 hex characters *)
+  test_assert "EIP-712 digest is 64 hex chars"
+    (String.length digest = 64);
+
+  (* Should be deterministic *)
+  let digest2 = Hyperliquid.Signing.Signature.create_digest
+    ~domain_separator:domain_sep ~struct_hash in
+  test_assert "EIP-712 digest is deterministic"
+    (String.equal digest digest2);
+
+  (* Different struct hash should produce different digest *)
+  let digest3 = Hyperliquid.Signing.Signature.create_digest
+    ~domain_separator:domain_sep
+    ~struct_hash:"0000000000000000000000000000000000000000000000000000000000000000" in
+  test_assert "Different struct hash changes digest"
+    (not (String.equal digest digest3))
+
+let test_signature_generation () =
+  printf "\n[Signing] Signature generation\n";
+
+  (* Test with a known private key *)
+  let private_key = "0000000000000000000000000000000000000000000000000000000000000001" in
+  let test_digest = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890" in
+
+  (match Hyperliquid.Signing.Signature.sign ~private_key_hex:private_key ~digest_hex:test_digest with
+   | Ok signature ->
+     (* Ethereum signature is 65 bytes (130 hex chars): r (32) + s (32) + v (1) *)
+     test_assert "Signature is 130 hex chars (65 bytes)"
+       (String.length signature = 130);
+
+     (* v should be 27 or 28 (last byte) *)
+     let v_hex = String.suffix signature 2 in
+     let v_int = int_of_string ("0x" ^ v_hex) in
+     test_assert "Recovery ID v is 27 or 28"
+       (v_int = 27 || v_int = 28);
+
+     (* Signature should be deterministic (RFC 6979) *)
+     (match Hyperliquid.Signing.Signature.sign ~private_key_hex:private_key ~digest_hex:test_digest with
+      | Ok signature2 ->
+        test_assert "Signature is deterministic"
+          (String.equal signature signature2)
+      | Error _ ->
+        printf "  X FAIL: Second signature failed\n";
+        incr tests_run; incr tests_failed)
+
+   | Error msg ->
+     printf "  X FAIL: Signature generation failed: %s\n" msg;
+     incr tests_run; incr tests_failed)
+
+let test_signature_error_handling () =
+  printf "\n[Signing] Signature error handling\n";
+
+  (* Test with invalid private key (wrong length) *)
+  (match Hyperliquid.Signing.Signature.sign
+    ~private_key_hex:"0001"
+    ~digest_hex:"abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890" with
+   | Error _ ->
+     printf "  * Rejected invalid private key length\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject invalid private key\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test with invalid digest (wrong length) *)
+  (match Hyperliquid.Signing.Signature.sign
+    ~private_key_hex:"0000000000000000000000000000000000000000000000000000000000000001"
+    ~digest_hex:"abc" with
+   | Error _ ->
+     printf "  * Rejected invalid digest length\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject invalid digest\n";
+     incr tests_run; incr tests_failed);
+
+  (* Test with all zeros private key (invalid on secp256k1 curve) *)
+  (match Hyperliquid.Signing.Signature.sign
+    ~private_key_hex:"0000000000000000000000000000000000000000000000000000000000000000"
+    ~digest_hex:"abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890" with
+   | Error _ ->
+     printf "  * Rejected zero private key\n";
+     incr tests_run; incr tests_passed
+   | Ok _ ->
+     printf "  X FAIL: Should reject zero private key\n";
+     incr tests_run; incr tests_failed)
+
+let test_full_order_signing_flow () =
+  printf "\n[Signing] Full order signing flow\n";
+
+  (* Test complete signing flow *)
+  let private_key = "0000000000000000000000000000000000000000000000000000000000000001" in
+  let order : Hyperliquid.Signing.order_request = {
+    asset = 0;
+    is_buy = true;
+    limit_px = "42000.0";
+    sz = "0.001";
+    reduce_only = false;
+    time_in_force = "Gtc";
+    cloid = None;
+  } in
+
+  (match Hyperliquid.Signing.sign_place_order
+    ~private_key
+    ~orders:[order]
+    ~grouping:"na"
+    ~nonce:123456789L with
+   | Ok signature ->
+     test_assert "Full signing flow produces valid signature"
+       (String.length signature = 130);
+
+     (* Should be deterministic *)
+     (match Hyperliquid.Signing.sign_place_order
+        ~private_key
+        ~orders:[order]
+        ~grouping:"na"
+        ~nonce:123456789L with
+      | Ok signature2 ->
+        test_assert "Full signing flow is deterministic"
+          (String.equal signature signature2)
+      | Error msg ->
+        printf "  X FAIL: Second signing failed: %s\n" msg;
+        incr tests_run; incr tests_failed)
+
+   | Error msg ->
+     printf "  X FAIL: Full signing flow failed: %s\n" msg;
+     incr tests_run; incr tests_failed)
+
+let test_full_cancel_signing_flow () =
+  printf "\n[Signing] Full cancel signing flow\n";
+
+  let private_key = "0000000000000000000000000000000000000000000000000000000000000001" in
+  let cancel : Hyperliquid.Signing.cancel_request = {
+    asset = 0;
+    oid = 12345L;
+  } in
+
+  (match Hyperliquid.Signing.sign_cancel_order
+    ~private_key
+    ~cancels:[cancel]
+    ~nonce:123456789L with
+   | Ok signature ->
+     test_assert "Cancel signing produces valid signature"
+       (String.length signature = 130)
+   | Error msg ->
+     printf "  X FAIL: Cancel signing failed: %s\n" msg;
+     incr tests_run; incr tests_failed)
+
+let test_signing_with_multiple_orders () =
+  printf "\n[Signing] Signing with multiple orders\n";
+
+  let private_key = "0000000000000000000000000000000000000000000000000000000000000001" in
+  let order1 : Hyperliquid.Signing.order_request = {
+    asset = 0;
+    is_buy = true;
+    limit_px = "42000.0";
+    sz = "1.0";
+    reduce_only = false;
+    time_in_force = "Gtc";
+    cloid = None;
+  } in
+  let order2 : Hyperliquid.Signing.order_request = {
+    asset = 1;
+    is_buy = false;
+    limit_px = "2500.0";
+    sz = "5.0";
+    reduce_only = false;
+    time_in_force = "Ioc";
+    cloid = Some "test-123";
+  } in
+
+  (match Hyperliquid.Signing.sign_place_order
+    ~private_key
+    ~orders:[order1; order2]
+    ~grouping:"na"
+    ~nonce:123456789L with
+   | Ok signature ->
+     test_assert "Multiple orders signing succeeds"
+       (String.length signature = 130)
+   | Error msg ->
+     printf "  X FAIL: Multiple orders signing failed: %s\n" msg;
+     incr tests_run; incr tests_failed)
+
+(* ============================================================ *)
 (* Main *)
 (* ============================================================ *)
 
@@ -629,6 +1021,21 @@ let () =
   (* Phase 2 Priority 2: Additional error path tests *)
   test_normalize_float_conversion_errors ();
   test_normalize_edge_cases ();
+
+  (* EIP-712 Signing Tests *)
+  test_keccak256_hashing ();
+  test_eip712_domain_separator ();
+  test_address_normalization ();
+  test_address_derivation_from_public_key ();
+  test_msgpack_order_serialization ();
+  test_msgpack_cancel_serialization ();
+  test_phantom_agent_construction ();
+  test_eip712_digest_creation ();
+  test_signature_generation ();
+  test_signature_error_handling ();
+  test_full_order_signing_flow ();
+  test_full_cancel_signing_flow ();
+  test_signing_with_multiple_orders ();
 
   printf "\n===========================================\n";
   printf "Test Summary\n";
