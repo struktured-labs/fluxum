@@ -1,6 +1,6 @@
 (library
  (name velodrome)
  (public_name fluxum.velodrome)
- (libraries core async cohttp cohttp-async yojson ppx_deriving_yojson.runtime fluxum)
+ (libraries core async cohttp cohttp-async yojson ppx_deriving_yojson.runtime fluxum pool_intf amm_pricing)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))
