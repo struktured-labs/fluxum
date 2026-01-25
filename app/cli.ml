@@ -946,6 +946,457 @@ let backtest_command =
            run_strategies ["buy-and-hold"; "sma-crossover"; "momentum"])))
     ]
 
+(* Pool command group for DEX liquidity *)
+let pool_command =
+  Command.group ~summary:"DEX pool liquidity commands"
+    [ ("list", Command.async
+        ~summary:"List available pools for a token pair"
+        (Command.Param.(
+          let base_token = flag "--token0" (required string)
+              ~doc:"STRING Base token symbol (e.g., WETH, BTC)"
+          and quote_token = flag "--token1" (required string)
+              ~doc:"STRING Quote token symbol (e.g., USDC, USDT)"
+          and venue = flag "--venue" (optional string)
+              ~doc:"STRING Filter by venue (e.g., sushiswap, uniswapv3)"
+          in
+          return (fun base_token quote_token venue () ->
+            let pools = Consolidated_pools.create () in
+
+            (* Add some example pools from known DEXes for demonstration *)
+            (* In production, pools would be fetched from on-chain data *)
+            let example_pools = [
+              { Pool_intf.Pool.
+                id = "sushi-" ^ base_token ^ "-" ^ quote_token;
+                venue = "sushiswap";
+                pool_type = Pool_intf.Pool_type.Constant_product;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = base_token; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = quote_token; decimals = 6 };
+                reserve0 = 1000.0;
+                reserve1 = 2000000.0;
+                tvl_usd = 4000000.0;
+                fee_bps = 30;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+              { Pool_intf.Pool.
+                id = "uniswapv3-" ^ base_token ^ "-" ^ quote_token ^ "-500";
+                venue = "uniswapv3";
+                pool_type = Pool_intf.Pool_type.Concentrated;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = base_token; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = quote_token; decimals = 6 };
+                reserve0 = 500.0;
+                reserve1 = 1000000.0;
+                tvl_usd = 2000000.0;
+                fee_bps = 5;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+              { Pool_intf.Pool.
+                id = "curve-" ^ base_token ^ "-" ^ quote_token;
+                venue = "curve";
+                pool_type = Pool_intf.Pool_type.Stable;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = base_token; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = quote_token; decimals = 6 };
+                reserve0 = 2000.0;
+                reserve1 = 4000000.0;
+                tvl_usd = 8000000.0;
+                fee_bps = 4;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+            ] in
+
+            List.iter example_pools ~f:(fun pool ->
+              Consolidated_pools.add_pool pools ~pool);
+
+            let filtered_pools = Consolidated_pools.get_pools pools ~token0:base_token ~token1:quote_token in
+            let filtered_pools = match venue with
+              | Some v ->
+                List.filter filtered_pools ~f:(fun ap ->
+                  String.equal (String.lowercase ap.venue) (String.lowercase v))
+              | None -> filtered_pools
+            in
+
+            printf "Pools for %s/%s:\n" base_token quote_token;
+            printf "%-40s %-15s %-12s %12s %15s %10s\n"
+              "Pool ID" "Venue" "Type" "TVL (USD)" "Spot Price" "Fee (bps)";
+            printf "%s\n" (String.make 110 '-');
+
+            List.iter filtered_pools ~f:(fun (ap : Consolidated_pools.Attributed_pool.t) ->
+              let pool = ap.pool in
+              let type_str = match pool.pool_type with
+                | Pool_intf.Pool_type.Constant_product -> "AMM"
+                | Pool_intf.Pool_type.Concentrated -> "Concentrated"
+                | Pool_intf.Pool_type.Stable -> "Stable"
+                | Pool_intf.Pool_type.Weighted -> "Weighted"
+                | Pool_intf.Pool_type.Liquidity_bin -> "LB"
+              in
+              printf "%-40s %-15s %-12s %12.0f %15.4f %10d\n"
+                pool.id
+                pool.venue
+                type_str
+                pool.tvl_usd
+                pool.spot_price
+                pool.fee_bps);
+
+            printf "\nTotal pools: %d\n" (List.length filtered_pools);
+            Deferred.unit)
+          <*> base_token <*> quote_token <*> venue
+        )))
+    ; ("quote", Command.async
+        ~summary:"Get quote for swapping tokens"
+        (Command.Param.(
+          let amount = flag "--amount" (required float)
+              ~doc:"FLOAT Amount of input token"
+          and token_in = flag "--from" (required string)
+              ~doc:"STRING Input token symbol"
+          and token_out = flag "--to" (required string)
+              ~doc:"STRING Output token symbol"
+          and venue = flag "--venue" (optional string)
+              ~doc:"STRING Filter by venue"
+          in
+          return (fun amount token_in token_out venue () ->
+            let pools = Consolidated_pools.create () in
+
+            (* Add example pools *)
+            let example_pools = [
+              { Pool_intf.Pool.
+                id = "sushi-" ^ token_in ^ "-" ^ token_out;
+                venue = "sushiswap";
+                pool_type = Pool_intf.Pool_type.Constant_product;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = token_in; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = token_out; decimals = 6 };
+                reserve0 = 1000.0;
+                reserve1 = 2000000.0;
+                tvl_usd = 4000000.0;
+                fee_bps = 30;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+              { Pool_intf.Pool.
+                id = "uniswapv3-" ^ token_in ^ "-" ^ token_out ^ "-500";
+                venue = "uniswapv3";
+                pool_type = Pool_intf.Pool_type.Concentrated;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = token_in; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = token_out; decimals = 6 };
+                reserve0 = 500.0;
+                reserve1 = 1000000.0;
+                tvl_usd = 2000000.0;
+                fee_bps = 5;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+            ] in
+
+            List.iter example_pools ~f:(fun pool ->
+              Consolidated_pools.add_pool pools ~pool);
+
+            let quotes = Consolidated_pools.best_quotes pools ~amount ~token_in ~token_out in
+            let quotes = match venue with
+              | Some v ->
+                List.filter quotes ~f:(fun q ->
+                  String.equal (String.lowercase q.venue) (String.lowercase v))
+              | None -> quotes
+            in
+
+            printf "Quote for swapping %.4f %s → %s:\n\n" amount token_in token_out;
+            printf "%-35s %-15s %12s %12s %10s %12s\n"
+              "Pool ID" "Venue" "Amount Out" "Eff. Price" "Impact %" "Fee";
+            printf "%s\n" (String.make 100 '-');
+
+            List.iter quotes ~f:(fun (q : Consolidated_pools.Attributed_quote.t) ->
+              let quote = q.quote in
+              printf "%-35s %-15s %12.4f %12.6f %10.4f %12.4f\n"
+                q.pool_id
+                q.venue
+                quote.amount_out
+                quote.effective_price
+                quote.price_impact_pct
+                quote.fee_amount);
+
+            (match Consolidated_pools.best_quote pools ~amount ~token_in ~token_out with
+            | Some best ->
+              printf "\n** Best quote: %s via %s **\n" best.pool_id best.venue;
+              printf "   Amount out: %.6f %s\n" best.quote.amount_out token_out;
+              printf "   Effective price: %.6f\n" best.quote.effective_price;
+              printf "   Price impact: %.4f%%\n" best.quote.price_impact_pct
+            | None ->
+              printf "\nNo quotes available\n");
+
+            Deferred.unit)
+          <*> amount <*> token_in <*> token_out <*> venue
+        )))
+    ; ("best-route", Command.async
+        ~summary:"Find best execution route across pools"
+        (Command.Param.(
+          let amount = flag "--amount" (required float)
+              ~doc:"FLOAT Amount of input token"
+          and token_in = flag "--from" (required string)
+              ~doc:"STRING Input token symbol"
+          and token_out = flag "--to" (required string)
+              ~doc:"STRING Output token symbol"
+          and max_splits = flag "--max-splits" (optional_with_default 3 int)
+              ~doc:"INT Maximum number of pools to split across (default: 3)"
+          in
+          return (fun amount token_in token_out max_splits () ->
+            let pools = Consolidated_pools.create () in
+
+            (* Add example pools with varying liquidity *)
+            let example_pools = [
+              { Pool_intf.Pool.
+                id = "sushi-" ^ token_in ^ "-" ^ token_out;
+                venue = "sushiswap";
+                pool_type = Pool_intf.Pool_type.Constant_product;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = token_in; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = token_out; decimals = 6 };
+                reserve0 = 1000.0;
+                reserve1 = 2000000.0;
+                tvl_usd = 4000000.0;
+                fee_bps = 30;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+              { Pool_intf.Pool.
+                id = "uniswapv3-" ^ token_in ^ "-" ^ token_out ^ "-500";
+                venue = "uniswapv3";
+                pool_type = Pool_intf.Pool_type.Concentrated;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = token_in; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = token_out; decimals = 6 };
+                reserve0 = 500.0;
+                reserve1 = 1000000.0;
+                tvl_usd = 2000000.0;
+                fee_bps = 5;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+              { Pool_intf.Pool.
+                id = "balancer-" ^ token_in ^ "-" ^ token_out;
+                venue = "balancer";
+                pool_type = Pool_intf.Pool_type.Weighted;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = token_in; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = token_out; decimals = 6 };
+                reserve0 = 750.0;
+                reserve1 = 1500000.0;
+                tvl_usd = 3000000.0;
+                fee_bps = 15;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+            ] in
+
+            List.iter example_pools ~f:(fun pool ->
+              Consolidated_pools.add_pool pools ~pool);
+
+            printf "Finding best route for %.4f %s → %s (max %d splits):\n\n"
+              amount token_in token_out max_splits;
+
+            let route = Consolidated_pools.split_route pools ~amount ~token_in ~token_out ~max_splits in
+
+            (match route with
+            | [] ->
+              printf "No route found\n"
+            | splits ->
+              printf "Recommended route:\n";
+              printf "%s\n" (String.make 80 '-');
+
+              let total_out = List.fold splits ~init:0.0 ~f:(fun acc (_, _, q) ->
+                acc +. q.quote.Pool_intf.Quote.amount_out) in
+              let total_fees = List.fold splits ~init:0.0 ~f:(fun acc (_, _, q) ->
+                acc +. q.quote.Pool_intf.Quote.fee_amount) in
+
+              List.iteri splits ~f:(fun i (pool_id, split_amount, q) ->
+                printf "%d. %s\n" (i + 1) pool_id;
+                printf "   Input: %.4f %s (%.1f%% of total)\n"
+                  split_amount token_in (split_amount /. amount *. 100.0);
+                printf "   Output: %.4f %s\n" q.quote.amount_out token_out;
+                printf "   Impact: %.4f%%, Fee: %.4f\n\n"
+                  q.quote.price_impact_pct q.quote.fee_amount);
+
+              printf "%s\n" (String.make 80 '-');
+              printf "Total output: %.4f %s\n" total_out token_out;
+              printf "Total fees: %.4f\n" total_fees;
+              printf "Effective price: %.6f\n" (total_out /. amount);
+
+              (* Compare with single best pool *)
+              (match Consolidated_pools.best_quote pools ~amount ~token_in ~token_out with
+              | Some single ->
+                let improvement = (total_out -. single.quote.amount_out) /. single.quote.amount_out *. 100.0 in
+                printf "\nSplit vs single-pool improvement: %.4f%%\n" improvement
+              | None -> ()));
+
+            Deferred.unit)
+          <*> amount <*> token_in <*> token_out <*> max_splits
+        )))
+    ; ("depth", Command.async
+        ~summary:"Show liquidity depth for a token pair"
+        (Command.Param.(
+          let base_tok = flag "--token0" (required string)
+              ~doc:"STRING Base token symbol"
+          and quote_tok = flag "--token1" (required string)
+              ~doc:"STRING Quote token symbol"
+          and max_impact = flag "--max-impact" (optional_with_default 1.0 float)
+              ~doc:"FLOAT Maximum price impact percentage (default: 1.0)"
+          in
+          return (fun base_tok quote_tok max_impact () ->
+            let pools = Consolidated_pools.create () in
+
+            (* Add example pools *)
+            let example_pools = [
+              { Pool_intf.Pool.
+                id = "sushi-" ^ base_tok ^ "-" ^ quote_tok;
+                venue = "sushiswap";
+                pool_type = Pool_intf.Pool_type.Constant_product;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = base_tok; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = quote_tok; decimals = 6 };
+                reserve0 = 1000.0;
+                reserve1 = 2000000.0;
+                tvl_usd = 4000000.0;
+                fee_bps = 30;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+              { Pool_intf.Pool.
+                id = "uniswapv3-" ^ base_tok ^ "-" ^ quote_tok ^ "-500";
+                venue = "uniswapv3";
+                pool_type = Pool_intf.Pool_type.Concentrated;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = base_tok; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = quote_tok; decimals = 6 };
+                reserve0 = 500.0;
+                reserve1 = 1000000.0;
+                tvl_usd = 2000000.0;
+                fee_bps = 5;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+            ] in
+
+            List.iter example_pools ~f:(fun pool ->
+              Consolidated_pools.add_pool pools ~pool);
+
+            let depth = Consolidated_pools.depth_at_impact pools ~token0:base_tok ~token1:quote_tok ~max_impact_pct:max_impact in
+
+            printf "Liquidity depth for %s/%s:\n\n" base_tok quote_tok;
+
+            (match Consolidated_pools.pair_liquidity pools ~token0:base_tok ~token1:quote_tok with
+            | Some liq ->
+              printf "Total pools: %d\n" liq.num_pools;
+              printf "Total TVL: $%.2f\n" liq.total_tvl_usd;
+              printf "Best spot price: %.6f (%s)\n" liq.best_spot_price liq.best_venue;
+              printf "TVL-weighted avg price: %.6f\n" liq.weighted_avg_price;
+              printf "\nDepth at %.2f%% impact: %.4f %s\n" max_impact depth base_tok
+            | None ->
+              printf "No liquidity data available\n");
+
+            Deferred.unit)
+          <*> base_tok <*> quote_tok <*> max_impact
+        )))
+    ; ("arbitrage", Command.async
+        ~summary:"Find arbitrage opportunities between pools"
+        (Command.Param.(
+          let base_tok = flag "--token0" (required string)
+              ~doc:"STRING Base token symbol"
+          and quote_tok = flag "--token1" (required string)
+              ~doc:"STRING Quote token symbol"
+          and min_profit = flag "--min-profit-bps" (optional_with_default 10 int)
+              ~doc:"INT Minimum profit in basis points (default: 10)"
+          in
+          return (fun base_tok quote_tok min_profit () ->
+            let pools = Consolidated_pools.create () in
+
+            (* Add example pools with different prices to simulate arb *)
+            let example_pools = [
+              { Pool_intf.Pool.
+                id = "sushi-" ^ base_tok ^ "-" ^ quote_tok;
+                venue = "sushiswap";
+                pool_type = Pool_intf.Pool_type.Constant_product;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = base_tok; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = quote_tok; decimals = 6 };
+                reserve0 = 1000.0;
+                reserve1 = 2000000.0;
+                tvl_usd = 4000000.0;
+                fee_bps = 30;
+                spot_price = 2000.0;
+                spot_price_inv = 0.0005;
+              };
+              { Pool_intf.Pool.
+                id = "uniswapv3-" ^ base_tok ^ "-" ^ quote_tok;
+                venue = "uniswapv3";
+                pool_type = Pool_intf.Pool_type.Concentrated;
+                token0 = { Pool_intf.Token.address = "0x"; symbol = base_tok; decimals = 18 };
+                token1 = { Pool_intf.Token.address = "0x"; symbol = quote_tok; decimals = 6 };
+                reserve0 = 500.0;
+                reserve1 = 1005000.0;  (* Slightly different ratio = price diff *)
+                tvl_usd = 2010000.0;
+                fee_bps = 5;
+                spot_price = 2010.0;  (* 0.5% price difference *)
+                spot_price_inv = 0.000497512;
+              };
+            ] in
+
+            List.iter example_pools ~f:(fun pool ->
+              Consolidated_pools.add_pool pools ~pool);
+
+            printf "Arbitrage opportunities for %s/%s (min profit: %d bps):\n\n" base_tok quote_tok min_profit;
+
+            let arbs = Consolidated_pools.find_arbitrage pools ~token0:base_tok ~token1:quote_tok ~min_profit_bps:min_profit in
+
+            (match arbs with
+            | [] ->
+              printf "No arbitrage opportunities found above %d bps threshold\n" min_profit
+            | opps ->
+              printf "%-30s %-30s %12s\n" "Buy Pool" "Sell Pool" "Spread (bps)";
+              printf "%s\n" (String.make 75 '-');
+              List.iter opps ~f:(fun (buy_pool, sell_pool, spread_bps) ->
+                printf "%-30s %-30s %12.1f\n"
+                  buy_pool.pool.id
+                  sell_pool.pool.id
+                  spread_bps);
+              printf "\nFound %d opportunities\n" (List.length opps));
+
+            Deferred.unit)
+          <*> base_tok <*> quote_tok <*> min_profit
+        )))
+    ; ("stats", Command.async
+        ~summary:"Show pool statistics"
+        (Command.Param.return (fun () ->
+           let pools = Consolidated_pools.create () in
+
+           (* Add example pools *)
+           let token_pairs = [("WETH", "USDC"); ("WBTC", "USDC"); ("WETH", "USDT")] in
+           List.iter token_pairs ~f:(fun (t0, t1) ->
+             let pool = { Pool_intf.Pool.
+               id = sprintf "sushi-%s-%s" t0 t1;
+               venue = "sushiswap";
+               pool_type = Pool_intf.Pool_type.Constant_product;
+               token0 = { Pool_intf.Token.address = "0x"; symbol = t0; decimals = 18 };
+               token1 = { Pool_intf.Token.address = "0x"; symbol = t1; decimals = 6 };
+               reserve0 = 1000.0;
+               reserve1 = 2000000.0;
+               tvl_usd = 4000000.0;
+               fee_bps = 30;
+               spot_price = 2000.0;
+               spot_price_inv = 0.0005;
+             } in
+             Consolidated_pools.add_pool pools ~pool);
+
+           printf "Pool Statistics:\n";
+           printf "%s\n" (String.make 40 '-');
+
+           let stats = Consolidated_pools.stats pools in
+           List.iter stats ~f:(fun (key, value) ->
+             printf "%-20s %s\n" key value);
+
+           printf "\nSupported DEXes:\n";
+           let venues = ["sushiswap"; "uniswapv3"; "curve"; "balancer"; "thena";
+                        "pancakeswap"; "aerodrome"; "velodrome"; "orca"; "raydium";
+                        "traderjoe"; "quickswap"; "spookyswap"; "camelot"; "osmosis";
+                        "gmx"; "jupiter"; "oneinch"] in
+           List.iter venues ~f:(fun v -> printf "  - %s\n" v);
+           printf "\nTotal supported: %d DEXes + 6 CEXes with synthetic pools\n" (List.length venues);
+
+           Deferred.unit)))
+    ]
+
 (* Bot command group *)
 let bot_command =
   Command.group ~summary:"Trading bot framework commands"
@@ -1171,6 +1622,7 @@ let command =
     ; ("api", api_command)
     ; ("backtest", backtest_command)
     ; ("bot", bot_command)
+    ; ("pool", pool_command)
     ]
 
 let () = Command_unix.run command
