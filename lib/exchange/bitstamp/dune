@@ -1,6 +1,6 @@
 (library
  (name bitstamp)
  (public_name fluxum.bitstamp)
- (libraries core async cohttp cohttp-async cryptokit yojson ppx_deriving_yojson.runtime fluxum websocket_curl)
+ (libraries core async cohttp cohttp-async cryptokit yojson ppx_deriving_yojson.runtime fluxum websocket_curl pool_intf amm_pricing)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))

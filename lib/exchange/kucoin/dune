@@ -1,6 +1,6 @@
 (library
  (name kucoin)
  (public_name fluxum.kucoin)
- (libraries core core_unix.uuid async cohttp cohttp-async cryptokit yojson ppx_deriving_yojson.runtime fluxum)
+ (libraries core core_unix.uuid async cohttp cohttp-async cryptokit yojson ppx_deriving_yojson.runtime fluxum pool_intf amm_pricing)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))

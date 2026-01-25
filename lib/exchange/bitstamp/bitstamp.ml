@@ -12,3 +12,4 @@ module Cfg = Cfg
 module Types = Types
 module Rest = Rest
 module Ws = Ws
+module Pool_adapter = Pool_adapter
