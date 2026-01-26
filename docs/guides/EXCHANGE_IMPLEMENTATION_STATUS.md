@@ -1,587 +1,101 @@
 # Exchange Implementation Status
 
-## Overview
-
-Fluxum supports 10 exchanges with varying levels of integration. This document provides a comprehensive status matrix of implemented features for each exchange.
-
-**Last Updated:** 2026-01-20 (Bybit and OKX production-ready)
-
-## Feature Matrix
-
-| Exchange | Type | Trading | Market Data | WebSocket | Order Book | Ledger | Session | Fallible Normalize | Status |
-|----------|------|---------|-------------|-----------|------------|--------|---------|-------------------|--------|
-| **Gemini** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
-| **Kraken** | CEX | ✅ REST | ✅ REST | ✅ v2 Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
-| **MEXC** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
-| **Bybit** | CEX | ✅ V5 REST | ✅ V5 REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
-| **OKX** | CEX | ✅ V5 REST | ✅ V5 REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
-| **Hyperliquid** | L1 DEX | ❌ Blockchain | ✅ REST | ✅ Curl | ✅ L2 | ❌ | ❌ | ✅ Phase 1 | **Market Data Only** |
-| **Binance** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ✅ P&L | ✅ Auto-reconnect | ✅ Phase 1 | **Production** |
-| **Coinbase** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ❌ | ❌ | ⚠️ Partial | **Partial** |
-| **Bitrue** | CEX | ✅ REST | ✅ REST | ✅ Curl | ✅ L2 | ❌ | ❌ | ⚠️ Partial | **Market Data Primary** |
-| **dYdX** | L1 DEX | ❌ Blockchain | ✅ REST | ✅ | ✅ L3 | ❌ | ❌ | ⚠️ Partial | **Market Data Only** |
-| **Jupiter** | Solana DEX | ❌ On-chain | ✅ Aggregator | ❌ | ❌ | ❌ | ❌ | ⚠️ Partial | **Experimental** |
-| **1inch** | DEX Aggregator | ❌ On-chain | ✅ Aggregator | ❌ | ❌ | ❌ | ❌ | ⚠️ Partial | **Experimental** |
-
-### Legend
-
-- ✅ **Implemented** - Feature is complete and tested
-- ⚠️ **Partial** - Feature is partially implemented or has limitations
-- ❌ **Not Implemented** - Feature is planned but not yet available
-- **CEX** - Centralized Exchange
-- **DEX** - Decentralized Exchange
-- **L1** - Layer 1 blockchain-based
-- **Curl** - Using websocket_curl library (rock solid)
-- **v2** - Using exchange's v2 API
-
-## Detailed Exchange Information
-
-### Gemini (Production Ready) ✅
-
-**Implementation:** Complete reference implementation of Exchange_intf.S
-
-**Features:**
-- ✅ REST trading (spot only, no derivatives)
-- ✅ WebSocket market data (trades, order book, L2 updates)
-- ✅ Order book tracking with incremental updates
-- ✅ P&L ledger (28 fields: position, cost basis, realized/unrealized P&L)
-- ✅ Session management with auto-reconnect
-- ✅ Fallible normalization (Phase 1 complete)
-
-**Authentication:**
-- API key/secret via environment variables (GEMINI_API_KEY, GEMINI_SECRET)
-- HMAC-SHA384 signatures
-- Nonce management with file-based tracking
-
-**Rate Limits:**
-- Public: 120 requests/minute
-- Private: 600 requests/minute
-- WebSocket: No documented limit
-
-**Symbol Format:** Lowercase, no separator (`btcusd`, `ethusd`)
-
-**Known Limitations:**
-- Spot trading only (no margin, no derivatives)
-- No batch order placement
-- Authenticated WebSocket needs custom header support (websocket_curl limitation)
-
-**Documentation:** See [fluxum_adapter.ml](../../lib/exchange/gemini/fluxum_adapter.ml) module docstring
-
----
-
-### Kraken (Production Ready) ✅
-
-**Implementation:** Complete implementation with WebSocket v2 support
-
-**Features:**
-- ✅ REST trading (spot, margin, futures via different APIs)
-- ✅ WebSocket market data (trades, order book, ticker, OHLC)
-- ✅ WebSocket v2 with authenticated feeds
-- ✅ Order book tracking with safe float conversions
-- ✅ P&L ledger with comprehensive tracking
-- ✅ Session management with auto-restart
-- ✅ Fallible normalization (Phase 1 complete)
-
-**Authentication:**
-- API key/secret via environment variables (KRAKEN_API_KEY, KRAKEN_SECRET)
-- HMAC-SHA512 signatures
-- Nonce: Unix timestamp in milliseconds
-
-**Rate Limits (Tier-dependent):**
-- Starter: 15 requests/second, burst up to 20 orders
-- Intermediate: 20 requests/second
-- Pro: 20 requests/second with higher call limits
-- Max tier: 60+ requests/second
-
-**Symbol Format:** Uppercase with prefixes (`XBTUSD`, `XXBTZUSD`, `ETHUSD`)
-- XBT = Bitcoin (Kraken's convention)
-- Pairs may have XX prefix for base, Z prefix for fiat quote
-
-**Known Limitations:**
-- Symbol naming can be inconsistent (e.g., BTC vs XBT)
-- Futures require separate API integration
-
-**Documentation:** See [fluxum_adapter.ml](../../lib/exchange/kraken/fluxum_adapter.ml) module docstring
-
----
-
-### MEXC (Production Ready) ✅
-
-**Implementation:** Complete implementation with Ledger and Session support
-
-**Features:**
-- ✅ REST trading (spot only)
-- ✅ WebSocket market data (trades, depth, kline, 24hr ticker)
-- ✅ Order book tracking with incremental updates
-- ✅ P&L ledger with comprehensive accounting (28 fields)
-- ✅ Session management with auto-reconnecting streams
-- ✅ Fallible normalization (Phase 1 complete)
-- ✅ Binance-compatible API structure
-
-**Authentication:**
-- API key/secret via environment variables (MEXC_API_KEY, MEXC_SECRET)
-- HMAC-SHA256 signatures
-- Timestamp-based nonce
-
-**Rate Limits:**
-- Public: 20 requests/second per IP
-- Private: 10 requests/second per API key
-- WebSocket: 5 connections per IP, 200 subscriptions per connection
-- Order placement: 100 orders/10 seconds per symbol
-
-**Symbol Format:** Uppercase with underscore (`BTC_USDT`, `ETH_USDT`)
-
-**Known Limitations:**
-- Spot trading only (no margin, futures, options)
-- Some order types not available (OCO, iceberg)
-- WebSocket reconnection requires full re-subscription
-- Binance-compatible but not 100% identical
-
-**Production Readiness:**
-- Asian market leader (good for regional arbitrage)
-- All normalize functions return Result.t
-- Comprehensive P&L tracking
-- Auto-reconnecting session management
-- 598-line test suite with full coverage
-
-**Documentation:** See [fluxum_adapter.ml](../../lib/exchange/mexc/fluxum_adapter.ml) module docstring
-
----
-
-### Bybit (Production Ready) ✅
-
-**Implementation:** Complete implementation with unified V5 API across all products
-
-**Features:**
-- ✅ REST trading (spot, linear, inverse, option via V5 API)
-- ✅ WebSocket market data (orderbook, trades, tickers, klines)
-- ✅ Order book tracking with incremental updates
-- ✅ P&L ledger with comprehensive accounting (28 fields)
-- ✅ Session management with auto-reconnecting streams
-- ✅ Fallible normalization (Phase 1 complete)
-- ✅ Unified V5 API across all products (spot + derivatives)
-
-**Authentication:**
-- API key/secret via environment variables (BYBIT_PRODUCTION_API_KEY, BYBIT_PRODUCTION_SECRET)
-- HMAC-SHA256 signatures
-- X-BAPI-* header authentication
-- 5000ms default recv window for clock skew
-
-**Rate Limits:**
-- Public endpoints: 50 requests/second per IP
-- Private endpoints: 10 requests/second per API key
-- WebSocket: 10 connections per IP
-- Order placement: 20 orders/second per API key
-
-**Symbol Format:** Uppercase with no separator (`BTCUSDT`, `ETHUSDT`)
-- Same format as Binance (unlike MEXC's underscore)
-- Category parameter distinguishes product type (spot/linear/inverse/option)
-
-**V5 API Categories:**
-- **spot**: Spot trading
-- **linear**: USDT/USDC perpetuals and futures
-- **inverse**: Inverse perpetuals and futures (BTC, ETH settled)
-- **option**: Options trading
-
-**Known Limitations:**
-- Some advanced order types require specific categories
-- Historical data depth varies by category
-- WebSocket requires reconnection if no pong received within 20 seconds
-- Different endpoints for spot vs derivatives in some cases
-
-**Production Readiness:**
-- 2nd largest derivatives exchange globally
-- All normalize functions return Result.t
-- Comprehensive P&L tracking
-- Auto-reconnecting session management
-- WebSocket with heartbeat (20s ping interval)
-- Complete V5 API implementation (9 endpoints)
-
-**Documentation:** See [fluxum_adapter.ml](../../lib/exchange/bybit/fluxum_adapter.ml) module docstring
-
----
-
-### OKX (Production Ready) ✅
-
-**Implementation:** Complete implementation with unified V5 API across all products
-
-**Features:**
-- ✅ REST trading (SPOT, FUTURES, SWAP, OPTION via V5 API)
-- ✅ WebSocket market data (books, trades, tickers, candles)
-- ✅ Order book tracking with incremental updates
-- ✅ P&L ledger with comprehensive accounting (28 fields)
-- ✅ Session management with auto-reconnecting streams
-- ✅ Fallible normalization (Phase 1 complete)
-- ✅ Unified V5 API across all products (spot + derivatives)
-
-**Authentication:**
-- API key/secret/passphrase via environment variables (OKX_API_KEY, OKX_SECRET, OKX_PASSPHRASE)
-- HMAC-SHA256 signatures with Base64 encoding
-- OK-ACCESS-* header authentication (KEY, SIGN, TIMESTAMP, PASSPHRASE)
-- ISO timestamp format: 2020-12-08T09:08:57.715Z
-
-**Rate Limits:**
-- Public endpoints: 20 requests/second per IP
-- Private endpoints: 10 requests/second per API key
-- WebSocket: 100 subscriptions per connection
-- Order placement: 60 orders/2 seconds per instrument
-
-**Symbol Format:** Hyphenated uppercase (`BTC-USDT`, `ETH-USDT`)
-- Different from most exchanges (Binance/Bybit use no separator)
-- InstType parameter distinguishes product type (SPOT/FUTURES/SWAP/OPTION)
-
-**V5 API Product Types (instType):**
-- **SPOT**: Spot trading
-- **FUTURES**: Delivery futures
-- **SWAP**: Perpetual swaps
-- **OPTION**: Options trading
-
-**V5 API Trade Modes (tdMode):**
-- **cash**: Spot and futures (simple mode)
-- **cross**: Cross-margin
-- **isolated**: Isolated margin
-
-**Known Limitations:**
-- Passphrase required (in addition to API key/secret)
-- ISO timestamp format more strict than other exchanges
-- Different symbol format requires conversion for cross-exchange strategies
-- WebSocket channel subscriptions use different structure than Bybit
-
-**Production Readiness:**
-- Top 5 global derivatives exchange
-- All normalize functions return Result.t
-- Comprehensive P&L tracking
-- Auto-reconnecting session management
-- Complete V5 API implementation (9 endpoints)
-- Base64-encoded signature authentication
-
-**Documentation:** See [fluxum_adapter.ml](../../lib/exchange/okx/fluxum_adapter.ml) module docstring
-
----
-
-### Hyperliquid (Market Data Only) 🔷
-
-**Implementation:** L1 blockchain DEX with read-only market data access
-
-**Features:**
-- ✅ REST market data (order books, trades, ticker-like data)
-- ✅ REST account queries (positions, balances, open orders, fills)
-- ✅ WebSocket market data (L2 book, trades, all mids)
-- ✅ Order book tracking with safe float conversions
-- ✅ Fallible normalization (Phase 1 complete)
-- ❌ Trading operations (requires blockchain signing - not yet implemented)
-- ❌ Ledger tracking (not yet implemented)
-- ❌ Session management (not yet implemented)
-
-**Architecture:** Hyperliquid L1 blockchain (perpetuals-only)
-
-**Trading Implementation Roadmap:**
-- Phase 1: Market data ✅ (complete)
-- Phase 2: Account queries ✅ (complete)
-- Phase 3: Order signing (requires eth-crypto integration)
-- Phase 4: Order placement via REST/WebSocket
-
-**Symbol Format:** Uppercase, no separator (`BTC`, `ETH`) - perpetuals only
-
-**Known Limitations:**
-- Trading requires blockchain signing (not standard REST)
-- Perpetuals only (no spot markets)
-- Account queries work but order placement not implemented
-
-**Documentation:** See [fluxum_adapter.ml](../../lib/exchange/hyperliquid/fluxum_adapter.ml) module docstring
-
----
-
-### Binance (Production Ready) ✅
-
-**Implementation:** Complete implementation with Ledger and Session support
-
-**Features:**
-- ✅ REST trading (spot, margin, futures)
-- ✅ WebSocket market data (trades, depth, ticker, klines)
-- ✅ Order book tracking with websocket_curl
-- ✅ P&L ledger with comprehensive accounting (28 fields)
-- ✅ Session management with auto-reconnecting streams
-- ✅ Fallible normalization (Phase 1 complete)
-
-**Authentication:**
-- API key/secret via environment variables (BINANCE_API_KEY, BINANCE_SECRET)
-- HMAC-SHA256 signatures
-- Timestamp-based nonce
-- Recv window support for clock skew
-
-**Rate Limits (Weight-Based System):**
-- Public: 1200 requests/minute per IP
-- Private: 1200 requests/minute per UID
-- Order placement: 10/second per account, 100K/day
-- WebSocket: 5 connections per IP, 300 streams per connection
-
-**Symbol Format:** Uppercase, no separator (`BTCUSDT`, `ETHUSDT`, `BNBUSDT`)
-
-**Order Types:** Market, Limit, Stop-Loss, Stop-Loss-Limit, Take-Profit, Take-Profit-Limit, Iceberg, OCO
-
-**Known Limitations:**
-- Separate credentials required for spot/margin/futures
-- Some advanced order types not yet exposed
-- Futures API integration pending
-
-**Production Readiness:**
-- Largest exchange by volume (critical for arbitrage)
-- All normalize functions return Result.t
-- Comprehensive P&L tracking
-- Auto-reconnecting session management
-- Battle-tested in production systems
-
-**Documentation:** See [fluxum_adapter.ml](../../lib/exchange/binance/fluxum_adapter.ml) module docstring
-
----
-
-### Coinbase (Partial Implementation) ⚠️
-
-**Implementation:** Advanced Trade API with basic features
-
-**Features:**
-- ✅ REST trading (Advanced Trade API)
-- ✅ WebSocket market data (level2, market_trades, ticker, candles)
-- ✅ Order book tracking with websocket_curl
-- ⚠️ Partial fallible normalization (some unsafe operations remain)
-- ❌ Ledger tracking (not yet implemented)
-- ❌ Session management (not yet implemented)
-
-**Symbol Format:** Hyphenated (`BTC-USD`, `ETH-USD`)
-
-**Status:** Functional but needs Phase 1 completion for all normalize functions
-
----
-
-### Bitrue (Market Data Primary) ⚠️
-
-**Implementation:** WebSocket market data focus
-
-**Features:**
-- ✅ REST market data and basic trading
-- ✅ WebSocket market data (trades, depth, ticker, klines)
-- ✅ Order book tracking with websocket_curl
-- ✅ Automatic ping/pong handling
-- ⚠️ Partial fallible normalization (some unsafe operations remain)
-- ❌ Ledger tracking (not yet implemented)
-- ❌ Session management (not yet implemented)
-
-**Symbol Format:** Uppercase, no separator (`BTCUSDT`)
-
-**Status:** Market data is solid, trading is basic
-
----
-
-### dYdX (Market Data Only) 🔷
-
-**Implementation:** L1 blockchain DEX (v4 decentralized)
-
-**Features:**
-- ✅ REST market data
-- ✅ WebSocket market data
-- ✅ Order book tracking (L3 - order-by-order)
-- ⚠️ Partial fallible normalization
-- ❌ Trading (requires blockchain signing)
-- ❌ Ledger tracking
-- ❌ Session management
-
-**Architecture:** dYdX v4 on custom blockchain (Cosmos SDK)
-
-**Known Limitations:**
-- Trading requires blockchain integration (not standard REST)
-- Account operations need wallet signing
-
----
-
-### Jupiter (Experimental) 🧪
-
-**Implementation:** Solana DEX aggregator integration
-
-**Features:**
-- ✅ REST aggregator API (quote, swap routes)
-- ⚠️ Partial normalization
-- ❌ On-chain execution (requires Solana wallet integration)
-- ❌ WebSocket market data
-- ❌ Order book tracking
-
-**Status:** Experimental - quote fetching works, execution requires Solana integration
-
----
-
-### 1inch (Experimental) 🧪
-
-**Implementation:** Multi-chain DEX aggregator
-
-**Features:**
-- ✅ REST aggregator API (quotes, swap routes)
-- ⚠️ Partial normalization
-- ❌ On-chain execution (requires Web3 wallet integration)
-- ❌ WebSocket market data
-- ❌ Order book tracking
-
-**Status:** Experimental - routing works, execution requires wallet integration
-
----
-
-## Phase 1 Completion Status
-
-**Fallible Normalize Functions (Result.t returns):**
-
-| Exchange | Normalize Functions | Phase 1 Complete | Notes |
-|----------|-------------------|------------------|-------|
-| Gemini | All ✅ | ✅ Yes | Reference implementation |
-| Kraken | All ✅ | ✅ Yes | Complete with safe conversions |
-| Hyperliquid | All ✅ | ✅ Yes | Market data only |
-| MEXC | All ✅ | ✅ Yes | Complete with safe conversions |
-| Bybit | All ✅ | ✅ Yes | Complete with safe conversions |
-| OKX | All ✅ | ✅ Yes | Complete with safe conversions |
-| Binance | All ✅ | ✅ Yes | Complete with safe conversions |
-| Coinbase | Partial ⚠️ | ❌ No | ~60% complete |
-| Bitrue | Partial ⚠️ | ❌ No | ~50% complete |
-| dYdX | Partial ⚠️ | ❌ No | ~40% complete |
-| Jupiter | Partial ⚠️ | ❌ No | ~30% complete |
-| 1inch | Partial ⚠️ | ❌ No | ~30% complete |
-
-**Priority exchanges** (Gemini, Kraken, Hyperliquid, MEXC) have 100% fallible normalization coverage.
-
-See [NORMALIZE_CONTRACT.md](./NORMALIZE_CONTRACT.md) for details on fallible normalization.
-
----
-
-## WebSocket Implementation Status
-
-**Post-Migration Status (2026-01-17):**
-
-All exchanges now use `websocket_curl` for WebSocket connections. The old `cohttp_async_websocket` dependency has been completely removed.
-
-| Exchange | WebSocket Library | Status | Notes |
-|----------|------------------|--------|-------|
-| Gemini | websocket_curl | ✅ Migrated | Auth channels may need header support |
-| Kraken | websocket_curl | ✅ Native | v2 API support |
-| MEXC | websocket_curl | ✅ Native | Binance-compatible |
-| Bybit | websocket_curl | ✅ Native | V5 API with 20s heartbeat |
-| OKX | websocket_curl | ✅ Native | V5 API with ping/pong |
-| Hyperliquid | websocket_curl | ✅ Native | L1 blockchain feeds |
-| Binance | websocket_curl | ✅ Migrated | Use Market_data module |
-| Coinbase | websocket_curl | ✅ Migrated | Use Market_data module |
-| Bitrue | websocket_curl | ✅ Migrated | Use Market_data_curl module |
-| dYdX | (varies) | ⚠️ Legacy | Needs review |
-
-**CI Status:** 🟢 All builds passing with clean dependencies
-
----
-
-## Recommended Exchanges by Use Case
-
-### Production Trading
-**Binance**, **Bybit**, **OKX**, **Gemini**, or **Kraken**
-- Complete feature set (trading, market data, P&L tracking, session management)
-- Fallible normalization (robust error handling)
-- Well-tested and documented
-- **Binance**: Largest exchange by volume (best liquidity)
-- **Bybit**: 2nd largest derivatives exchange (unified V5 API, spot + derivatives)
-- **OKX**: Top 5 global derivatives exchange (unified V5 API, comprehensive product types)
-
-### Derivatives Trading
-**Bybit**, **OKX**, or **Binance**
-- **Bybit**: Unified V5 API across spot, linear, inverse, option - 2nd largest derivatives exchange globally
-- **OKX**: Unified V5 API across SPOT, FUTURES, SWAP, OPTION - Top 5 global derivatives exchange
-- **Binance**: Largest overall volume, strong derivatives offering
-- Category/InstType-based routing for all product types
-- Lower maker fees on derivatives than most exchanges
-
-### Market Data Only
-**MEXC**, **Bybit**, **OKX**, or **Hyperliquid**
-- Reliable WebSocket feeds
-- Good order book tracking
-- No trading required
-- **Bybit**: V5 API with unified data streams
-- **OKX**: V5 API with comprehensive market data channels
-
-### High-Frequency Trading
-**Kraken**, **Bybit**, or **OKX**
-- **Kraken**: Lowest latency (WebSocket v2), high rate limits (60+ req/s on Pro tier)
-- **Bybit**: 50 req/s public, 10 req/s private, 20 orders/s placement
-- **OKX**: 20 req/s public, 10 req/s private, 60 orders/2s per instrument
-
-### Multi-Exchange Arbitrage
-**Binance + Bybit + OKX + Kraken** or **Binance + Gemini + Kraken + Bybit + OKX**
-- Use `Consolidated_order_book` for aggregated L2 data
-- All have complete fallible normalization
-- **Binance**: Critical for arbitrage (largest volume, best liquidity)
-- **Bybit**: Derivatives arbitrage, unified V5 API
-- **OKX**: Top derivatives volume, diverse product types
-- Note: OKX uses hyphenated symbol format (BTC-USDT) vs Binance/Bybit (BTCUSDT)
-
-### DEX Integration (Experimental)
-**Hyperliquid** (perpetuals) or **Jupiter** (Solana spot)
-- Market data available
-- Trading requires blockchain integration (future work)
-
----
-
-## Development Priorities
-
-### Next Phase Targets
-
-**Phase 2: Complete Fallible Normalization**
-- Binance: Migrate remaining normalize functions to Result.t
-- Coinbase: Migrate remaining normalize functions to Result.t
-- Bitrue: Migrate remaining normalize functions to Result.t
-
-**Phase 3: Expand Production Coverage**
-- Binance: Add Ledger and Session modules
-- Coinbase: Add Ledger and Session modules
-- MEXC: Add Ledger module
-
-**Phase 4: Blockchain Trading**
-- Hyperliquid: Implement order signing and placement
-- dYdX: Implement blockchain signing
-- Jupiter: Add Solana wallet integration
-
----
-
-## Testing Status
-
-| Exchange | Unit Tests | Integration Tests | WebSocket Tests | Coverage |
-|----------|------------|------------------|----------------|----------|
-| Gemini | ✅ 400+ lines | ✅ Public endpoints | ✅ Error paths | ~80% |
-| Kraken | ✅ 527 lines | ✅ Public endpoints | ✅ v2 feeds | ~75% |
-| MEXC | ✅ 598 lines | ✅ Public endpoints | ✅ Error handling | ~70% |
-| Hyperliquid | ✅ 471 lines | ✅ Public endpoints | ✅ L1 feeds | ~65% |
-| Binance | ⚠️ Partial | ⚠️ Basic | ❌ Needed | ~40% |
-| Coinbase | ⚠️ Partial | ⚠️ Basic | ❌ Needed | ~40% |
-| Others | ❌ Minimal | ❌ Minimal | ❌ Minimal | <20% |
-
----
-
-## Contributing
-
-To add support for a new exchange or complete an existing implementation:
-
-1. Review [Exchange_intf.S](../../lib/exchange_intf.mli) interface
-2. Follow the pattern from Gemini (reference implementation)
-3. Ensure all normalize functions return Result.t
-4. Add comprehensive unit tests (400+ lines recommended)
-5. Add integration tests for public endpoints
-6. Update this status document
-
-See [CLAUDE.md](../../CLAUDE.md) for detailed implementation guidance.
-
----
-
-## See Also
-
-- [NORMALIZE_CONTRACT.md](./NORMALIZE_CONTRACT.md) - Fallible normalization guide
-- [MIGRATION_PHASE1.md](../MIGRATION_PHASE1.md) - Breaking changes from Phase 1
-- [Exchange_intf.mli](../../lib/exchange_intf.mli) - Exchange adapter interface
-- [Consolidated APIs](../../lib/) - Cross-exchange aggregation (order book, balance)
-
----
-
-**Maintenance:** This document should be updated whenever:
-- A new exchange is added
-- An exchange implementation is completed
-- Major features are added/removed
-- Phase completion milestones are reached
+This document tracks the implementation status of all exchange adapters in Fluxum.
+
+## CEX (Centralized Exchanges)
+
+| Exchange | Trading | Market Data | WebSocket | Session | Ledger | Pool Adapter | Status |
+|----------|---------|-------------|-----------|---------|--------|--------------|--------|
+| Gemini | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | **Production** |
+| Kraken | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | **Production** |
+| Binance | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | Partial |
+| MEXC | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | Beta |
+| Hyperliquid | ❌* | ✅ | ✅ | ❌ | ❌ | ✅ | *Blockchain only |
+| Coinbase | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | Partial |
+| Bitrue | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ | Data only |
+| Bybit | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | Partial |
+| Bitfinex | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | Partial |
+| Bitstamp | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | Partial |
+| Gate.io | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | Partial |
+| HTX | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | Partial |
+| KuCoin | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | Partial |
+| Poloniex | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | Partial |
+
+**Notes:**
+- *Hyperliquid: Trading via blockchain signing only (L1 transactions, not REST)
+- Pool Adapters for CEXes model order book liquidity as synthetic pools
+
+## DEX (Decentralized Exchanges)
+
+### EVM DEXes
+
+| Exchange | Chain | Pool Type | Pool Adapter | Status |
+|----------|-------|-----------|--------------|--------|
+| SushiSwap | Multi | Constant Product | ✅ | Production |
+| Uniswap V3 | Multi | Concentrated | ✅ | Production |
+| Curve | Multi | Stable | ✅ | Production |
+| Balancer | Multi | Weighted | ✅ | Production |
+| PancakeSwap | BSC | Constant Product | ✅ | Production |
+| Thena | BSC | Constant Product | ✅ | Production |
+| Aerodrome | Base | Concentrated | ✅ | Production |
+| Velodrome | Optimism | Concentrated | ✅ | Production |
+| QuickSwap | Polygon | Constant Product | ✅ | Production |
+| Camelot | Arbitrum | Concentrated | ✅ | Production |
+| SpookySwap | Fantom | Constant Product | ✅ | Production |
+| TraderJoe | Avalanche | Liquidity Bin | ✅ | Production |
+
+### Solana DEXes
+
+| Exchange | Pool Type | Pool Adapter | Status |
+|----------|-----------|--------------|--------|
+| Orca | Concentrated | ✅ | Production |
+| Raydium | Constant Product | ✅ | Production |
+| Jupiter | Aggregator | ✅ | Production |
+
+### Other Chain DEXes
+
+| Exchange | Chain | Pool Type | Pool Adapter | Status |
+|----------|-------|-----------|--------------|--------|
+| Osmosis | Cosmos | Weighted | ✅ | Production |
+| dYdX | Cosmos | Order Book | ✅ | Production |
+| 1inch | Multi | Aggregator | ✅ | Production |
+
+### Perpetuals DEXes
+
+| Exchange | Chain | Pool Type | Pool Adapter | Status |
+|----------|-------|-----------|--------------|--------|
+| GMX | Arbitrum/Avalanche | GLP (Weighted) | ✅ | Production |
+
+## Feature Legend
+
+- **Trading**: REST API for placing/canceling orders
+- **Market Data**: REST API for ticker, order book, trades
+- **WebSocket**: Real-time streaming data
+- **Session**: Auto-reconnecting session management (Session_intf.S)
+- **Ledger**: P&L tracking (Ledger_intf.ENTRY)
+- **Pool Adapter**: Unified pool interface (Pool_intf.S)
+
+## Implementation Priority
+
+### Tier 1 (Complete)
+- Gemini, Kraken - Full implementation with all features
+
+### Tier 2 (Production Ready)
+- MEXC, Hyperliquid - Trading + market data, tested
+
+### Tier 3 (Partial)
+- Binance, Coinbase, Bybit - Core functionality, needs Session/Ledger
+
+### Tier 4 (Data Only)
+- Bitrue, dYdX - Market data only, no trading
+
+## Adding a New Exchange
+
+See [CLAUDE.md](/CLAUDE.md) for detailed instructions on implementing a new exchange adapter.
+
+Key steps:
+1. Create `lib/exchange/<name>/` directory
+2. Implement `fluxum_adapter.ml` satisfying `Exchange_intf.S`
+3. Implement `pool_adapter.ml` satisfying `Pool_intf.S`
+4. Add tests in `lib/exchange/<name>/test/`
+5. Register in CLI (`app/cli.ml`)

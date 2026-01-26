@@ -1,338 +1,149 @@
 # Normalize Function Contract
 
+This document explains the normalization contract for exchange adapters in Fluxum.
+
 ## Overview
 
-All `Normalize` module functions in Fluxum exchange adapters return `Result.t` types, making them **fallible by design**. This document explains the rationale, common error cases, and best practices for handling normalization.
+All normalize functions in Fluxum return `Result.t` types to handle malformed or unexpected data gracefully. This ensures the system never crashes on bad API responses.
 
-## Why Fallible Normalization?
+## The Contract
 
-### The Problem: Untrusted External Data
+Every `Normalize` module in an exchange adapter must follow these rules:
 
-Exchange APIs return data in various formats with inconsistent validation:
-- **Null values** where numbers are expected (e.g., `{"bid": null}`)
-- **Malformed numbers** (`"not_a_number"`, `"NaN"`, `"Infinity"`)
-- **Missing required fields** (incomplete JSON objects)
-- **Unexpected enum values** (`"UNKNOWN_STATUS"` for order status)
-- **Negative values** where only positive make sense (prices, quantities)
-- **Precision issues** (18-decimal prices when 8 is the limit)
-
-### Pre-Phase 1 Approach (Unsafe)
-
-Before Phase 1, normalize functions used `Float.of_string` and similar unsafe operations:
+### 1. All normalize functions are fallible
 
 ```ocaml
-(* OLD CODE - DO NOT USE *)
-let normalize_ticker json : Types.Ticker.t =
-  let bid = Float.of_string (member "bid" json) in  (* CRASHES on null! *)
-  let ask = Float.of_string (member "ask" json) in
-  { bid_price = bid; ask_price = ask; ... }
+(* Good - returns Result.t *)
+val ticker : Native.Ticker.t -> (Types.Ticker.t, string) Result.t
+val order_book : Native.Book.snapshot -> (Types.Order_book.t, string) Result.t
+val balance : Native.Balance.t -> (Types.Balance.t, string) Result.t
+
+(* Exception: error normalization is infallible *)
+val error : Native.Error.t -> Types.Error.t
 ```
 
-**Consequences:**
-- Production crashes on malformed API responses
-- Silent data corruption (NaN/Infinity propagating through calculations)
-- No error recovery mechanism
-- Difficult debugging (stack traces at call sites, not parse sites)
-
-### Phase 1 Solution: Result.t Returns
-
-All normalize functions now return `(normalized_type, string) Result.t`:
+### 2. Error messages should be descriptive
 
 ```ocaml
-(* Phase 1+ CODE - CORRECT *)
-let normalize_ticker json : (Types.Ticker.t, string) Result.t =
-  let open Result.Let_syntax in
-  let%bind bid = safe_float_of_json "bid" json in
-  let%bind ask = safe_float_of_json "ask" json in
-  Ok { bid_price = bid; ask_price = ask; ... }
+(* Good *)
+Error (sprintf "Price must be positive, got: %f" price)
+Error (sprintf "Unrecognized order status: %s" status_str)
+
+(* Bad *)
+Error "invalid"
+Error "parse error"
 ```
 
-**Benefits:**
-- Explicit error handling at every boundary
-- Clear error messages indicating what field failed
-- Graceful degradation (skip malformed data, continue processing)
-- Production resilience (no crashes, log errors instead)
-
-## Common Error Cases
-
-### 1. Null Fields
-
-**Scenario:** Exchange returns `{"bid": null, "ask": "50000"}`
-
-**Error:** `"Failed to parse bid: expected number, got null"`
-
-**Handling:**
-```ocaml
-match Adapter.Normalize.ticker json with
-| Ok ticker -> process_ticker ticker
-| Error msg when String.is_substring msg ~substring:"null" ->
-  Log.warn "Ticker has null bid/ask, skipping: %s" msg;
-  (* Skip this update, use previous ticker data *)
-| Error msg ->
-  Log.error "Ticker normalization failed: %s" msg
-```
-
-### 2. Malformed Numbers
-
-**Scenario:** Exchange returns `{"price": "12,345.67"}` (comma separator) or `{"price": "abc"}`
-
-**Error:** `"Invalid float '12,345.67': commas not supported"` or `"Invalid float 'abc': not a number"`
-
-**Handling:**
-```ocaml
-match Adapter.Normalize.order_response response with
-| Ok order -> place_dependent_order order
-| Error msg when String.is_substring msg ~substring:"Invalid float" ->
-  Log.error "Cannot parse order price: %s" msg;
-  (* Do NOT place dependent orders - pricing data is corrupt *)
-  return (Error `Malformed_price)
-| Error msg -> ...
-```
-
-### 3. Missing Required Fields
-
-**Scenario:** Exchange returns `{"bids": [...]}` without `"asks"` field
-
-**Error:** `"Missing required field: asks"`
-
-**Handling:**
-```ocaml
-match Adapter.Normalize.order_book ~symbol:"BTCUSD" json with
-| Ok book -> update_book book
-| Error msg when String.is_substring msg ~substring:"Missing required field" ->
-  Log.error "Incomplete order book for BTCUSD: %s" msg;
-  (* Request full snapshot instead of incremental update *)
-  request_order_book_snapshot ~symbol:"BTCUSD"
-| Error msg -> ...
-```
-
-### 4. Unrecognized Enum Values
-
-**Scenario:** Exchange returns `{"side": "UNKNOWN"}` for a trade
-
-**Error:** `"Unrecognized side: UNKNOWN"` (when using strict validation)
-
-**Or:** Side defaults to `Buy` (when using permissive validation with defaults)
-
-**Handling:**
-```ocaml
-match Adapter.Normalize.public_trade json with
-| Ok trade ->
-  (* Check if side looks suspicious *)
-  if String.(trade.side_raw <> "buy" && trade.side_raw <> "sell") then
-    Log.warn "Trade %s has unusual side: %s (defaulted to %s)"
-      trade.id trade.side_raw (Types.Side.to_string trade.side);
-  process_trade trade
-| Error msg -> ...
-```
-
-### 5. Negative Prices or Quantities
-
-**Scenario:** Exchange returns `{"price": "-100.50"}` or `{"quantity": "-5.0"}`
-
-**Error:** `"Price must be positive, got: -100.50"` or `"Quantity cannot be negative, got: -5.0"`
-
-**Handling:**
-```ocaml
-match Adapter.Normalize.balance balance with
-| Ok b when Float.(b.total < 0.0) ->
-  Log.error "Negative balance detected: %f (data corruption?)" b.total;
-  (* Use zero balance as fallback *)
-  process_balance { b with total = 0.0; available = 0.0 }
-| Ok b -> process_balance b
-| Error msg ->
-  Log.error "Balance normalization failed: %s" msg
-```
-
-## Best Practices
-
-### 1. Always Handle Errors Explicitly
-
-**Bad:**
-```ocaml
-let ticker = Adapter.Normalize.ticker json |> Result.ok_or_failwith in
-(* This crashes on malformed data - defeats the purpose! *)
-```
-
-**Good:**
-```ocaml
-match Adapter.Normalize.ticker json with
-| Ok ticker -> process_ticker ticker
-| Error msg ->
-  Log.error "Ticker normalization failed: %s" msg;
-  (* Use previous ticker or skip update *)
-```
-
-### 2. Log Errors with Context
-
-Include enough information to debug the issue:
+### 3. Use Normalize_common utilities
 
 ```ocaml
-match Adapter.Normalize.order_response response with
-| Error msg ->
-  Log.error "Order normalization failed for order_id=%s, symbol=%s: %s"
-    (extract_order_id response)
-    (extract_symbol response)
-    msg;
-  (* Now you can correlate with exchange's API logs *)
-```
+open Fluxum.Normalize_common
 
-### 3. Fail Fast for Critical Operations
-
-For trading operations where malformed data could cause financial loss:
-
-```ocaml
-let place_market_order adapter ~symbol ~side ~qty =
-  let%bind order_req = build_order_request ~symbol ~side ~qty in
-  let%bind response = Adapter.place_order adapter order_req in
-  match Adapter.Normalize.order_response response with
-  | Error msg ->
-    (* CRITICAL: Do not proceed if we can't parse the order response *)
-    Log.error "CRITICAL: Cannot parse order response for %s %s: %s"
-      (Types.Symbol.to_string symbol) (Types.Side.to_string side) msg;
-    return (Error (`Normalization_failed msg))
-  | Ok order ->
-    (* Verify order details match our request before considering it successful *)
-    validate_order_matches_request order order_req
-```
-
-### 4. Use Shared Utilities
-
-The `Normalize_common` module provides safe parsing functions:
-
-```ocaml
-open Normalize_common
-
-(* Safe float parsing *)
+(* Safe float conversion *)
 let%bind price = Float_conv.price_of_string price_str in
 let%bind qty = Float_conv.qty_of_string qty_str in
 
-(* Enum parsing with clear errors *)
-let%bind side = Side.of_string_exn side_str in
+(* Safe side/status conversion *)
+let%bind side = Side.of_string side_str in
 let%bind status = Order_status.of_string status_str in
 ```
 
-### 5. Test Error Paths
+## Common Error Cases
 
-Write unit tests for normalization failures:
+### Float Conversion Errors
+
+| Input | Error |
+|-------|-------|
+| `"not_a_number"` | `Float conversion error 'not_a_number': Invalid_argument` |
+| `"NaN"` | `Non-finite float: NaN` |
+| `"Infinity"` | `Non-finite float: Infinity` |
+| `"-50000"` (for price) | `Price must be positive, got: -50000` |
+| `"-1.5"` (for qty) | `Quantity cannot be negative, got: -1.5` |
+
+### JSON Type Errors
+
+| Input | Error |
+|-------|-------|
+| `null` where string expected | `Expected string, got null` |
+| `[]` where object expected | `Expected object, got array` |
+| Missing field | `Expected string, got null` (from member lookup) |
+
+### Domain Errors
+
+| Input | Error |
+|-------|-------|
+| `"INVALID_STATUS"` | `Unrecognized order status: INVALID_STATUS` |
+| `"UNKNOWN_SIDE"` | `Unrecognized side: UNKNOWN_SIDE` |
+
+## Handling Errors in Callers
+
+### CLI Commands
 
 ```ocaml
-let test_ticker_null_bid () =
-  let json = `Assoc [("bid", `Null); ("ask", `String "1000")] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
-  | Error msg ->
-    assert (String.is_substring msg ~substring:"bid");
-    pass "Correctly rejected null bid"
-  | Ok _ -> fail "Should reject null bid"
-```
-
-## Migration from Pre-Phase 1 Code
-
-If you have code that assumes normalize functions are infallible:
-
-**Before (Pre-Phase 1):**
-```ocaml
-let ticker = Adapter.Normalize.ticker json in
-update_ticker_display ticker
-```
-
-**After (Phase 1+):**
-```ocaml
-match Adapter.Normalize.ticker json with
-| Ok ticker -> update_ticker_display ticker
+match Adapter.Normalize.ticker native_ticker with
+| Ok ticker -> print_ticker ticker
 | Error msg ->
-  Log.error "Failed to normalize ticker: %s" msg;
-  (* Keep displaying previous ticker or show error state *)
+  eprintf "Normalization failed: %s\n" msg;
+  (* Don't crash, handle gracefully *)
 ```
 
-See [MIGRATION_PHASE1.md](../MIGRATION_PHASE1.md) for a complete migration guide.
-
-## Exchanges Supporting Fallible Normalization
-
-| Exchange | Status | Notes |
-|----------|--------|-------|
-| Gemini | ✅ Complete | Phase 1 - all normalize functions return Result.t |
-| Kraken | ✅ Complete | Phase 1 - all normalize functions return Result.t |
-| Hyperliquid | ✅ Complete | Phase 1 - all normalize functions return Result.t |
-| MEXC | ✅ Complete | Phase 1 - all normalize functions return Result.t |
-| Binance | ⚠️ Partial | Some normalize functions still unsafe |
-| Coinbase | ⚠️ Partial | Some normalize functions still unsafe |
-| Bitrue | ⚠️ Partial | Some normalize functions still unsafe |
-| dYdX | ⚠️ Partial | Some normalize functions still unsafe |
-
-Priority exchanges (Gemini, Kraken, Hyperliquid, MEXC) have 100% fallible normalization coverage.
-
-## Error Message Format
-
-Normalize errors follow a consistent format:
-
-```
-"<operation>: <specific_error>"
-```
-
-Examples:
-- `"Failed to parse bid: expected number, got null"`
-- `"Invalid float '12,345.67': commas not supported"`
-- `"Missing required field: asks"`
-- `"Unrecognized side: UNKNOWN"`
-- `"Price must be positive, got: -100.50"`
-- `"Quantity cannot be negative, got: -5.0"`
-
-This allows pattern matching on error types:
+### Batch Operations
 
 ```ocaml
-match Adapter.Normalize.ticker json with
-| Error msg when String.is_substring msg ~substring:"null" -> handle_null_field ()
-| Error msg when String.is_substring msg ~substring:"Invalid float" -> handle_parse_error ()
-| Error msg when String.is_substring msg ~substring:"Missing" -> handle_missing_field ()
-| Error msg -> handle_generic_error msg
-| Ok ticker -> process_ticker ticker
+(* Use Result_util.transpose for lists *)
+let results = List.map orders ~f:Normalize.order_from_status in
+match Normalize_common.Result_util.transpose results with
+| Ok orders -> process_orders orders
+| Error first_error -> handle_error first_error
 ```
 
-## Performance Considerations
-
-**Q: Does Result.t add overhead?**
-
-A: Minimal. OCaml's Result.t is a simple variant type with zero allocation overhead for the Ok branch. The bind operators (`let%bind`) are inlined by the compiler.
-
-**Q: Should I cache normalized data?**
-
-A: Yes, if you're normalizing the same data repeatedly. Example:
+### Streaming Data
 
 ```ocaml
-type cached_ticker = {
-  raw: Yojson.Safe.t;
-  normalized: Types.Ticker.t option;
-  error: string option;
-}
-
-let get_normalized t =
-  match t.normalized with
-  | Some ticker -> Ok ticker
-  | None ->
-    match t.error with
-    | Some err -> Error err
-    | None ->
-      (* First access - normalize and cache *)
-      match Adapter.Normalize.ticker t.raw with
-      | Ok ticker ->
-        t.normalized <- Some ticker;
-        Ok ticker
-      | Error err ->
-        t.error <- Some err;
-        Error err
+(* Filter out bad data, log errors *)
+Pipe.filter_map stream ~f:(fun native ->
+  match Normalize.trade native with
+  | Ok trade -> Some trade
+  | Error msg ->
+    Log.Global.error "Trade normalization failed: %s" msg;
+    None)
 ```
 
-## Future Improvements
+## Testing Normalize Functions
 
-- **Typed errors**: Replace `(t, string) Result.t` with `(t, Normalize_error.t) Result.t` for pattern matching
-- **Recovery hints**: Include suggestions in error messages (e.g., "Try requesting full snapshot")
-- **Metrics**: Track normalization error rates by exchange/endpoint for monitoring
-- **Schema validation**: Pre-validate JSON against expected schema before normalization
+Every exchange adapter should have tests covering:
 
-## See Also
+1. **Happy path** - Valid data normalizes correctly
+2. **Error paths** - Invalid data returns descriptive errors
+3. **Edge cases** - Very large numbers, very small numbers, empty strings
+4. **Round-trip** - Data survives normalize without loss
 
-- [EXCHANGE_IMPLEMENTATION_STATUS.md](./EXCHANGE_IMPLEMENTATION_STATUS.md) - Exchange feature matrix
-- [MIGRATION_PHASE1.md](../MIGRATION_PHASE1.md) - Migration guide for Phase 1 changes
-- [lib/normalize_common.mli](../../lib/normalize_common.mli) - Shared normalization utilities
-- [lib/exchange_intf.mli](../../lib/exchange_intf.mli) - Exchange adapter interface
+Example test structure:
+
+```ocaml
+let test_ticker_malformed_float () =
+  let json = \`Assoc [("bid", \`String "not_a_number"); ...] in
+  match Normalize.ticker json with
+  | Error msg ->
+    assert (String.is_substring msg ~substring:"Float conversion error");
+    pass "Correctly rejected malformed float"
+  | Ok _ ->
+    fail "Should reject non-numeric bid"
+```
+
+## Migration from Pre-Result.t Code
+
+If you have code that assumed normalize functions were infallible:
+
+```ocaml
+(* Old code (crashes on bad data) *)
+let ticker = Normalize.ticker native in
+use_ticker ticker
+
+(* New code (handles errors) *)
+match Normalize.ticker native with
+| Ok ticker -> use_ticker ticker
+| Error msg -> handle_error msg
+```
+
+See [MIGRATION_PHASE1.md](../MIGRATION_PHASE1.md) for detailed migration guide.
