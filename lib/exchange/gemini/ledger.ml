@@ -417,8 +417,10 @@ module Ledger (*: S *) = struct
     List.fold events ~init:t ~f:(fun t event ->
         match (
           let open Result.Let_syntax in
-          let price_str = Option.value_exn event.avg_execution_price in
-          let qty_str = Option.value_exn event.executed_amount in
+          let%bind price_str = Result.of_option event.avg_execution_price
+            ~error:"Missing avg_execution_price in fill event" in
+          let%bind qty_str = Result.of_option event.executed_amount
+            ~error:"Missing executed_amount in fill event" in
           let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string price_str in
           let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string qty_str in
           Ok (price, qty)
@@ -526,10 +528,21 @@ Command does what?
 
 
   let pipe ?num_values ?behavior ?(how=`Sequential) ~(init:Entry.t Symbol.Map.t) (order_books:Order_book.Book.t Pipe.Reader.t Symbol.Map.t) order_events =
-    Deferred.Map.map ~how init ~f:(fun entry ->  
-      let order_book = entry.symbol |> Symbol.Enum_or_string.to_enum_exn (* TODO: Rethink this *) |> Map.find order_books in
-      let order_book = Option.value_exn order_book in
-      Entry.pipe ~init:entry ?num_values ?behavior order_book order_events)
+    Deferred.Map.filter_mapi ~how init ~f:(fun ~key:_ ~data:entry ->
+      match Symbol.Enum_or_string.to_enum entry.symbol with
+      | None ->
+        Log.Global.error "Gemini ledger: Cannot convert symbol %s to enum"
+          (Symbol.Enum_or_string.to_string entry.symbol);
+        Deferred.return None
+      | Some symbol_enum ->
+        match Map.find order_books symbol_enum with
+        | None ->
+          Log.Global.error "Gemini ledger: No order book for symbol %s"
+            (Symbol.to_string symbol_enum);
+          Deferred.return None
+        | Some order_book ->
+          Entry.pipe ~init:entry ?num_values ?behavior order_book order_events
+          >>| Option.some)
   end
 
 include Ledger

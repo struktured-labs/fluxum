@@ -386,10 +386,14 @@ module Stable = struct
     | false -> Error "invalid token indices"
     | true ->
       let open Result.Let_syntax in
+      let%bind balance_in = Result.of_option (List.nth p.balances token_in_idx)
+        ~error:(sprintf "token_in_idx %d out of bounds (pool has %d tokens)"
+          token_in_idx (List.length p.balances)) in
+      let%bind balance_out = Result.of_option (List.nth p.balances token_out_idx)
+        ~error:(sprintf "token_out_idx %d out of bounds (pool has %d tokens)"
+          token_out_idx (List.length p.balances)) in
       let fee = p.fee_pct /. 100.0 in
       let amount_in_after_fee = amount_in *. (1.0 -. fee) in
-      let balance_in = List.nth_exn p.balances token_in_idx in
-      let balance_out = List.nth_exn p.balances token_out_idx in
       let new_balance_in = balance_in +. amount_in_after_fee in
       let d = get_d ~balances:p.balances ~amp:p.amp in
       let%bind new_balance_out = get_y ~balances:p.balances ~amp:p.amp ~d

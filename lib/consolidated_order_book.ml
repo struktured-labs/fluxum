@@ -210,11 +210,13 @@ module Book = struct
       gemini_bids @ kraken_bids @ hyperliquid_bids @ bitrue_bids @ binance_bids @ coinbase_bids @ mexc_bids @ bybit_bids @ okx_bids
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p2 p1) (* Descending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
-      |> List.map ~f:(fun group ->
-        (* Safe: List.group guarantees non-empty groups *)
-        let price = fst (List.hd_exn group) in
-        let levels = List.map group ~f:snd in
-        (price, merge_levels levels))
+      |> List.filter_map ~f:(fun group ->
+        (* List.group guarantees non-empty groups, but use pattern match for safety *)
+        match group with
+        | [] -> None
+        | (price, _) :: _ ->
+          let levels = List.map group ~f:snd in
+          Some (price, merge_levels levels))
       |> Bid_price_map.of_alist_exn
     in
 
@@ -272,11 +274,13 @@ module Book = struct
       gemini_asks @ kraken_asks @ hyperliquid_asks @ bitrue_asks @ binance_asks @ coinbase_asks @ mexc_asks @ bybit_asks @ okx_asks
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2) (* Ascending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
-      |> List.map ~f:(fun group ->
-        (* Safe: List.group guarantees non-empty groups *)
-        let price = fst (List.hd_exn group) in
-        let levels = List.map group ~f:snd in
-        (price, merge_levels levels))
+      |> List.filter_map ~f:(fun group ->
+        (* List.group guarantees non-empty groups, but use pattern match for safety *)
+        match group with
+        | [] -> None
+        | (price, _) :: _ ->
+          let levels = List.map group ~f:snd in
+          Some (price, merge_levels levels))
       |> Ask_price_map.of_alist_exn
     in
 
