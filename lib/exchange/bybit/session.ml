@@ -53,32 +53,34 @@ module Events = struct
   let ledger t = t.ledger
   let order_events t = t.order_events_pipe
 
-  (** Create session events
-
-      Note: This is a placeholder implementation until Bybit WebSocket client is implemented.
-      When the WS client is ready, this should:
-      1. Connect to Bybit WebSocket API
-      2. Subscribe to relevant channels (orderbook, trades, executions)
-      3. Use Auto_restart.pipe for reliable reconnection
-      4. Parse Bybit-specific message formats
-  *)
+  (** Create session events *)
   let create
       ?(symbols : Fluxum.Types.Symbol.t list = [])
       ?order_ids:_
       ()
     : t Deferred.t =
-    Log.Global.info "Bybit Events.create: start symbols=%d (placeholder - WebSocket not yet implemented)" (List.length symbols);
+    Log.Global.info "Bybit Events.create: start symbols=%d" (List.length symbols);
 
     (* Balance pipe - placeholder for now *)
     let balance_reader, _balance_writer = Pipe.create () in
     let balance_pipe = balance_reader in
 
-    (* Market data pipes - one per symbol - placeholder *)
+    (* Market data pipes - one per symbol using WebSocket *)
     let market_data =
       Fluxum.Types.Symbol.Map.of_alist_exn (
         List.map symbols ~f:(fun symbol ->
-          let reader, _writer = Pipe.create () in
-          (symbol, reader)
+          let name = sprintf "market_data[%s]" symbol in
+          let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
+            Log.Global.info "Creating market data connection for %s" symbol;
+            let streams = [Ws.Stream.Tickers symbol] in
+            Ws.connect ~streams () >>| function
+            | Ok ws -> Ws.messages ws
+            | Error err ->
+              Log.Global.error "Failed to connect market data for %s: %s" symbol (Error.to_string_hum err);
+              let reader, _writer = Pipe.create () in
+              reader
+          ) () in
+          (symbol, pipe)
         )
       )
     in
@@ -89,7 +91,7 @@ module Events = struct
         List.map symbols ~f:(fun symbol ->
           let name = sprintf "order_book[%s]" symbol in
           let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
-            Log.Global.info "Creating order book for %s (placeholder)" symbol;
+            Log.Global.info "Creating order book for %s" symbol;
             Order_book.Book.pipe ~symbol ~depth:10 ()
           ) () in
           (symbol, pipe)
@@ -97,12 +99,42 @@ module Events = struct
       )
     in
 
-    (* Trades pipes - one per symbol - placeholder *)
+    (* Trades pipes - one per symbol using WebSocket *)
     let trades =
       Fluxum.Types.Symbol.Map.of_alist_exn (
         List.map symbols ~f:(fun symbol ->
-          let reader, _writer = Pipe.create () in
-          (symbol, reader)
+          let name = sprintf "trades[%s]" symbol in
+          let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
+            Log.Global.info "Creating trade stream for %s" symbol;
+            let streams = [Ws.Stream.PublicTrade symbol] in
+            Ws.connect ~streams () >>| function
+            | Ok ws ->
+              let trade_reader, trade_writer = Pipe.create () in
+              don't_wait_for (
+                Pipe.iter (Ws.messages ws) ~f:(fun msg ->
+                  match Ws.parse_message msg with
+                  | Ws.Message.PublicTrade { data = trades_list; _ } ->
+                    (* Convert to JSON list *)
+                    let trades_json = List.map trades_list ~f:(fun trade ->
+                      Ws.Message.public_trade_to_yojson trade
+                    ) in
+                    Pipe.write trade_writer trades_json
+                  | Ws.Message.SubscriptionResponse _ -> Deferred.unit
+                  | Ws.Message.Orderbook _ -> Deferred.unit
+                  | Ws.Message.Tickers _ -> Deferred.unit
+                  | Ws.Message.Kline _ -> Deferred.unit
+                  | Ws.Message.Pong _ -> Deferred.unit
+                  | Ws.Message.Error _ -> Deferred.unit
+                  | Ws.Message.Unknown _ -> Deferred.unit
+                )
+              );
+              trade_reader
+            | Error err ->
+              Log.Global.error "Failed to connect trade stream for %s: %s" symbol (Error.to_string_hum err);
+              let reader, _writer = Pipe.create () in
+              reader
+          ) () in
+          (symbol, pipe)
         )
       )
     in
