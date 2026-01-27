@@ -52,8 +52,17 @@ module Book = struct
     try
       let open Yojson.Safe.Util in
       (* Bybit format: {"b": [[price, size], ...], "a": [[price, size], ...]} *)
-      let bids = (try update |> member "b" |> to_list with _ -> []) in
-      let asks = (try update |> member "a" |> to_list with _ -> []) in
+      (* Use safe extraction - member returns `Null for missing keys *)
+      let safe_to_list json = match json with
+        | `Null -> []
+        | `List l -> l
+        | other ->
+          Log.Global.debug "Bybit WS: Expected list for bids/asks, got: %s"
+            (Yojson.Safe.to_string other);
+          []
+      in
+      let bids = update |> member "b" |> safe_to_list in
+      let asks = update |> member "a" |> safe_to_list in
 
       (* Process bid updates *)
       let t_with_bids =
@@ -96,7 +105,9 @@ module Book = struct
       in
       t_with_asks
     with
-    | _ -> t
+    | exn ->
+      Log.Global.error "Bybit WS: Exception in apply_book_update: %s" (Exn.to_string exn);
+      t
 
   (** Create live order book pipe from Bybit WebSocket
 

@@ -13,8 +13,8 @@ end
 
 let normalize (pool : Native.pool) : (Pool_intf.Pool.t, string) Result.t =
   let open Result.Let_syntax in
-  let decimals0 = try Int.of_string pool.token0.decimals with _ -> 18 in
-  let decimals1 = try Int.of_string pool.token1.decimals with _ -> 18 in
+  let decimals0 = Pool_common.Int_conv.decimals_of_string pool.token0.decimals in
+  let decimals1 = Pool_common.Int_conv.decimals_of_string pool.token1.decimals in
   let%bind liquidity = Fluxum.Normalize_common.Float_conv.qty_of_string pool.liquidity in
   let%bind spot_price = Pool_common.Concentrated.price_from_sqrt_price_x96
     ~sqrt_price_x96:pool.sqrtPrice ~decimals0 ~decimals1 in

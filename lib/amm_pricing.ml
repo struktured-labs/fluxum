@@ -129,14 +129,12 @@ module Concentrated = struct
 
   (** Convert sqrtPriceX96 to actual price *)
   let price_from_sqrt_price_x96 ~(sqrt_price_x96 : string) ~(decimals0 : int) ~(decimals1 : int) : float pricing_result =
-    try
-      let sqrt_price_raw = Float.of_string sqrt_price_x96 in
-      let sqrt_price = sqrt_price_raw /. q96 in
-      let raw_price = sqrt_price *. sqrt_price in
-      let decimal_adjustment = Float.int_pow 10.0 (decimals1 - decimals0) in
-      Ok (raw_price *. decimal_adjustment)
-    with
-    | _ -> Error "invalid sqrtPriceX96"
+    let open Result.Let_syntax in
+    let%bind sqrt_price_raw = Fluxum.Normalize_common.Float_conv.of_string sqrt_price_x96 in
+    let sqrt_price = sqrt_price_raw /. q96 in
+    let raw_price = sqrt_price *. sqrt_price in
+    let decimal_adjustment = Float.int_pow 10.0 (decimals1 - decimals0) in
+    Ok (raw_price *. decimal_adjustment)
 
   (** Convert tick to price *)
   let price_from_tick ~(tick : int) ~(decimals0 : int) ~(decimals1 : int) : float =
@@ -155,18 +153,17 @@ module Concentrated = struct
   (** Calculate output amount within current tick range
       Note: This is simplified - real implementation needs tick crossing logic *)
   let get_amount_out (p : params) ~(amount_in : float) : float pricing_result =
-    try
-      let sqrt_price = Float.of_string p.sqrt_price_x96 /. q96 in
-      let liq = Float.of_string p.liquidity in
-      let fee = Float.of_int p.fee_bps /. 10000.0 in
-      let amount_in_after_fee = amount_in *. (1.0 -. fee) in
-      (* Simplified single-tick calculation *)
-      let delta_sqrt_price = amount_in_after_fee /. liq in
-      let new_sqrt_price = sqrt_price +. delta_sqrt_price in
-      let amount_out = liq *. (1.0 /. sqrt_price -. 1.0 /. new_sqrt_price) in
-      Ok (Float.abs amount_out)
-    with
-    | _ -> Error "invalid concentrated pool params"
+    let open Result.Let_syntax in
+    let%bind sqrt_price_raw = Fluxum.Normalize_common.Float_conv.of_string p.sqrt_price_x96 in
+    let sqrt_price = sqrt_price_raw /. q96 in
+    let%bind liq = Fluxum.Normalize_common.Float_conv.qty_of_string p.liquidity in
+    let fee = Float.of_int p.fee_bps /. 10000.0 in
+    let amount_in_after_fee = amount_in *. (1.0 -. fee) in
+    (* Simplified single-tick calculation *)
+    let delta_sqrt_price = amount_in_after_fee /. liq in
+    let new_sqrt_price = sqrt_price +. delta_sqrt_price in
+    let amount_out = liq *. (1.0 /. sqrt_price -. 1.0 /. new_sqrt_price) in
+    Ok (Float.abs amount_out)
 
   (** Full quote for concentrated liquidity *)
   let quote (p : params) ~(amount_in : float) ~(pool_id : string) : Pool_intf.Quote.t pricing_result =

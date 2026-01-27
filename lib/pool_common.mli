@@ -23,6 +23,22 @@
     ]}
 *)
 
+(** {1 Safe Integer Conversions} *)
+
+module Int_conv : sig
+  (** Convert string to int with Result.t error handling. *)
+  val of_string : string -> (int, string) Result.t
+
+  (** Convert string to int with default fallback. *)
+  val of_string_with_default : string -> default:int -> int
+
+  (** Parse token decimals from string (defaults to 18). *)
+  val decimals_of_string : string -> int
+
+  (** Parse fee in basis points (0-10000). *)
+  val fee_bps_of_string : string -> (int, string) Result.t
+end
+
 (** {1 Constant Product Pool Helpers} *)
 
 module Constant_product : sig

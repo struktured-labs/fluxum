@@ -8,6 +8,52 @@ open Core
 
 module Float_conv = Fluxum.Normalize_common.Float_conv
 
+(** {1 Safe Integer Conversions} *)
+
+module Int_conv = struct
+  (** Convert string to int with Result.t error handling.
+
+      @param s Input string
+      @return Int or Error with descriptive message
+  *)
+  let of_string (s : string) : (int, string) Result.t =
+    match Int.of_string_opt s with
+    | Some i -> Ok i
+    | None -> Error (sprintf "Invalid integer: '%s'" s)
+
+  (** Convert string to int with default fallback.
+
+      Use when a sensible default exists (e.g., 18 for token decimals).
+
+      @param s Input string
+      @param default Default value if parsing fails
+      @return Parsed int or default
+  *)
+  let of_string_with_default (s : string) ~default : int =
+    Option.value (Int.of_string_opt s) ~default
+
+  (** Parse token decimals from string.
+
+      Token decimals default to 18 (ERC-20 standard) if parsing fails.
+
+      @param s Decimals as string
+      @return Decimals as int (defaults to 18)
+  *)
+  let decimals_of_string (s : string) : int =
+    of_string_with_default s ~default:18
+
+  (** Parse fee in basis points.
+
+      @param s Fee as string (e.g., "30" for 0.3%)
+      @return Fee in basis points or Error
+  *)
+  let fee_bps_of_string (s : string) : (int, string) Result.t =
+    match Int.of_string_opt s with
+    | Some i when i >= 0 && i <= 10000 -> Ok i
+    | Some i -> Error (sprintf "Fee basis points out of range (0-10000): %d" i)
+    | None -> Error (sprintf "Invalid fee basis points: '%s'" s)
+end
+
 (** {1 Constant Product Pool Helpers} *)
 
 module Constant_product = struct
@@ -170,7 +216,7 @@ module Stable = struct
   *)
   let parse_amplification ?amp_str ~default () : int =
     match amp_str with
-    | Some s -> (try Int.of_string s with _ -> default)
+    | Some s -> Int_conv.of_string_with_default s ~default
     | None -> default
 end
 
