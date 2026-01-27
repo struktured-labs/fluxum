@@ -87,6 +87,7 @@ module V1 : sig
       | `Insufficient_funds
       | `Self_cross_prevented
       | `Immediate_or_cancel_would_post
+      | `Maker_or_cancel_would_take
     ]
     [@@deriving sexp, yojson, enumerate, compare, equal]
 

@@ -281,6 +281,7 @@ module Adapter = struct
         | Some `Insufficient_funds -> Types.Order_status.Rejected "insufficient_funds"
         | Some `Self_cross_prevented -> Types.Order_status.Rejected "self_cross_prevented"
         | Some `Immediate_or_cancel_would_post -> Types.Order_status.Rejected "ioc_would_post"
+        | Some `Maker_or_cancel_would_take -> Types.Order_status.Rejected "moc_would_take"
         | None -> Types.Order_status.New
       in
       let status : Types.Order_status.t =
