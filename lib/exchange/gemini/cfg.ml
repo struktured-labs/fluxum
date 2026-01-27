@@ -1,5 +1,14 @@
+(** Get home directory with fallback to /tmp *)
+let home_dir () =
+  match Unix.getenv "HOME" with
+  | Some h -> h
+  | None ->
+    match Unix.getenv "XDG_CONFIG_HOME" with
+    | Some h -> h
+    | None -> "/tmp"
+
 let create_config_dir () =
-  let dirname = sprintf "%s/%s" (Unix.getenv_exn "HOME") ".gemini" in
+  let dirname = sprintf "%s/%s" (home_dir ()) ".gemini" in
   try_with ~extract_exn:true (fun () -> Unix.mkdir ?p:None ?perm:None dirname)
   >>= function
   | Result.Ok () -> Deferred.unit

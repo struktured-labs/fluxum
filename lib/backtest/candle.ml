@@ -37,33 +37,43 @@ let is_bearish t = Float.(t.close < t.open_)
 (** CSV field names for parsing *)
 let csv_header = ["timestamp"; "open"; "high"; "low"; "close"; "volume"]
 
-(** Parse from CSV row (assumes standard OHLCV format) *)
-let of_csv_row ~symbol row =
+(** Safe float parsing helper *)
+let parse_float name s =
+  match Float.of_string_opt s with
+  | Some f -> Ok f
+  | None -> Error (sprintf "Invalid %s value: %s" name s)
+
+(** Safe timestamp parsing helper *)
+let parse_timestamp ts =
+  match Time_ns_unix.of_string ts with
+  | timestamp -> Ok timestamp
+  | exception _ ->
+    match Float.of_string_opt ts with
+    | Some epoch ->
+      let span = Time_ns.Span.of_sec epoch in
+      Ok (Time_ns.of_span_since_epoch span)
+    | None -> Error (sprintf "Cannot parse timestamp: %s" ts)
+
+(** Parse from CSV row with Result.t error handling *)
+let of_csv_row_result ~symbol row =
+  let open Result.Let_syntax in
   match row with
   | [ts; o; h; l; c; v] ->
-    let timestamp =
-      (* Try parsing as ISO 8601 first, then as epoch seconds *)
-      match Time_ns_unix.of_string ts with
-      | ts -> ts
-      | exception _ ->
-        (* Try as epoch seconds (float) *)
-        match Float.of_string ts with
-        | epoch ->
-          let span = Time_ns.Span.of_sec epoch in
-          Time_ns.of_span_since_epoch span
-        | exception _ ->
-          failwith (sprintf "Cannot parse timestamp: %s" ts)
-    in
-    { symbol
-    ; timestamp
-    ; open_  = Float.of_string o
-    ; high   = Float.of_string h
-    ; low    = Float.of_string l
-    ; close  = Float.of_string c
-    ; volume = Float.of_string v
-    }
+    let%bind timestamp = parse_timestamp ts in
+    let%bind open_ = parse_float "open" o in
+    let%bind high = parse_float "high" h in
+    let%bind low = parse_float "low" l in
+    let%bind close = parse_float "close" c in
+    let%bind volume = parse_float "volume" v in
+    Ok { symbol; timestamp; open_; high; low; close; volume }
   | _ ->
-    failwith (sprintf "Invalid CSV row: expected 6 columns, got %d" (List.length row))
+    Error (sprintf "Invalid CSV row: expected 6 columns, got %d" (List.length row))
+
+(** Parse from CSV row (assumes standard OHLCV format) - raises on error *)
+let of_csv_row ~symbol row =
+  match of_csv_row_result ~symbol row with
+  | Ok t -> t
+  | Error msg -> failwith msg
 
 (** Convert to CSV row *)
 let to_csv_row t =

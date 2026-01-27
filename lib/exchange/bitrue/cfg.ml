@@ -18,11 +18,17 @@ module type S = sig
   val ws_user_url : string
 end
 
-(** Production configuration *)
+(** Get required environment variable with descriptive error *)
+let require_env name =
+  match Sys.getenv name with
+  | Some v -> v
+  | None -> failwith (sprintf "Missing required environment variable: %s" name)
+
+(** Production configuration - requires BITRUE_API_KEY and BITRUE_API_SECRET *)
 let production () : (module S) =
   (module struct
-    let api_key = Sys.getenv_exn "BITRUE_API_KEY"
-    let api_secret = Sys.getenv_exn "BITRUE_API_SECRET"
+    let api_key = require_env "BITRUE_API_KEY"
+    let api_secret = require_env "BITRUE_API_SECRET"
     let rest_url = Endpoint.rest_url
     let ws_market_url = Endpoint.ws_market
     let ws_user_url = Endpoint.ws_user

@@ -16,11 +16,17 @@ module type S = sig
   val ws_url : string
 end
 
-(** Production configuration *)
+(** Get required environment variable with descriptive error *)
+let require_env name =
+  match Sys.getenv name with
+  | Some v -> v
+  | None -> failwith (sprintf "Missing required environment variable: %s" name)
+
+(** Production configuration - requires COINBASE_API_KEY and COINBASE_API_SECRET *)
 let production () : (module S) =
   (module struct
-    let api_key = Sys.getenv_exn "COINBASE_API_KEY"
-    let api_secret = Sys.getenv_exn "COINBASE_API_SECRET"
+    let api_key = require_env "COINBASE_API_KEY"
+    let api_secret = require_env "COINBASE_API_SECRET"
     let rest_url = Endpoint.rest_url
     let ws_url = Endpoint.ws_url
   end)
@@ -33,11 +39,11 @@ module Production : S = struct
   let ws_url = Endpoint.ws_url
 end
 
-(** Sandbox/testnet configuration *)
+(** Sandbox/testnet configuration - requires COINBASE_SANDBOX_API_KEY and COINBASE_SANDBOX_API_SECRET *)
 let sandbox () : (module S) =
   (module struct
-    let api_key = Sys.getenv_exn "COINBASE_SANDBOX_API_KEY"
-    let api_secret = Sys.getenv_exn "COINBASE_SANDBOX_API_SECRET"
+    let api_key = require_env "COINBASE_SANDBOX_API_KEY"
+    let api_secret = require_env "COINBASE_SANDBOX_API_SECRET"
     let rest_url = "https://api-public.sandbox.pro.coinbase.com"
     let ws_url = "wss://ws-feed-public.sandbox.pro.coinbase.com"
   end)

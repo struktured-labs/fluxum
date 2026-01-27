@@ -48,7 +48,12 @@ module File = struct
     |> return
 
   let default_filename =
-    let root_path = Unix.getenv_exn "HOME" in
+    let root_path = match Unix.getenv "HOME" with
+      | Some h -> h
+      | None -> match Unix.getenv "XDG_CONFIG_HOME" with
+        | Some h -> h
+        | None -> "/tmp"
+    in
     sprintf "%s/.gemini/nonce.txt" root_path
 
   let default = pipe ~init:default_filename

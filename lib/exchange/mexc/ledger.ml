@@ -360,8 +360,11 @@ let from_trades
     ?avg_trade_prices
     (trades : V1.My_trades.trade list)
   : t * Entry.t Pipe.Reader.t Fluxum.Types.Symbol.Map.t =
-  (* Sort trades by time (would need to parse timestamps) *)
-  let sorted_trades = trades in  (* TODO: sort by time field *)
+  (* Sort trades by time field (ascending order) *)
+  let sorted_trades =
+    List.sort trades ~compare:(fun a b ->
+      Int64.compare a.V1.My_trades.time b.V1.My_trades.time)
+  in
 
   (* Fold over trades to build ledger and pipes *)
   let symbol_to_entry_and_pipe = List.fold sorted_trades
@@ -383,7 +386,11 @@ let from_trades
           | true -> Fluxum.Types.Side.Buy
           | false -> Fluxum.Types.Side.Sell
         in
-        let timestamp = Time_float_unix.now () in  (* TODO: parse trade.time *)
+        (* MEXC time is unix timestamp in milliseconds *)
+        let timestamp =
+          Time_float_unix.of_span_since_epoch
+            (Time_float.Span.of_ms (Int64.to_float trade.time))
+        in
 
         let fee_usd = 0. in  (* MEXC doesn't provide fee in trade data *)
 

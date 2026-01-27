@@ -360,8 +360,11 @@ let from_trades
     ?avg_trade_prices
     (trades : Rest.Types.trade list)
   : t * Entry.t Pipe.Reader.t Fluxum.Types.Symbol.Map.t =
-  (* Sort trades by time (would need to parse timestamps) *)
-  let sorted_trades = trades in  (* TODO: sort by time field *)
+  (* Sort trades by time field *)
+  let sorted_trades =
+    List.sort trades ~compare:(fun a b ->
+      String.compare a.Rest.Types.time b.Rest.Types.time)
+  in
 
   (* Fold over trades to build ledger and pipes *)
   let symbol_to_entry_and_pipe = List.fold sorted_trades
@@ -383,7 +386,11 @@ let from_trades
           | "BUY" -> Fluxum.Types.Side.Buy
           | _ -> Fluxum.Types.Side.Sell
         in
-        let timestamp = Time_float_unix.now () in  (* TODO: parse trade.time *)
+        let timestamp =
+          match Time_float_unix.of_string trade.Rest.Types.time with
+          | t -> t
+          | exception _ -> Time_float_unix.now ()
+        in
 
         let fee_usd = 0. in  (* Coinbase doesn't provide fee in trade data *)
 
