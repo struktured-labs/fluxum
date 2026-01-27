@@ -92,6 +92,7 @@ module Price : sig
   end
 
   val of_string : string -> t
+  val of_string_opt : string -> t option
   val to_string : t -> string
 end
 
@@ -102,6 +103,10 @@ module Qty : sig
       Minimum: Typically > 0, but 0 allowed for order cancellations
   *)
   type t = float [@@deriving sexp, compare, equal]
+
+  val of_string : string -> t
+  val of_string_opt : string -> t option
+  val to_string : t -> string
 end
 
 (** {1 Order Types} *)

@@ -26,7 +26,9 @@ let connect ~url =
 
   (* Parse URL for building WebSocket upgrade request *)
   let uri = Uri.of_string url in
-  let host = Option.value_exn (Uri.host uri) ~message:"URL must have host" in
+  let%bind host = Deferred.return (
+    Result.of_option (Uri.host uri) ~error:(Error.of_string "URL must have host")
+  ) in
   let path = match Uri.path uri with "" | "/" -> "/" | p -> p in
 
   (* Use curl to establish TLS connection *)

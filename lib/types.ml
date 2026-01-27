@@ -64,11 +64,16 @@ module Price = struct
   end
 
   let of_string = Float.of_string
+  let of_string_opt = Float.of_string_opt
   let to_string = Float.to_string
 end
 
 module Qty = struct
   type t = float [@@deriving sexp, compare, equal]
+
+  let of_string = Float.of_string
+  let of_string_opt = Float.of_string_opt
+  let to_string = Float.to_string
 end
 
 module Side = struct
