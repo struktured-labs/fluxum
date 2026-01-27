@@ -27,12 +27,12 @@ end
 (** Multi-stream event container *)
 module Events = struct
   (** Type aliases for Bybit-specific types *)
-  type balance = unit  (* TODO: Implement balance type *)
+  type balance = V5.Wallet_balance.coin_info
   type trade = Yojson.Safe.t  (* Raw trade JSON until WS client implemented *)
   type market_event = string  (* Raw WebSocket message *)
   type book = (Order_book.Book.t, string) Result.t
   type ledger_entry = Ledger.Entry.t
-  type order_event = unit  (* TODO: Implement order event type *)
+  type order_event = V5.Create_order.response  (** Order execution updates *)
   type order_id = string
 
   type t =

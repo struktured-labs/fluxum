@@ -65,12 +65,22 @@ module Events = struct
     let balance_reader, _balance_writer = Pipe.create () in
     let balance_pipe = balance_reader in
 
-    (* Market data pipes *)
+    (* Market data pipes - one per symbol using WebSocket *)
     let market_data =
       Fluxum.Types.Symbol.Map.of_alist_exn (
         List.map symbols ~f:(fun symbol ->
-          let reader, _writer = Pipe.create () in
-          (symbol, reader)
+          let name = sprintf "market_data[%s]" symbol in
+          let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
+            Log.Global.info "Creating market data connection for %s" symbol;
+            let streams = [Ws.Stream.Bbo symbol; Ws.Stream.Trades symbol] in
+            Market_data.connect ~streams () >>| function
+            | Ok md -> Market_data.messages md
+            | Error err ->
+              Log.Global.error "Failed to connect market data for %s: %s" symbol err;
+              let reader, _writer = Pipe.create () in
+              reader
+          ) () in
+          (symbol, pipe)
         )
       )
     in
@@ -89,12 +99,45 @@ module Events = struct
       )
     in
 
-    (* Trades pipes *)
+    (* Trades pipes - one per symbol using WebSocket *)
     let trades =
       Fluxum.Types.Symbol.Map.of_alist_exn (
         List.map symbols ~f:(fun symbol ->
-          let reader, _writer = Pipe.create () in
-          (symbol, reader)
+          let name = sprintf "trades[%s]" symbol in
+          let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
+            Log.Global.info "Creating trade stream for %s" symbol;
+            let streams = [Ws.Stream.Trades symbol] in
+            Market_data.connect ~streams () >>| function
+            | Ok md ->
+              let trade_reader, trade_writer = Pipe.create () in
+              don't_wait_for (
+                Pipe.iter (Market_data.messages md) ~f:(fun msg ->
+                  match Ws.parse_message msg with
+                  | Ws.Message.Trades trades_list ->
+                    (* Convert trade list to JSON list *)
+                    let trades_json = List.map trades_list ~f:(fun trade ->
+                      Ws.Message.trade_to_yojson trade
+                    ) in
+                    Pipe.write trade_writer trades_json
+                  | Ws.Message.SubscriptionResponse _ -> Deferred.unit
+                  | Ws.Message.AllMids _ -> Deferred.unit
+                  | Ws.Message.L2Book _ -> Deferred.unit
+                  | Ws.Message.Bbo _ -> Deferred.unit
+                  | Ws.Message.Candle _ -> Deferred.unit
+                  | Ws.Message.OrderUpdates _ -> Deferred.unit
+                  | Ws.Message.UserFills _ -> Deferred.unit
+                  | Ws.Message.Pong -> Deferred.unit
+                  | Ws.Message.Error _ -> Deferred.unit
+                  | Ws.Message.Unknown _ -> Deferred.unit
+                )
+              );
+              trade_reader
+            | Error err ->
+              Log.Global.error "Failed to connect trade stream for %s: %s" symbol err;
+              let reader, _writer = Pipe.create () in
+              reader
+          ) () in
+          (symbol, pipe)
         )
       )
     in
