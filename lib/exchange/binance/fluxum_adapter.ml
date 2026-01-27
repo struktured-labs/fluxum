@@ -406,17 +406,38 @@ module Adapter = struct
       } : Types.Book_update.t)
 
     let symbol_info (s : Native.Symbol_info.t) : (Types.Symbol_info.t, string) Result.t =
-      (* Note: Binance API doesn't provide min_order_size/tick_size in the basic symbol_info.
-         These are in the 'filters' array which requires more complex parsing.
-         For now, we use safe defaults. *)
+      (* Parse filters to extract trading constraints *)
+      let find_filter filter_type =
+        List.find s.filters ~f:(fun f ->
+          String.equal f.V3.Exchange_info.filterType filter_type)
+      in
+      (* Extract LOT_SIZE filter for min_order_size *)
+      let min_order_size =
+        match find_filter "LOT_SIZE" with
+        | Some f ->
+          Option.bind f.minQty ~f:(fun s ->
+            Fluxum.Normalize_common.Float_conv.qty_of_string s |> Result.ok)
+          |> Option.value ~default:0.0
+        | None -> 0.0
+      in
+      (* Extract PRICE_FILTER for tick_size *)
+      let tick_size =
+        match find_filter "PRICE_FILTER" with
+        | Some f ->
+          Option.bind f.tickSize ~f:(fun s ->
+            Fluxum.Normalize_common.Float_conv.price_of_string s |> Result.ok)
+        | None -> None
+      in
+      (* quote_increment is same as tick_size for Binance *)
+      let quote_increment = tick_size in
       Ok ({ venue = Venue.t
       ; symbol = s.symbol
       ; base_currency = s.baseAsset
       ; quote_currency = s.quoteAsset
       ; status = s.status
-      ; min_order_size = 0.0  (* TODO: parse from filters array *)
-      ; tick_size = None      (* TODO: parse from filters array *)
-      ; quote_increment = None (* TODO: parse from filters array *)
+      ; min_order_size
+      ; tick_size
+      ; quote_increment
       } : Types.Symbol_info.t)
 
     let ticker (t : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =

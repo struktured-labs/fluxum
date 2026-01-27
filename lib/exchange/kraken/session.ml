@@ -27,13 +27,13 @@ end
 (** Multi-stream event container *)
 module Events = struct
   (** Type aliases for Kraken-specific types *)
-  type balance = unit  (* TODO: Implement balance type *)
+  type balance = string * string  (** Currency and amount pair *)
   type trade = Ws.Public.Trade_item.t
   type market_event = string  (* Raw WebSocket message *)
   type book = (Order_book.Book.t, string) Result.t
   type ledger_entry = Ledger.Entry.t
-  type order_event = unit  (* TODO: Implement order event type *)
-  type order_id = int64
+  type order_event = V1.Open_orders.Order.t  (** Order execution updates *)
+  type order_id = string
 
   type t =
     { symbols : Fluxum.Types.Symbol.t list;

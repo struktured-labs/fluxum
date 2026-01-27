@@ -65,16 +65,20 @@ module Events = struct
     let balance_reader, _balance_writer = Pipe.create () in
     let balance_pipe = balance_reader in
 
-    (* Market data pipes - one per symbol (placeholder) *)
+    (* Market data pipes - one per symbol using WebSocket *)
     let market_data =
       Fluxum.Types.Symbol.Map.of_alist_exn (
         List.map symbols ~f:(fun symbol ->
           let name = sprintf "market_data[%s]" symbol in
           let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
             Log.Global.info "Creating market data connection for %s" symbol;
-            (* TODO: Implement WebSocket market data streaming *)
-            let reader, _writer = Pipe.create () in
-            return reader
+            let streams = [Ws.Stream.Trade symbol; Ws.Stream.BookTicker symbol] in
+            Market_data.connect ~streams () >>| function
+            | Ok md -> Market_data.messages md
+            | Error err ->
+              Log.Global.error "Failed to connect market data for %s: %s" symbol err;
+              let reader, _writer = Pipe.create () in
+              reader
           ) () in
           (symbol, pipe)
         )
@@ -95,16 +99,47 @@ module Events = struct
       )
     in
 
-    (* Trades pipes - one per symbol (placeholder) *)
+    (* Trades pipes - one per symbol using WebSocket *)
     let trades =
       Fluxum.Types.Symbol.Map.of_alist_exn (
         List.map symbols ~f:(fun symbol ->
           let name = sprintf "trades[%s]" symbol in
           let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
             Log.Global.info "Creating trade stream for %s" symbol;
-            (* TODO: Implement WebSocket trade streaming *)
-            let reader, _writer = Pipe.create () in
-            return reader
+            let streams = [Ws.Stream.Trade symbol] in
+            Market_data.connect ~streams () >>| function
+            | Ok md ->
+              (* Parse trade messages and convert to trade list *)
+              let trade_reader, trade_writer = Pipe.create () in
+              don't_wait_for (
+                Pipe.iter (Market_data.messages md) ~f:(fun msg ->
+                  match Ws.parse_message msg with
+                  | Ws.Message.Trade trade_msg ->
+                    (* Convert WS trade to V3.My_trades.trade format *)
+                    let trade : V3.My_trades.trade = {
+                      symbol = trade_msg.symbol;
+                      id = trade_msg.trade_id;
+                      orderId = 0L;  (* Not available from public WS trade stream *)
+                      orderListId = (-1L);
+                      price = trade_msg.price;
+                      qty = trade_msg.quantity;
+                      quoteQty = "0";
+                      commission = "0";
+                      commissionAsset = "";
+                      time = trade_msg.trade_time;
+                      isBuyer = not trade_msg.is_buyer_maker;
+                      isMaker = false;
+                      isBestMatch = true;
+                    } in
+                    Pipe.write trade_writer [trade]
+                  | _ -> Deferred.unit
+                )
+              );
+              trade_reader
+            | Error err ->
+              Log.Global.error "Failed to connect trade stream for %s: %s" symbol err;
+              let reader, _writer = Pipe.create () in
+              reader
           ) () in
           (symbol, pipe)
         )

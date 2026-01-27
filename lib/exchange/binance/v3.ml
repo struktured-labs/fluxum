@@ -39,11 +39,25 @@ module Exchange_info = struct
       | None -> []
       | Some s -> [ ("symbol", s) ]
 
+    (** Symbol filter from Binance API *)
+    type symbol_filter =
+      { filterType : string
+      ; minPrice : string option [@default None]
+      ; maxPrice : string option [@default None]
+      ; tickSize : string option [@default None]
+      ; minQty : string option [@default None]
+      ; maxQty : string option [@default None]
+      ; stepSize : string option [@default None]
+      ; minNotional : string option [@default None]
+      }
+    [@@deriving sexp, of_yojson { strict = false }]
+
     type symbol_info =
       { symbol : string
       ; status : string
       ; baseAsset : string
       ; quoteAsset : string
+      ; filters : symbol_filter list [@default []]
       }
     [@@deriving sexp, of_yojson { strict = false }]
 

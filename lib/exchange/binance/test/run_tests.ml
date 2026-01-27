@@ -720,6 +720,7 @@ let test_normalize_symbol_info_ok () =
     status = "TRADING";
     baseAsset = "BTC";
     quoteAsset = "USDT";
+    filters = [];
   } in
   incr tests_run;
   (match Binance.Fluxum_adapter.Adapter.Normalize.symbol_info symbol_info with
