@@ -12,32 +12,30 @@ module Native = struct
 end
 
 let normalize (pool : Native.pool) : (Pool_intf.Pool.t, string) Result.t =
-  try
-    let spot_price = pool.price in
-    let spot_price_inv = match Float.(spot_price > 0.0) with true -> 1.0 /. spot_price | false -> 0.0 in
+  let spot_price = pool.price in
+  let spot_price_inv = match Float.(spot_price > 0.0) with true -> 1.0 /. spot_price | false -> 0.0 in
 
-    (* Extract token symbols from name (e.g., "SOL-USDC" -> SOL, USDC) *)
-    let tokens = String.split pool.name ~on:'-' in
-    let (symbol0, symbol1) = match tokens with
-      | [t0; t1] -> (t0, t1)
-      | _ -> (pool.name, "USD")
-    in
+  (* Extract token symbols from name (e.g., "SOL-USDC" -> SOL, USDC) *)
+  let tokens = String.split pool.name ~on:'-' in
+  let (symbol0, symbol1) = match tokens with
+    | [t0; t1] -> (t0, t1)
+    | _ -> (pool.name, "USD")
+  in
 
-    (* Raydium uses 0.25% fee = 25 bps *)
-    let fee_bps = 25 in
+  (* Raydium uses 0.25% fee = 25 bps *)
+  let fee_bps = 25 in
 
-    Ok {
-      Pool_intf.Pool.
-      id = pool.ammId; venue = venue;
-      pool_type = Pool_intf.Pool_type.Constant_product;
-      token0 = { Pool_intf.Token. address = pool.lpMint; symbol = symbol0; decimals = 9 };
-      token1 = { Pool_intf.Token. address = pool.lpMint; symbol = symbol1; decimals = 9 };
-      reserve0 = pool.liquidity /. 2.0;
-      reserve1 = pool.liquidity /. 2.0 *. spot_price;
-      tvl_usd = pool.liquidity; fee_bps = fee_bps;
-      spot_price = spot_price; spot_price_inv = spot_price_inv;
-    }
-  with exn -> Error (sprintf "Failed to normalize: %s" (Exn.to_string exn))
+  Ok {
+    Pool_intf.Pool.
+    id = pool.ammId; venue = venue;
+    pool_type = Pool_intf.Pool_type.Constant_product;
+    token0 = { Pool_intf.Token. address = pool.lpMint; symbol = symbol0; decimals = 9 };
+    token1 = { Pool_intf.Token. address = pool.lpMint; symbol = symbol1; decimals = 9 };
+    reserve0 = pool.liquidity /. 2.0;
+    reserve1 = pool.liquidity /. 2.0 *. spot_price;
+    tvl_usd = pool.liquidity; fee_bps = fee_bps;
+    spot_price = spot_price; spot_price_inv = spot_price_inv;
+  }
 
 let spot_price (pool : Native.pool) ~(token_in : string) ~(token_out : string) : (float, string) Result.t =
   let tokens = String.split pool.name ~on:'-' in

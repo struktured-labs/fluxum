@@ -12,26 +12,25 @@ module Native = struct
 end
 
 let normalize (pool : Native.pool) : (Pool_intf.Pool.t, string) Result.t =
-  try
-    let liquidity = Float.of_string pool.liquidity in
-    let spot_price = pool.price in
-    let spot_price_inv = match Float.(spot_price > 0.0) with true -> 1.0 /. spot_price | false -> 0.0 in
+  let open Result.Let_syntax in
+  let%bind liquidity = Fluxum.Normalize_common.Float_conv.qty_of_string pool.liquidity in
+  let spot_price = pool.price in
+  let spot_price_inv = match Float.(spot_price > 0.0) with true -> 1.0 /. spot_price | false -> 0.0 in
 
-    (* Fee rate is in decimal form, convert to bps *)
-    let fee_bps = Float.to_int (pool.feeRate *. 10000.0) in
+  (* Fee rate is in decimal form, convert to bps *)
+  let fee_bps = Float.to_int (pool.feeRate *. 10000.0) in
 
-    Ok {
-      Pool_intf.Pool.
-      id = pool.address; venue = venue;
-      pool_type = Pool_intf.Pool_type.Concentrated;
-      token0 = { Pool_intf.Token. address = pool.tokenA; symbol = pool.tokenA; decimals = 9 };
-      token1 = { Pool_intf.Token. address = pool.tokenB; symbol = pool.tokenB; decimals = 9 };
-      reserve0 = liquidity /. (Float.sqrt spot_price);
-      reserve1 = liquidity *. (Float.sqrt spot_price);
-      tvl_usd = pool.volume24h; fee_bps = fee_bps;
-      spot_price = spot_price; spot_price_inv = spot_price_inv;
-    }
-  with exn -> Error (sprintf "Failed to normalize: %s" (Exn.to_string exn))
+  Ok {
+    Pool_intf.Pool.
+    id = pool.address; venue = venue;
+    pool_type = Pool_intf.Pool_type.Concentrated;
+    token0 = { Pool_intf.Token. address = pool.tokenA; symbol = pool.tokenA; decimals = 9 };
+    token1 = { Pool_intf.Token. address = pool.tokenB; symbol = pool.tokenB; decimals = 9 };
+    reserve0 = liquidity /. (Float.sqrt spot_price);
+    reserve1 = liquidity *. (Float.sqrt spot_price);
+    tvl_usd = pool.volume24h; fee_bps = fee_bps;
+    spot_price = spot_price; spot_price_inv = spot_price_inv;
+  }
 
 let spot_price (pool : Native.pool) ~(token_in : string) ~(token_out : string) : (float, string) Result.t =
   match String.equal token_in pool.tokenA with

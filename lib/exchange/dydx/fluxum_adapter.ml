@@ -160,24 +160,14 @@ module Adapter = struct
     (* Use shared normalize function *)
     let side_of_string s = Fluxum.Normalize_common.Side.of_string_exn s
 
-    let order_response (() : Native.Order.response) : Types.Order.t =
-      { venue = Venue.t
-      ; id = ""
-      ; symbol = ""
-      ; side = Types.Side.Buy
-      ; kind = Types.Order_kind.Market
-      ; qty = 0.
-      ; filled = 0.
-      ; status = Types.Order_status.New
-      ; created_at = None
-      ; updated_at = None
-      }
+    let order_response (_ : Native.Order.response) : (Types.Order.t, string) Result.t =
+      Error "dYdX order response normalization requires wallet signing - not implemented"
 
-    let order_status (() : Native.Order.status) : Types.Order_status.t =
-      Types.Order_status.New
+    let order_status (_ : Native.Order.status) : (Types.Order_status.t, string) Result.t =
+      Error "dYdX order status normalization requires wallet signing - not implemented"
 
-    let order_from_status (() : Native.Order.status) : Types.Order.t =
-      order_response ()
+    let order_from_status (_ : Native.Order.status) : (Types.Order.t, string) Result.t =
+      Error "dYdX order normalization requires wallet signing - not implemented"
 
     let trade (tr : Native.Trade.t) : (Types.Trade.t, string) Result.t =
       let open Result.Let_syntax in
@@ -199,13 +189,8 @@ module Adapter = struct
       ; ts
       } : Types.Trade.t)
 
-    let balance (() : Native.Balance.t) : Types.Balance.t =
-      { venue = Venue.t
-      ; currency = ""
-      ; total = 0.
-      ; available = 0.
-      ; locked = 0.
-      }
+    let balance (_ : Native.Balance.t) : (Types.Balance.t, string) Result.t =
+      Error "dYdX balance normalization requires wallet signing - not implemented"
 
     let book_update (u : Native.Book.update) : (Types.Book_update.t, string) Result.t =
       let open Result.Let_syntax in

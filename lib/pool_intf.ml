@@ -171,13 +171,24 @@ end
 
 (** Helper for concentrated liquidity math (Uniswap V3 style) *)
 module Concentrated_math = struct
-  (** Convert sqrtPriceX96 to price *)
+  (** Q96 constant = 2^96 for sqrtPriceX96 conversion *)
+  let q96 : float = Float.ldexp 1.0 96
+
+  (** Convert sqrtPriceX96 to price (safe version returning Result) *)
+  let price_from_sqrt_price_x96_result ~sqrt_price_x96 ~decimals0 ~decimals1
+      : (float, string) Result.t =
+    try
+      let sqrt_price = Float.of_string sqrt_price_x96 /. q96 in
+      let raw_price = sqrt_price *. sqrt_price in
+      let decimal_adjustment = Float.int_pow 10.0 (decimals1 - decimals0) in
+      Ok (raw_price *. decimal_adjustment)
+    with _ -> Error (sprintf "Invalid sqrtPriceX96: %s" sqrt_price_x96)
+
+  (** Convert sqrtPriceX96 to price (legacy - returns 0.0 on error) *)
   let price_from_sqrt_price_x96 ~sqrt_price_x96 ~decimals0 ~decimals1 : float =
-    let q96 = Float.ldexp 1.0 96 in
-    let sqrt_price = Float.of_string sqrt_price_x96 /. q96 in
-    let raw_price = sqrt_price *. sqrt_price in
-    let decimal_adjustment = Float.int_pow 10.0 (decimals1 - decimals0) in
-    raw_price *. decimal_adjustment
+    match price_from_sqrt_price_x96_result ~sqrt_price_x96 ~decimals0 ~decimals1 with
+    | Ok price -> price
+    | Error _ -> 0.0
 
   (** Convert tick to price *)
   let price_from_tick ~tick ~decimals0 ~decimals1 : float =

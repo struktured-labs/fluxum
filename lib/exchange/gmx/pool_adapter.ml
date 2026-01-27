@@ -13,49 +13,47 @@ module Native = struct
 end
 
 let normalize (pool : Native.pool) : (Pool_intf.Pool.t, string) Result.t =
-  try
-    (* GMX uses oracle prices, spot price is the ratio of USD prices *)
-    let spot_price = match Float.(pool.token0_price > 0.0) with
-      | true -> pool.token1_price /. pool.token0_price
-      | false -> 0.0
-    in
-    let spot_price_inv = match Float.(pool.token1_price > 0.0) with
-      | true -> pool.token0_price /. pool.token1_price
-      | false -> 0.0
-    in
+  (* GMX uses oracle prices, spot price is the ratio of USD prices *)
+  let spot_price = match Float.(pool.token0_price > 0.0) with
+    | true -> pool.token1_price /. pool.token0_price
+    | false -> 0.0
+  in
+  let spot_price_inv = match Float.(pool.token1_price > 0.0) with
+    | true -> pool.token0_price /. pool.token1_price
+    | false -> 0.0
+  in
 
-    (* GMX swap fee is typically 0.2-0.5% depending on pool balance *)
-    let fee_bps = pool.swap_fee_bps in
+  (* GMX swap fee is typically 0.2-0.5% depending on pool balance *)
+  let fee_bps = pool.swap_fee_bps in
 
-    (* TVL is sum of pool amounts in USD *)
-    let tvl_usd = (pool.token0_pool_amount *. pool.token0_price) +.
-                  (pool.token1_pool_amount *. pool.token1_price) in
+  (* TVL is sum of pool amounts in USD *)
+  let tvl_usd = (pool.token0_pool_amount *. pool.token0_price) +.
+                (pool.token1_pool_amount *. pool.token1_price) in
 
-    Ok {
-      Pool_intf.Pool.
-      id = pool.id;
-      venue = venue;
-      pool_type = Pool_intf.Pool_type.Weighted;  (* GLP is similar to weighted pool *)
-      token0 = {
-        Pool_intf.Token.
-        address = pool.token0.id;
-        symbol = pool.token0.symbol;
-        decimals = pool.token0.decimals;
-      };
-      token1 = {
-        Pool_intf.Token.
-        address = pool.token1.id;
-        symbol = pool.token1.symbol;
-        decimals = pool.token1.decimals;
-      };
-      reserve0 = pool.token0_pool_amount;
-      reserve1 = pool.token1_pool_amount;
-      tvl_usd = tvl_usd;
-      fee_bps = fee_bps;
-      spot_price = spot_price;
-      spot_price_inv = spot_price_inv;
-    }
-  with exn -> Error (sprintf "Failed to normalize: %s" (Exn.to_string exn))
+  Ok {
+    Pool_intf.Pool.
+    id = pool.id;
+    venue = venue;
+    pool_type = Pool_intf.Pool_type.Weighted;  (* GLP is similar to weighted pool *)
+    token0 = {
+      Pool_intf.Token.
+      address = pool.token0.id;
+      symbol = pool.token0.symbol;
+      decimals = pool.token0.decimals;
+    };
+    token1 = {
+      Pool_intf.Token.
+      address = pool.token1.id;
+      symbol = pool.token1.symbol;
+      decimals = pool.token1.decimals;
+    };
+    reserve0 = pool.token0_pool_amount;
+    reserve1 = pool.token1_pool_amount;
+    tvl_usd = tvl_usd;
+    fee_bps = fee_bps;
+    spot_price = spot_price;
+    spot_price_inv = spot_price_inv;
+  }
 
 let spot_price (pool : Native.pool) ~(token_in : string) ~(token_out : string) : (float, string) Result.t =
   let is_token0_in = String.equal token_in pool.token0.id || String.equal token_in pool.token0.symbol in

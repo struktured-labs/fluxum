@@ -13,94 +13,59 @@ end
 
 (** Normalize SushiSwap pool to unified representation *)
 let normalize (pool : Native.pool) : (Pool_intf.Pool.t, string) Result.t =
-  try
-    let reserve0 = Float.of_string pool.reserve0 in
-    let reserve1 = Float.of_string pool.reserve1 in
-    let spot_price = match Float.(reserve0 > 0.0) with
-      | true -> reserve1 /. reserve0
-      | false -> 0.0
-    in
-    let spot_price_inv = match Float.(reserve1 > 0.0) with
-      | true -> reserve0 /. reserve1
-      | false -> 0.0
-    in
-    (* SushiSwap uses 0.3% fee = 30 bps *)
-    let fee_bps = 30 in
-    Ok {
-      Pool_intf.Pool.
-      id = pool.address;
-      venue = venue;
-      pool_type = Pool_intf.Pool_type.Constant_product;
-      token0 = {
-        Pool_intf.Token.
-        address = pool.token0;
-        symbol = pool.token0;  (* Would need token lookup for symbol *)
-        decimals = 18;  (* Default, would need lookup *)
-      };
-      token1 = {
-        Pool_intf.Token.
-        address = pool.token1;
-        symbol = pool.token1;
-        decimals = 18;
-      };
-      reserve0 = reserve0;
-      reserve1 = reserve1;
-      tvl_usd = 0.0;  (* Would need price oracle *)
-      fee_bps = fee_bps;
-      spot_price = spot_price;
-      spot_price_inv = spot_price_inv;
-    }
-  with
-  | exn -> Error (sprintf "Failed to normalize pool: %s" (Exn.to_string exn))
+  Pool_common.Constant_product.normalize_pool
+    ~venue
+    ~pool_id:pool.address
+    ~token0_addr:pool.token0
+    ~token0_symbol:pool.token0
+    ~token0_decimals:18
+    ~token1_addr:pool.token1
+    ~token1_symbol:pool.token1
+    ~token1_decimals:18
+    ~reserve0_str:pool.reserve0
+    ~reserve1_str:pool.reserve1
+    ~fee_bps:30  (* SushiSwap uses 0.3% fee *)
+    ()
 
 (** Get spot price for token pair *)
 let spot_price (pool : Native.pool) ~(token_in : string) ~(token_out : string)
     : (float, string) Result.t =
-  try
-    let reserve0 = Float.of_string pool.reserve0 in
-    let reserve1 = Float.of_string pool.reserve1 in
-    match String.equal token_in pool.token0 with
-    | true when String.equal token_out pool.token1 ->
-      Ok (reserve1 /. reserve0)
-    | false when String.equal token_in pool.token1 && String.equal token_out pool.token0 ->
-      Ok (reserve0 /. reserve1)
-    | _ -> Error "Token pair does not match pool"
-  with
-  | exn -> Error (sprintf "Failed to get spot price: %s" (Exn.to_string exn))
+  Pool_common.Constant_product.spot_price
+    ~reserve0_str:pool.reserve0
+    ~reserve1_str:pool.reserve1
+    ~token0_id:pool.token0
+    ~token1_id:pool.token1
+    ~token_in
+    ~token_out
 
 (** Get quote for swapping amount *)
 let quote (pool : Native.pool) ~(amount_in : float) ~(token_in : string) ~(token_out : string)
     : (Pool_intf.Quote.t, string) Result.t =
-  try
-    let reserve0 = Float.of_string pool.reserve0 in
-    let reserve1 = Float.of_string pool.reserve1 in
-    let fee_bps = 30 in
+  let open Result.Let_syntax in
+  let%bind reserve0 = Fluxum.Normalize_common.Float_conv.qty_of_string pool.reserve0 in
+  let%bind reserve1 = Fluxum.Normalize_common.Float_conv.qty_of_string pool.reserve1 in
+  let fee_bps = 30 in
 
-    (* Determine direction and validate tokens *)
-    let (reserve_in, reserve_out, expected_out) =
-      match String.equal token_in pool.token0 with
-      | true -> (reserve0, reserve1, pool.token1)
-      | false -> (reserve1, reserve0, pool.token0)
-    in
+  (* Determine direction and validate tokens *)
+  let (reserve_in, reserve_out, expected_out) =
+    match String.equal token_in pool.token0 with
+    | true -> (reserve0, reserve1, pool.token1)
+    | false -> (reserve1, reserve0, pool.token0)
+  in
 
-    (* Validate token_out matches expected *)
-    match String.equal token_out expected_out with
-    | false -> Error (sprintf "token_out %s does not match expected %s" token_out expected_out)
-    | true ->
-      let params = Amm_pricing.Constant_product.{
-        reserve0 = reserve_in;
-        reserve1 = reserve_out;
-        fee_bps = fee_bps;
-      } in
-
-      Amm_pricing.Constant_product.quote params ~amount_in ~pool_id:pool.address
-  with
-  | exn -> Error (sprintf "Failed to get quote: %s" (Exn.to_string exn))
+  (* Validate token_out matches expected *)
+  match String.equal token_out expected_out with
+  | false -> Error (sprintf "token_out %s does not match expected %s" token_out expected_out)
+  | true ->
+    let params = Amm_pricing.Constant_product.{
+      reserve0 = reserve_in;
+      reserve1 = reserve_out;
+      fee_bps = fee_bps;
+    } in
+    Amm_pricing.Constant_product.quote params ~amount_in ~pool_id:pool.address
 
 (** Get all pools for a token pair (async - queries API) *)
 let pools_for_pair ~(token0 : string) ~(token1 : string)
     : (Native.pool list, string) Result.t Async.Deferred.t =
-  (* This would need config and make API call *)
-  (* For now, return empty list - would be implemented with Rest.pools_for_token *)
   ignore (token0, token1);
   Async.return (Ok [])

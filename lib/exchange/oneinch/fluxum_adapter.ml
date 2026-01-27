@@ -193,53 +193,20 @@ module Adapter = struct
   end
 
   module Normalize = struct
-    let order_response (_ : Native.Order.response) : Types.Order.t =
-      { venue = Venue.t
-      ; id = ""
-      ; symbol = ""
-      ; side = Types.Side.Buy
-      ; kind = Types.Order_kind.Market
-      ; qty = 0.
-      ; filled = 0.
-      ; status = Types.Order_status.Filled
-      ; created_at = None
-      ; updated_at = None
-      }
+    let order_response (_ : Native.Order.response) : (Types.Order.t, string) Result.t =
+      Error "1inch is a DEX aggregator - use swap/quote APIs instead of order tracking"
 
-    let order_status (() : Native.Order.status) : Types.Order_status.t =
-      Types.Order_status.Filled
+    let order_status (_ : Native.Order.status) : (Types.Order_status.t, string) Result.t =
+      Error "1inch is a DEX aggregator - use swap/quote APIs instead of order tracking"
 
-    let order_from_status (() : Native.Order.status) : Types.Order.t =
-      { venue = Venue.t
-      ; id = ""
-      ; symbol = ""
-      ; side = Types.Side.Buy
-      ; kind = Types.Order_kind.Market
-      ; qty = 0.
-      ; filled = 0.
-      ; status = Types.Order_status.Filled
-      ; created_at = None
-      ; updated_at = None
-      }
+    let order_from_status (_ : Native.Order.status) : (Types.Order.t, string) Result.t =
+      Error "1inch is a DEX aggregator - use swap/quote APIs instead of order tracking"
 
-    let trade (() : Native.Trade.t) : Types.Trade.t =
-      { venue = Venue.t
-      ; symbol = ""
-      ; side = Types.Side.Buy
-      ; price = 0.
-      ; qty = 0.
-      ; fee = None
-      ; trade_id = None
-      ; ts = None
-      }
+    let trade (_ : Native.Trade.t) : (Types.Trade.t, string) Result.t =
+      Error "1inch is a DEX aggregator - use swap/quote APIs instead of trade tracking"
 
-    let balance (() : Native.Balance.t) : Types.Balance.t =
-      { venue = Venue.t
-      ; currency = ""
-      ; total = 0.
-      ; available = 0.
-      ; locked = 0.
-      }
+    let balance (_ : Native.Balance.t) : (Types.Balance.t, string) Result.t =
+      Error "1inch is a DEX aggregator - balances are on-chain, use wallet APIs"
 
     let book_update (() : Native.Book.update) : Types.Book_update.t =
       { venue = Venue.t

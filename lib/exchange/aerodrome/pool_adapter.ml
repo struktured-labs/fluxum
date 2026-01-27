@@ -11,41 +11,36 @@ module Native = struct
   type pool = Types.pool
 end
 
-let q96 : float = Float.ldexp 1.0 96
-
 let normalize (pool : Native.pool) : (Pool_intf.Pool.t, string) Result.t =
-  try
-    let decimals0 = Int.of_string pool.token0.decimals in
-    let decimals1 = Int.of_string pool.token1.decimals in
-    let _tick = Int.of_string pool.tick in
-    let liquidity = Float.of_string pool.liquidity in
+  let open Result.Let_syntax in
+  let decimals0 = try Int.of_string pool.token0.decimals with _ -> 18 in
+  let decimals1 = try Int.of_string pool.token1.decimals with _ -> 18 in
+  let%bind liquidity = Fluxum.Normalize_common.Float_conv.qty_of_string pool.liquidity in
+  let%bind spot_price = Pool_common.Concentrated.price_from_sqrt_price_x96
+    ~sqrt_price_x96:pool.sqrtPrice ~decimals0 ~decimals1 in
 
-    let sqrt_price = Float.of_string pool.sqrtPrice /. q96 in
-    let spot_price = sqrt_price *. sqrt_price *.
-      Float.int_pow 10.0 (decimals1 - decimals0) in
-    let spot_price_inv = match Float.(spot_price > 0.0) with
-      | true -> 1.0 /. spot_price
-      | false -> 0.0
-    in
+  let spot_price_inv = match Float.(spot_price > 0.0) with
+    | true -> 1.0 /. spot_price
+    | false -> 0.0
+  in
 
-    (* Aerodrome uses 0.3% fee = 30 bps by default *)
-    let fee_bps = 30 in
+  (* Aerodrome uses 0.3% fee = 30 bps by default *)
+  let fee_bps = 30 in
 
-    Ok {
-      Pool_intf.Pool.
-      id = pool.id;
-      venue = venue;
-      pool_type = Pool_intf.Pool_type.Concentrated;
-      token0 = { Pool_intf.Token. address = pool.token0.id; symbol = pool.token0.symbol; decimals = decimals0 };
-      token1 = { Pool_intf.Token. address = pool.token1.id; symbol = pool.token1.symbol; decimals = decimals1 };
-      reserve0 = liquidity /. (Float.sqrt spot_price);
-      reserve1 = liquidity *. (Float.sqrt spot_price);
-      tvl_usd = 0.0;
-      fee_bps = fee_bps;
-      spot_price = spot_price;
-      spot_price_inv = spot_price_inv;
-    }
-  with exn -> Error (sprintf "Failed to normalize: %s" (Exn.to_string exn))
+  Ok {
+    Pool_intf.Pool.
+    id = pool.id;
+    venue = venue;
+    pool_type = Pool_intf.Pool_type.Concentrated;
+    token0 = { Pool_intf.Token. address = pool.token0.id; symbol = pool.token0.symbol; decimals = decimals0 };
+    token1 = { Pool_intf.Token. address = pool.token1.id; symbol = pool.token1.symbol; decimals = decimals1 };
+    reserve0 = liquidity /. (Float.sqrt spot_price);
+    reserve1 = liquidity *. (Float.sqrt spot_price);
+    tvl_usd = 0.0;
+    fee_bps = fee_bps;
+    spot_price = spot_price;
+    spot_price_inv = spot_price_inv;
+  }
 
 let spot_price (pool : Native.pool) ~(token_in : string) ~(token_out : string) : (float, string) Result.t =
   let open Result.Let_syntax in

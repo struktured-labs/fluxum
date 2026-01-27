@@ -1,10 +1,18 @@
 (library
  (name fluxum)
  (public_name fluxum)
- (modules :standard \ websocket_curl curl_ext consolidated_order_book consolidated_balance pool_intf amm_pricing consolidated_pools)
+ (modules :standard \ websocket_curl curl_ext consolidated_order_book consolidated_balance pool_intf amm_pricing consolidated_pools pool_common)
  (libraries core async csvfields yojson)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))
+
+(library
+ (name pool_common)
+ (public_name fluxum.pool_common)
+ (modules pool_common)
+ (libraries core fluxum pool_intf)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
 
 (library
  (name pool_intf)
