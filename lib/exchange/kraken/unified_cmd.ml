@@ -38,9 +38,27 @@ module Orderbook = struct
               (* Clear screen and print updated book *)
               printf "\027[2J\027[H";  (* ANSI clear screen *)
               printf "=== Order Book Update #%d - %s ===\n\n" !update_count symbol;
-              (* FIXME: Refactored order book doesn't have pretty_print yet *)
-              (* Order_book.Book.pretty_print book (); *)
-              printf "Book updated (epoch: %d)\n" (Order_book.Book.epoch book);
+
+              (* Display best bid/ask and spread *)
+              let best_bid = Order_book.Book.best_bid book in
+              let best_ask = Order_book.Book.best_ask book in
+              let spread = Order_book.Book.spread book in
+              printf "Best Bid: %.8f (vol: %.8f)\n" best_bid.price best_bid.volume;
+              printf "Best Ask: %.8f (vol: %.8f)\n" best_ask.price best_ask.volume;
+              printf "Spread:   %.8f\n\n" spread;
+
+              (* Display top 5 levels *)
+              let top_bids = Order_book.Book.best_n_bids book ~n:5 () in
+              let top_asks = Order_book.Book.best_n_asks book ~n:5 () in
+              printf "%-20s | %-20s\n" "BIDS" "ASKS";
+              printf "%-20s | %-20s\n" "--------------------" "--------------------";
+              List.iter2_exn
+                (List.take (top_bids @ List.init 5 ~f:(fun _ -> Order_book.Price_level.empty)) 5)
+                (List.take (top_asks @ List.init 5 ~f:(fun _ -> Order_book.Price_level.empty)) 5)
+                ~f:(fun bid ask ->
+                  printf "%.4f @ %.4f | %.4f @ %.4f\n"
+                    bid.volume bid.price ask.price ask.volume);
+              printf "\nBook updated (epoch: %d)\n" (Order_book.Book.epoch book);
               printf "\n";
 
               (match limit > 0 && !update_count >= limit with
