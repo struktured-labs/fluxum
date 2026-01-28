@@ -109,7 +109,11 @@ module Ledger = struct
 
           (* Update ledgers from book prices *)
           Deferred.List.iter book_pipes ~how:`Sequential ~f:(fun (symbol, book_pipe) ->
-            let ledger_ref = List.Assoc.find_exn ledgers ~equal:String.equal symbol in
+            match List.Assoc.find ledgers ~equal:String.equal symbol with
+            | None ->
+              eprintf "Warning: no ledger entry for symbol %s\n" symbol;
+              Deferred.unit
+            | Some ledger_ref ->
 
             Pipe.iter book_pipe ~f:(fun book_result ->
               match book_result with
