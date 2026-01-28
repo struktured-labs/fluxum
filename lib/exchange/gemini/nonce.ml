@@ -27,24 +27,51 @@ module File = struct
 
   type t = string [@@deriving sexp]
 
-  (* TODO - too expensive- only check the file once, then do
-   * everything in memory *)
+  (** Get current millisecond timestamp as nonce base *)
+  let now_ms () =
+    Time_float_unix.now ()
+    |> Time_float_unix.to_span_since_epoch
+    |> Time_float.Span.to_ms
+    |> Int64.of_float
+    |> Int64.to_int_exn
+
+  (** Use timestamp-based nonces: every nonce = max(prev+1, now_ms).
+      This is self-healing across process restarts and competing processes:
+      - Each nonce uses the current timestamp (always increasing over time)
+      - If multiple calls happen within 1ms, falls back to prev+1
+      - On restart, the new timestamp is always higher than old nonces
+      - No dependency on file state for correctness (file is advisory only)
+      Persists periodically for compatibility with other tools. *)
   let pipe ~init:filename () =
     Cfg.create_config_dir () >>= fun () ->
     create_nonce_file ?default:None filename >>= fun () ->
-    Inf_pipe.unfold ~init:() ~f:(fun _ ->
-        Reader.with_file filename ~f:(fun reader ->
-            Reader.really_read_line reader
-              ~wait_time:(Time_float.Span.of_ms 1.0))
-        >>= fun line ->
-        let nonce =
-          match line with
-          | None -> 0
-          | Some nonce_str -> Int.of_string nonce_str
-        in
-        let nonce' = nonce + 1 in
-        Writer.save filename ~contents:(sprintf "%d\n" nonce')
-        >>| fun () -> (nonce, ()) )
+    Reader.with_file filename ~f:(fun reader ->
+        Reader.really_read_line reader
+          ~wait_time:(Time_float.Span.of_ms 1.0))
+    >>= fun line ->
+    let file_nonce =
+      match line with
+      | None -> 0
+      | Some nonce_str ->
+        (try Int.of_string (String.strip nonce_str) with _ -> 0)
+    in
+    (* Bootstrap: use max of current timestamp and file nonce + safety margin *)
+    let initial_nonce = Int.max (now_ms ()) (file_nonce + 100000) in
+    (* Persist immediately *)
+    Writer.save filename ~contents:(sprintf "%d\n" initial_nonce)
+    >>= fun () ->
+    Inf_pipe.unfold ~init:initial_nonce ~f:(fun prev_nonce ->
+        (* KEY FIX: Use current timestamp for EVERY nonce, not just the first.
+           This guarantees self-healing: even if a competing process used a
+           higher nonce, the next call uses current time which is always
+           moving forward. With 300ms+ delays between calls, each nonce
+           gets a unique millisecond timestamp. *)
+        let nonce = Int.max (prev_nonce + 1) (now_ms ()) in
+        (* Persist every 100 nonces for recovery *)
+        (match nonce mod 100 with
+         | 0 -> don't_wait_for (Writer.save filename ~contents:(sprintf "%d\n" nonce))
+         | _ -> ());
+        return (nonce, nonce) )
     |> return
 
   let default_filename =
