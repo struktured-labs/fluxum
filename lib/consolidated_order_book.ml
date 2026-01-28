@@ -174,40 +174,41 @@ module Book = struct
       in
       let hyperliquid_bids = extract_common_levels
         ~book_opt:t.hyperliquid_book
-        ~extract_levels:(fun book -> Hyperliquid.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Hyperliquid.Order_book.Book.best_n_bids book ~n:100 ())
         ~exchange:Hyperliquid
       in
       let bitrue_bids = extract_common_levels
         ~book_opt:t.bitrue_book
-        ~extract_levels:(fun book -> Bitrue.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Bitrue.Order_book.Book.best_n_bids book ~n:100 ())
         ~exchange:Bitrue
       in
       let binance_bids = extract_common_levels
         ~book_opt:t.binance_book
-        ~extract_levels:(fun book -> Binance.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Binance.Order_book.Book.best_n_bids book ~n:100 ())
         ~exchange:Binance
       in
       let coinbase_bids = extract_common_levels
         ~book_opt:t.coinbase_book
-        ~extract_levels:(fun book -> Coinbase.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Coinbase.Order_book.Book.best_n_bids book ~n:100 ())
         ~exchange:Coinbase
       in
       let mexc_bids = extract_common_levels
         ~book_opt:t.mexc_book
-        ~extract_levels:(fun book -> Mexc.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Mexc.Order_book.Book.best_n_bids book ~n:100 ())
         ~exchange:Mexc
       in
       let bybit_bids = extract_common_levels
         ~book_opt:t.bybit_book
-        ~extract_levels:(fun book -> Bybit.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Bybit.Order_book.Book.best_n_bids book ~n:100 ())
         ~exchange:Bybit
       in
       let okx_bids = extract_common_levels
         ~book_opt:t.okx_book
-        ~extract_levels:(fun book -> Okx.Order_book.Book.bids_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Okx.Order_book.Book.best_n_bids book ~n:100 ())
         ~exchange:Okx
       in
-      gemini_bids @ kraken_bids @ hyperliquid_bids @ bitrue_bids @ binance_bids @ coinbase_bids @ mexc_bids @ bybit_bids @ okx_bids
+      [gemini_bids; kraken_bids; hyperliquid_bids; bitrue_bids; binance_bids; coinbase_bids; mexc_bids; bybit_bids; okx_bids]
+      |> List.concat
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p2 p1) (* Descending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
       |> List.filter_map ~f:(fun group ->
@@ -238,40 +239,41 @@ module Book = struct
       in
       let hyperliquid_asks = extract_common_levels
         ~book_opt:t.hyperliquid_book
-        ~extract_levels:(fun book -> Hyperliquid.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Hyperliquid.Order_book.Book.best_n_asks book ~n:100 ())
         ~exchange:Hyperliquid
       in
       let bitrue_asks = extract_common_levels
         ~book_opt:t.bitrue_book
-        ~extract_levels:(fun book -> Bitrue.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Bitrue.Order_book.Book.best_n_asks book ~n:100 ())
         ~exchange:Bitrue
       in
       let binance_asks = extract_common_levels
         ~book_opt:t.binance_book
-        ~extract_levels:(fun book -> Binance.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Binance.Order_book.Book.best_n_asks book ~n:100 ())
         ~exchange:Binance
       in
       let coinbase_asks = extract_common_levels
         ~book_opt:t.coinbase_book
-        ~extract_levels:(fun book -> Coinbase.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Coinbase.Order_book.Book.best_n_asks book ~n:100 ())
         ~exchange:Coinbase
       in
       let mexc_asks = extract_common_levels
         ~book_opt:t.mexc_book
-        ~extract_levels:(fun book -> Mexc.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Mexc.Order_book.Book.best_n_asks book ~n:100 ())
         ~exchange:Mexc
       in
       let bybit_asks = extract_common_levels
         ~book_opt:t.bybit_book
-        ~extract_levels:(fun book -> Bybit.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Bybit.Order_book.Book.best_n_asks book ~n:100 ())
         ~exchange:Bybit
       in
       let okx_asks = extract_common_levels
         ~book_opt:t.okx_book
-        ~extract_levels:(fun book -> Okx.Order_book.Book.asks_alist book |> (fun l -> List.take l 100) |> List.map ~f:snd)
+        ~extract_levels:(fun book -> Okx.Order_book.Book.best_n_asks book ~n:100 ())
         ~exchange:Okx
       in
-      gemini_asks @ kraken_asks @ hyperliquid_asks @ bitrue_asks @ binance_asks @ coinbase_asks @ mexc_asks @ bybit_asks @ okx_asks
+      [gemini_asks; kraken_asks; hyperliquid_asks; bitrue_asks; binance_asks; coinbase_asks; mexc_asks; bybit_asks; okx_asks]
+      |> List.concat
       |> List.sort ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2) (* Ascending *)
       |> List.group ~break:(fun (p1, _) (p2, _) -> Float.(p1 <> p2))
       |> List.filter_map ~f:(fun group ->
@@ -349,17 +351,19 @@ module Book = struct
     | true -> Some (best_ask.price -. best_bid.price)
     | false -> None
 
-  (** Get top N bids *)
+  (** Get top N bids (O(n) via lazy sequence, not O(k) via full alist) *)
   let best_n_bids t ~n () =
-    Map.to_alist t.bids
-    |> (fun list -> List.take list n)
-    |> List.map ~f:snd
+    Map.to_sequence t.bids
+    |> Fn.flip Sequence.take n
+    |> Sequence.map ~f:snd
+    |> Sequence.to_list
 
-  (** Get top N asks *)
+  (** Get top N asks (O(n) via lazy sequence, not O(k) via full alist) *)
   let best_n_asks t ~n () =
-    Map.to_alist t.asks
-    |> (fun list -> List.take list n)
-    |> List.map ~f:snd
+    Map.to_sequence t.asks
+    |> Fn.flip Sequence.take n
+    |> Sequence.map ~f:snd
+    |> Sequence.to_list
 
   (** Format exchange source for display *)
   let rec exchange_to_string = function

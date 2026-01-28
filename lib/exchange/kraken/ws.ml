@@ -480,23 +480,26 @@ module Public = struct
       (* Determine message type from data structure *)
       (match data_json with
       | `Assoc fields ->
+        (* Convert fields to Map once for O(log n) lookups instead of O(n) *)
+        let fm = List.fold fields ~init:String.Map.empty ~f:(fun acc (k, v) ->
+          Map.set acc ~key:k ~data:v) in
         (* Check for book update fields *)
-        (match (List.Assoc.find fields ~equal:String.equal "a",
-                List.Assoc.find fields ~equal:String.equal "b",
-                List.Assoc.find fields ~equal:String.equal "as",
-                List.Assoc.find fields ~equal:String.equal "bs") with
+        (match (Map.find fm "a",
+                Map.find fm "b",
+                Map.find fm "as",
+                Map.find fm "bs") with
         | (Some asks_json, _, _, _) | (_, _, Some asks_json, _) ->
           (* Book update or snapshot *)
-          let bids_json = List.Assoc.find fields ~equal:String.equal "b"
-                         |> Option.value ~default:(List.Assoc.find fields ~equal:String.equal "bs" |> Option.value ~default:(`List [])) in
-          let checksum = List.Assoc.find fields ~equal:String.equal "c"
+          let bids_json = Map.find fm "b"
+                         |> Option.value ~default:(Map.find fm "bs" |> Option.value ~default:(`List [])) in
+          let checksum = Map.find fm "c"
                         |> Option.bind ~f:(function `String s -> Int.of_string_opt s | _ -> None) in
           let asks = parse_price_levels asks_json in
           let bids = parse_price_levels bids_json in
           let update = { Book_data.bids; asks; checksum } in
           Ok (Book { Book_data.update; channel; pair })
 
-        | (None, Some _, None, None) when List.Assoc.mem fields ~equal:String.equal "a" ->
+        | (None, Some _, None, None) when Map.mem fm "a" ->
           (* Spread message *)
           (match Spread_data.of_yojson data_json with
           | Ok data -> Ok (Spread { data; channel; pair })
@@ -504,7 +507,7 @@ module Public = struct
 
         | _ ->
           (* Check for ticker fields *)
-          match List.Assoc.find fields ~equal:String.equal "c" with
+          match Map.find fm "c" with
           | Some _ ->
             (match Ticker_data.of_yojson data_json with
             | Ok data -> Ok (Ticker { data; channel; pair })

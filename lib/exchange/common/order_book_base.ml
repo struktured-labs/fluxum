@@ -129,17 +129,19 @@ end) = struct
       let ask = best_ask t in
       ask.price -. bid.price
 
-    (** Get top N bids *)
+    (** Get top N bids (O(n) via lazy sequence, not O(k) via full alist) *)
     let best_n_bids t ~n () =
-      Map.to_alist t.bids
-      |> (fun lst -> List.take lst n)
-      |> List.map ~f:snd
+      Map.to_sequence t.bids
+      |> Fn.flip Sequence.take n
+      |> Sequence.map ~f:snd
+      |> Sequence.to_list
 
-    (** Get top N asks *)
+    (** Get top N asks (O(n) via lazy sequence, not O(k) via full alist) *)
     let best_n_asks t ~n () =
-      Map.to_alist t.asks
-      |> (fun lst -> List.take lst n)
-      |> List.map ~f:snd
+      Map.to_sequence t.asks
+      |> Fn.flip Sequence.take n
+      |> Sequence.map ~f:snd
+      |> Sequence.to_list
 
     (** Get all bids *)
     let all_bids t = Map.data t.bids

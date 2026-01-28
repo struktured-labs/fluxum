@@ -142,9 +142,12 @@ module Make (E : ENUM_STRING) : S with type t = E.t = struct
   module T = struct
     let dict = List.zip_exn (List.map E.all ~f:E.to_string) E.all
 
+    (** Pre-lowercased dictionary for O(n) lookup with single lowercase call *)
+    let dict_lower = List.map dict ~f:(fun (k, v) -> (String.lowercase k, v))
+
     let of_string_opt (s : string) : E.t option =
-      List.Assoc.find dict s ~equal:(fun s s' ->
-          String.equal (String.lowercase s) (String.lowercase s') )
+      let s_lower = String.lowercase s in
+      List.Assoc.find dict_lower s_lower ~equal:String.equal
 
     let error_message x =
       sprintf "String %S is not a valid enumeration value. Expected one of %s" x

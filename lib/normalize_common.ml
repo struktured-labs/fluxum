@@ -9,16 +9,14 @@ open Core
 (** {1 Safe Float Conversions} *)
 
 module Float_conv = struct
-  (** Convert string to float with validation *)
+  (** Convert string to float with validation (no exception overhead) *)
   let of_string (s : string) : (float, string) Result.t =
-    try
-      let f = Float.of_string s in
-      match Float.is_finite f with
-      | true -> Ok f
-      | false -> Error (sprintf "Non-finite float: %s" s)
-    with
-    | Failure msg -> Error (sprintf "Invalid float '%s': %s" s msg)
-    | exn -> Error (sprintf "Float conversion error '%s': %s" s (Exn.to_string exn))
+    match Float.of_string_opt s with
+    | Some f ->
+      (match Float.is_finite f with
+       | true -> Ok f
+       | false -> Error (sprintf "Non-finite float: %s" s))
+    | None -> Error (sprintf "Invalid float '%s'" s)
 
   (** Convert string to price (must be positive) *)
   let price_of_string (s : string) : (float, string) Result.t =
