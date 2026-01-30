@@ -113,9 +113,13 @@ let test_normalize_order_book_valid () =
   match Oneinch.Fluxum_adapter.Adapter.Normalize.order_book (sell_quote, buy_quote) with
   | Ok b ->
     (* sell_price = sell_to_amt / 10^to_dec = 3010000000 / 10^6 = 3010 *)
-    ignore (assert_float_equal 3010.0 (List.hd_exn b.asks).price "Ask price");
+    (match List.hd b.asks with
+     | Some level -> ignore (assert_float_equal 3010.0 level.price "Ask price")
+     | None -> failwith "Expected non-empty asks");
     (* buy_price = 10^buy_to_dec / buy_to_amt = 10^18 / 10^18 = 1.0 *)
-    ignore (assert_float_equal 1.0 (List.hd_exn b.bids).price "Bid price");
+    (match List.hd b.bids with
+     | Some level -> ignore (assert_float_equal 1.0 level.price "Bid price")
+     | None -> failwith "Expected non-empty bids");
     pass "Synthetic order book created"
   | Error msg ->
     fail (sprintf "Order book normalization failed: %s" msg)

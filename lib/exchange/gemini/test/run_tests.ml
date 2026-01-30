@@ -236,7 +236,9 @@ let test_order_book_zero_quantity () =
   ] in
   match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
   | Ok book ->
-    ignore (assert_float_equal 0.0 (List.hd_exn book.bids).volume "Zero volume accepted");
+    (match List.hd book.bids with
+     | Some level -> ignore (assert_float_equal 0.0 level.volume "Zero volume accepted")
+     | None -> failwith "Expected non-empty bids");
     ()
   | Error msg ->
     fail (sprintf "Should accept zero quantity: %s" msg);
@@ -258,10 +260,16 @@ let test_order_book_valid () =
   | Ok book ->
     ignore (assert_float_equal 2.0 (Float.of_int (List.length book.bids)) "Two bid levels");
     ignore (assert_float_equal 2.0 (Float.of_int (List.length book.asks)) "Two ask levels");
-    ignore (assert_float_equal 49900.0 (List.hd_exn book.bids).price "Bid price");
-    ignore (assert_float_equal 2.5 (List.hd_exn book.bids).volume "Bid volume");
-    ignore (assert_float_equal 50100.0 (List.hd_exn book.asks).price "Ask price");
-    ignore (assert_float_equal 1.5 (List.hd_exn book.asks).volume "Ask volume");
+    (match List.hd book.bids with
+     | Some level ->
+       ignore (assert_float_equal 49900.0 level.price "Bid price");
+       ignore (assert_float_equal 2.5 level.volume "Bid volume")
+     | None -> failwith "Expected non-empty bids");
+    (match List.hd book.asks with
+     | Some level ->
+       ignore (assert_float_equal 50100.0 level.price "Ask price");
+       ignore (assert_float_equal 1.5 level.volume "Ask volume")
+     | None -> failwith "Expected non-empty asks");
     ()
   | Error msg ->
     fail (sprintf "Valid order book should succeed: %s" msg);
@@ -464,10 +472,16 @@ let test_order_book_round_trip () =
   ] in
   match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
   | Ok book ->
-    ignore (assert_float_equal 49123.45 (List.hd_exn book.bids).price "Round-trip bid price preserved");
-    ignore (assert_float_equal 2.5 (List.hd_exn book.bids).volume "Round-trip bid volume preserved");
-    ignore (assert_float_equal 49234.56 (List.hd_exn book.asks).price "Round-trip ask price preserved");
-    ignore (assert_float_equal 1.5 (List.hd_exn book.asks).volume "Round-trip ask volume preserved");
+    (match List.hd book.bids with
+     | Some level ->
+       ignore (assert_float_equal 49123.45 level.price "Round-trip bid price preserved");
+       ignore (assert_float_equal 2.5 level.volume "Round-trip bid volume preserved")
+     | None -> failwith "Expected non-empty bids");
+    (match List.hd book.asks with
+     | Some level ->
+       ignore (assert_float_equal 49234.56 level.price "Round-trip ask price preserved");
+       ignore (assert_float_equal 1.5 level.volume "Round-trip ask volume preserved")
+     | None -> failwith "Expected non-empty asks");
     ()
   | Error msg ->
     fail (sprintf "Round-trip order book failed: %s" msg);

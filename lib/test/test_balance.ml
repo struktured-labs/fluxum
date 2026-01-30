@@ -331,9 +331,11 @@ let test_non_zero_balances () =
   let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
     1 (List.length non_zero) "Only 1 non-zero balance (dust filtered)" in
 
-  let (currency, _) = List.hd_exn non_zero in
-  let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
-    "BTC" currency "Non-zero currency is BTC" in
+  (match List.hd non_zero with
+   | None -> ignore (assert_true false "Expected non-empty non_zero list")
+   | Some (currency, _) ->
+     ignore (assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
+       "BTC" currency "Non-zero currency is BTC"));
   ()
 
 (** ========== TEST RUNNER ========== *)

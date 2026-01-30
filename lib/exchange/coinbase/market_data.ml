@@ -85,7 +85,10 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.exchange) () : (t,
         (* Generate authentication signature
            Note: streams is guaranteed non-empty by validation at line 25-26 *)
         let timestamp = Int63.to_string (Time_ns.to_int63_ns_since_epoch (Time_ns.now ())) in
-        let first_stream = List.hd_exn streams in  (* Safe: validated non-empty above *)
+        let first_stream = match List.hd streams with
+          | Some s -> s
+          | None -> failwith "BUG: streams validated non-empty at entry"
+        in
         let channel = Ws.Stream.channel_name first_stream in
         let product_ids_str =
           first_stream

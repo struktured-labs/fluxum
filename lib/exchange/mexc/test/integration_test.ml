@@ -42,8 +42,14 @@ let test_depth () =
     (match bid_count > 0 && ask_count > 0 with
      | true ->
        pass (sprintf "Got %d bids, %d asks" bid_count ask_count);
-       let best_bid, bid_qty = List.hd_exn resp.bids in
-       let best_ask, ask_qty = List.hd_exn resp.asks in
+       let best_bid, bid_qty = match List.hd resp.bids with
+         | Some x -> x
+         | None -> failwith "Expected non-empty bids"
+       in
+       let best_ask, ask_qty = match List.hd resp.asks with
+         | Some x -> x
+         | None -> failwith "Expected non-empty asks"
+       in
        pass (sprintf "Best bid: %s @ %s" bid_qty best_bid);
        pass (sprintf "Best ask: %s @ %s" ask_qty best_ask);
        pass (sprintf "Last update ID: %Ld" resp.lastUpdateId)
@@ -60,7 +66,10 @@ let test_recent_trades () =
     (match count > 0 with
      | true ->
        pass (sprintf "Got %d trades" count);
-       let trade = List.hd_exn trades in
+       let trade = match List.hd trades with
+         | Some x -> x
+         | None -> failwith "Expected non-empty trades"
+       in
        pass (sprintf "Latest: %s @ %s" trade.qty trade.price)
      | false -> fail "No trades returned")
   | #Mexc.Rest.Error.t as err ->
@@ -89,7 +98,10 @@ let test_exchange_info () =
     pass (sprintf "Symbols returned: %d" symbol_count);
     (match symbol_count > 0 with
      | true ->
-       let sym = List.hd_exn info.symbols in
+       let sym = match List.hd info.symbols with
+         | Some x -> x
+         | None -> failwith "Expected non-empty symbols"
+       in
        pass (sprintf "BTCUSDT status: %s" sym.status)
      | false -> ())
   | #Mexc.Rest.Error.t as err ->
@@ -259,7 +271,10 @@ let test_websocket_connection () =
                 (match deal_count > 0 with
                  | true ->
                    pass (sprintf "Received %d trades" deal_count);
-                   let deal = List.hd_exn deals.deals in
+                   let deal = match List.hd deals.deals with
+                     | Some x -> x
+                     | None -> failwith "Expected non-empty deals"
+                   in
                    pass (sprintf "Trade: %s @ %s" deal.quantity deal.price)
                  | false -> ())
               | Mexc.Ws.Message.AggreDepth depth ->

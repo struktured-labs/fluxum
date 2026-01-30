@@ -559,7 +559,10 @@ let test_synthetic_data_generation () =
     25 (List.length candles) "24 hour candles generated (inclusive)" in
 
   (* First candle should be around initial price *)
-  let first = List.hd_exn candles in
+  let first = match List.hd candles with
+    | Some c -> c
+    | None -> failwith "Expected non-empty candles list"
+  in
   let _ = assert_true (Float.(first.open_ > 45000.0 && first.open_ < 55000.0))
     "First candle open within range" in
 

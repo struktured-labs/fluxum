@@ -160,8 +160,12 @@ let test_normalize_order_book_valid () =
   match Jupiter.Fluxum_adapter.Adapter.Normalize.order_book (sell_quote, buy_quote) with
   | Ok b ->
     (* Raw amounts: sell_price = 51000000/1000000000 = 0.051, buy_price = 50000000/1000000000 = 0.05 *)
-    ignore (assert_float_equal 0.051 (List.hd_exn b.asks).price "Ask price (raw)");
-    ignore (assert_float_equal 0.05 (List.hd_exn b.bids).price "Bid price (raw)");
+    (match List.hd b.asks with
+     | Some level -> ignore (assert_float_equal 0.051 level.price "Ask price (raw)")
+     | None -> failwith "Expected non-empty asks");
+    (match List.hd b.bids with
+     | Some level -> ignore (assert_float_equal 0.05 level.price "Bid price (raw)")
+     | None -> failwith "Expected non-empty bids");
     pass "Synthetic order book created"
   | Error msg ->
     fail (sprintf "Order book normalization failed: %s" msg)

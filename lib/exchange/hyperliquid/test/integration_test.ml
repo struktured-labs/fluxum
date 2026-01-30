@@ -47,16 +47,14 @@ let test_l2_book () =
      | [bids; asks] ->
        pass (sprintf "Bids: %d levels, Asks: %d levels"
          (List.length bids) (List.length asks));
-       (match List.length bids > 0 with
-        | true ->
-          let best_bid = List.hd_exn bids in
+       (match List.hd bids with
+        | Some best_bid ->
           pass (sprintf "Best bid: %s @ %s" best_bid.sz best_bid.px)
-        | false -> ());
-       (match List.length asks > 0 with
-        | true ->
-          let best_ask = List.hd_exn asks in
+        | None -> ());
+       (match List.hd asks with
+        | Some best_ask ->
           pass (sprintf "Best ask: %s @ %s" best_ask.sz best_ask.px)
-        | false -> ())
+        | None -> ())
      | _ -> fail "Unexpected levels structure")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Hyperliquid.Rest.Error.sexp_of_t err)))
@@ -68,11 +66,10 @@ let test_meta () =
   | Ok meta ->
     let count = List.length meta.universe in
     pass (sprintf "Universe has %d assets" count);
-    (match count > 0 with
-     | true ->
-       let first = List.hd_exn meta.universe in
+    (match List.hd meta.universe with
+     | Some first ->
        pass (sprintf "First asset: %s (decimals: %d)" first.name first.szDecimals)
-     | false -> ())
+     | None -> ())
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Hyperliquid.Rest.Error.sexp_of_t err)))
 
@@ -83,11 +80,10 @@ let test_meta_and_asset_ctxs () =
   | Ok (meta, ctxs) ->
     pass (sprintf "Universe: %d assets, Contexts: %d"
       (List.length meta.universe) (List.length ctxs));
-    (match List.length ctxs > 0 with
-     | true ->
-       let ctx = List.hd_exn ctxs in
+    (match List.hd ctxs with
+     | Some ctx ->
        pass (sprintf "First context - OI: %s, Funding: %s" ctx.openInterest ctx.funding)
-     | false -> ())
+     | None -> ())
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Hyperliquid.Rest.Error.sexp_of_t err)))
 
@@ -96,12 +92,11 @@ let test_recent_trades () =
   let cfg = Hyperliquid.Cfg.production in
   Hyperliquid.Rest.recent_trades cfg ~coin:"ETH" >>| function
   | Ok trades ->
-    (match List.length trades > 0 with
-     | true ->
+    (match List.hd trades with
+     | Some trade ->
        pass (sprintf "Got %d recent trades" (List.length trades));
-       let trade = List.hd_exn trades in
        pass (sprintf "Latest: %s %s @ %s" trade.side trade.sz trade.px)
-     | false -> pass "No recent trades (market may be quiet)")
+     | None -> pass "No recent trades (market may be quiet)")
   | Error err ->
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Hyperliquid.Rest.Error.sexp_of_t err)))
 

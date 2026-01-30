@@ -48,11 +48,14 @@ let calculate_momentum history ~period =
   match List.length history >= period with
   | false -> None
   | true ->
-    let current = (List.hd_exn history).Backtest.Candle.close in
-    let past = (List.nth_exn history (period - 1)).Backtest.Candle.close in
-    match Float.(past > 0.) with
-    | true -> Some ((current -. past) /. past)
-    | false -> None
+    match List.hd history, List.nth history (period - 1) with
+    | Some current_candle, Some past_candle ->
+      let current = current_candle.Backtest.Candle.close in
+      let past = past_candle.Backtest.Candle.close in
+      (match Float.(past > 0.) with
+       | true -> Some ((current -. past) /. past)
+       | false -> None)
+    | _ -> None
 
 let on_candle state (ctx : Backtest.Strategy_intf.Context.t) =
   let config = state.config in
