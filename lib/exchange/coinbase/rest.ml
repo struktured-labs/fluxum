@@ -254,3 +254,192 @@ let accounts cfg : (Account.response, [> Error.t ]) result Deferred.t =
     match Account.response_of_yojson json with
     | Error e -> Error (`Json_parse e)
     | Ok accounts -> Ok accounts
+
+(** Make authenticated POST request *)
+let post_authenticated ~cfg ~path ~body : (Yojson.Safe.t, [> Error.t ]) result Deferred.t =
+  let module Cfg = (val cfg : Cfg.S) in
+  let timestamp = Signature.current_timestamp () in
+  let body_str = Yojson.Safe.to_string body in
+  match Signature.coinbase_rest_signature
+          ~api_secret:Cfg.api_secret
+          ~timestamp
+          ~method_:"POST"
+          ~path
+          ~body:body_str
+  with
+  | Error _ -> Deferred.return (Error (`Api_error "Failed to generate signature"))
+  | Ok signature ->
+    let uri = Uri.of_string (Cfg.rest_url ^ path) in
+    let headers = Cohttp.Header.of_list
+      [ ("CB-ACCESS-KEY", Cfg.api_key)
+      ; ("CB-ACCESS-SIGN", signature)
+      ; ("CB-ACCESS-TIMESTAMP", timestamp)
+      ; ("Content-Type", "application/json")
+      ]
+    in
+    let cohttp_body = Cohttp_async.Body.of_string body_str in
+    Monitor.try_with (fun () ->
+      Cohttp_async.Client.post ~headers ~body:cohttp_body uri
+      >>= fun (_response, body) ->
+      Cohttp_async.Body.to_string body
+    )
+    >>| function
+    | Error exn ->
+      Error (`Http (0, Exn.to_string exn))
+    | Ok body_str ->
+      match Yojson.Safe.from_string body_str with
+      | exception _ -> Error (`Json_parse body_str)
+      | json -> Ok json
+
+(* ============================================================ *)
+(* Order Types *)
+(* ============================================================ *)
+
+module Order = struct
+  (** Order configuration for market orders *)
+  type market_ioc = {
+    quote_size : string option; [@default None]
+    base_size : string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Order configuration for limit orders *)
+  type limit_gtc = {
+    base_size : string;
+    limit_price : string;
+    post_only : bool; [@default false]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type order_configuration =
+    | Market_market_ioc of market_ioc
+    | Limit_limit_gtc of limit_gtc
+
+  let order_configuration_to_yojson = function
+    | Market_market_ioc m ->
+      `Assoc [("market_market_ioc", market_ioc_to_yojson m)]
+    | Limit_limit_gtc l ->
+      `Assoc [("limit_limit_gtc", limit_gtc_to_yojson l)]
+
+  type create_order_request = {
+    client_order_id : string;
+    product_id : string;
+    side : string;  (* BUY or SELL *)
+    order_configuration : order_configuration;
+  }
+
+  let create_order_request_to_yojson req =
+    `Assoc
+      [ ("client_order_id", `String req.client_order_id)
+      ; ("product_id", `String req.product_id)
+      ; ("side", `String req.side)
+      ; ("order_configuration", order_configuration_to_yojson req.order_configuration)
+      ]
+
+  type success_response = {
+    order_id : string;
+    product_id : string option; [@default None]
+    side : string option; [@default None]
+    client_order_id : string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type error_response = {
+    error : string option; [@default None]
+    message : string option; [@default None]
+    error_details : string option; [@default None]
+    preview_failure_reason : string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type create_order_response = {
+    success : bool;
+    success_response : success_response option; [@default None]
+    error_response : error_response option; [@default None]
+    order_id : string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type order_status = {
+    order_id : string;
+    product_id : string;
+    side : string;
+    status : string;
+    order_type : string option; [@default None]
+    filled_size : string option; [@default None]
+    filled_value : string option; [@default None]
+    average_filled_price : string option; [@default None]
+    total_fees : string option; [@default None]
+    created_time : string option; [@default None]
+    completion_percentage : string option; [@default None]
+    base_size : string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type order_status_response = {
+    order : order_status;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type orders_response = {
+    orders : order_status list;
+    has_next : bool; [@default false]
+    cursor : string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type cancel_request_item = {
+    order_id : string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type cancel_result = {
+    success : bool;
+    order_id : string option; [@default None]
+    failure_reason : string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type cancel_response = {
+    results : cancel_result list;
+  } [@@deriving yojson { strict = false }, sexp]
+end
+
+(** Create an order *)
+let create_order cfg (req : Order.create_order_request) : (Order.create_order_response, [> Error.t ]) result Deferred.t =
+  let body = Order.create_order_request_to_yojson req in
+  post_authenticated ~cfg ~path:"/api/v3/brokerage/orders" ~body >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Order.create_order_response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok resp -> Ok resp
+
+(** Cancel orders *)
+let cancel_orders cfg ~order_ids : (Order.cancel_response, [> Error.t ]) result Deferred.t =
+  let body = `Assoc [("order_ids", `List (List.map order_ids ~f:(fun id -> `String id)))] in
+  post_authenticated ~cfg ~path:"/api/v3/brokerage/orders/batch_cancel" ~body >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Order.cancel_response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok resp -> Ok resp
+
+(** Get order by ID *)
+let get_order cfg ~order_id : (Order.order_status, [> Error.t ]) result Deferred.t =
+  let path = sprintf "/api/v3/brokerage/orders/historical/%s" order_id in
+  get_authenticated ~cfg ~path >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Order.order_status_response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok resp -> Ok resp.order
+
+(** List orders *)
+let list_orders cfg ?product_id ?status ?limit () : (Order.orders_response, [> Error.t ]) result Deferred.t =
+  let params = List.filter_opt
+    [ Option.map product_id ~f:(fun p -> sprintf "product_id=%s" p)
+    ; Option.map status ~f:(fun s -> sprintf "order_status=%s" s)
+    ; Option.map limit ~f:(fun l -> sprintf "limit=%d" l)
+    ]
+  in
+  let path = match params with
+    | [] -> "/api/v3/brokerage/orders/historical"
+    | _ -> sprintf "/api/v3/brokerage/orders/historical?%s" (String.concat ~sep:"&" params)
+  in
+  get_authenticated ~cfg ~path >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Order.orders_response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok resp -> Ok resp

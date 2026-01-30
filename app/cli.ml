@@ -6,6 +6,7 @@ let gemini_command = Gemini.command
 let kraken_command = Kraken.command
 let binance_command = Binance.command
 let bybit_command = Bybit.command
+let okx_command = Okx.command
 let mexc_command = Mexc.command
 let hyperliquid_command = Hyperliquid.command
 let coinbase_command = Coinbase.command
@@ -1612,6 +1613,7 @@ let command =
     ; ("kraken", kraken_command)
     ; ("binance", binance_command)
     ; ("bybit", bybit_command)
+    ; ("okx", okx_command)
     ; ("mexc", mexc_command)
     ; ("hyperliquid", hyperliquid_command)
     ; ("coinbase", coinbase_command)

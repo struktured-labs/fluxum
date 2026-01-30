@@ -411,6 +411,57 @@ let pipe
       return (Map.set acc ~key:symbol ~data:entry_pipe)
   )
 
-(** CLI command - TODO *)
+(** CLI command - Live P&L tracking from order book data *)
 let command : string * Command.t =
-  ("ledger", Command.basic ~summary:"Kraken ledger (TODO)" (Command.Param.return (fun () -> printf "Ledger command not implemented yet\n")))
+  ("ledger", Command.async
+    ~summary:"Live P&L tracking from order book spot prices"
+    (Command.Param.(
+      let symbols = flag "--symbols" (required string)
+          ~doc:"STRING Comma-separated symbols (e.g. XBTUSD,ETHUSD)"
+      and depth = flag "--depth" (optional_with_default 1 int)
+          ~doc:"INT Order book depth for spot price (default: 1)"
+      in
+      return (fun symbols depth () ->
+        let symbol_list = String.split symbols ~on:',' |> List.map ~f:String.strip in
+        printf "Starting ledger for: %s\n" (String.concat ~sep:", " symbol_list);
+
+        (* Create ledger entries *)
+        let ledgers = List.map symbol_list ~f:(fun symbol ->
+          let entry = Entry.create ~symbol () in
+          (symbol, ref entry)
+        ) in
+
+        (* Create order book pipes for spot price updates *)
+        let%bind book_pipes = Deferred.List.map symbol_list ~how:`Sequential ~f:(fun symbol ->
+          let%map pipe = Order_book.Book.pipe ~symbol ~depth () in
+          (symbol, pipe)
+        ) in
+
+        (* Update ledgers from book prices *)
+        Deferred.List.iter book_pipes ~how:`Sequential ~f:(fun (symbol, book_pipe) ->
+          match List.Assoc.find ledgers ~equal:String.equal symbol with
+          | None ->
+            eprintf "Warning: no ledger entry for symbol %s\n" symbol;
+            Deferred.unit
+          | Some ledger_ref ->
+            Pipe.iter book_pipe ~f:(fun book_result ->
+              match book_result with
+              | Ok book ->
+                let spot = (Order_book.Book.best_bid book).price in
+                (match Float.(spot > 0.) with
+                 | true ->
+                   ledger_ref := Entry.update_spot !ledger_ref spot;
+                   printf "\n=== Ledger: %s ===\n" symbol;
+                   printf "Spot: $%.2f\n" spot;
+                   printf "Position: %.8f\n" (!ledger_ref).position;
+                   printf "Notional: $%.2f\n" (!ledger_ref).notional;
+                   printf "Cost Basis: $%.2f\n" (!ledger_ref).cost_basis;
+                   printf "PnL: $%.2f\n" (!ledger_ref).pnl;
+                   Deferred.unit
+                 | false -> Deferred.unit)
+              | Error e ->
+                eprintf "Book error for %s: %s\n" symbol e;
+                Deferred.unit))
+      )
+    <*> symbols <*> depth
+    )))

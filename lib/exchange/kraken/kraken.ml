@@ -25,5 +25,6 @@ let command : Command.t =
     ; V1.Closed_orders.command
     ; Order.command
     ; Ws_cmd.command
+    ; Ledger.command
     ; Unified_cmd.command
     ]
