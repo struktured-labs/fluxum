@@ -126,8 +126,6 @@ module Impl (Channel : CHANNEL) :
 
   let client (module Cfg : Cfg.S) ?query ?uri_args ?nonce () :
       [ `Ok of response | Error.t ] Pipe.Reader.t Deferred.t =
-    Core.Printf.eprintf "!!!WS_ML_CLIENT_CALLED for channel=%s!!!\n%!" Channel.name;
-    Log.Global.error "[WS_CLIENT_ENTRY] Starting WebSocket client for channel: %s" Channel.name;
     let query =
       Option.map query ~f:(fun l ->
           List.fold ~init:String.Map.empty l ~f:(fun map q ->
@@ -145,9 +143,7 @@ module Impl (Channel : CHANNEL) :
              @ Option.(map ~f:Channel.encode_uri_args uri_args |> to_list) ) )
         ()
     in
-    Core.Printf.eprintf "!!!BEFORE_URI_LOG channel=%s uri=%s!!!\n%!" Channel.name (Uri.to_string uri);
     Log.Global.info "Ws.client: uri=%s" (Uri.to_string uri);
-    Core.Printf.eprintf "!!!AFTER_URI_LOG!!!\n%!";
     let payload = `Null in
     let path = Path.to_string Channel.path in
     let%bind payload =
@@ -181,21 +177,15 @@ module Impl (Channel : CHANNEL) :
           let%bind msg_opt = Websocket_curl.receive ws in
           match msg_opt with
           | None ->
-            (* Connection closed *)
-            (if String.length !buffer > 0 then
-              Log.Global.error "WebSocket closed with incomplete JSON buffer: %d bytes"
-                (String.length !buffer));
+            Log.Global.error "[WS_%s] Connection closed (buffer: %d bytes)"
+              Channel.name (String.length !buffer);
             Pipe.close w;
             return ()
           | Some s ->
             (* Skip empty frames (keepalive/heartbeat) *)
             (match String.length s with
-             | 0 ->
-               Log.Global.debug "Received empty WebSocket frame (keepalive), ignoring";
-               receive_loop ()
+             | 0 -> receive_loop ()
              | _ ->
-               (* Append to buffer *)
-               Log.Global.debug "[WS_RECEIVE] Got %d bytes, buffer now %d bytes" (String.length s) (String.length (!buffer ^ s));
                buffer := !buffer ^ s;
 
             (* Try to extract complete JSON messages from buffer *)
@@ -215,7 +205,9 @@ module Impl (Channel : CHANNEL) :
                 match find_json_start 0 with
                 | None ->
                   (* No JSON delimiter found in buffer, discard and wait for more data *)
-                  Log.Global.debug "No JSON delimiter in %d byte buffer, discarding" (String.length !buffer);
+                  Log.Global.info "[WS_%s] No JSON start in %d byte buffer (first bytes: %s), discarding"
+                    Channel.name (String.length !buffer)
+                    (String.prefix !buffer (min 20 (String.length !buffer)) |> String.escaped);
                   buffer := "";
                   return ()
                 | Some start_pos ->
@@ -262,7 +254,6 @@ module Impl (Channel : CHANNEL) :
                   match complete_json_opt with
                   | None ->
                     (* Incomplete JSON, keep buffering *)
-                    Log.Global.debug "Buffering incomplete JSON: %d bytes" (String.length !buffer);
                     return ()
                   | Some (json_str, consumed_len, prefix_len) ->
                     (* We have complete JSON, parse and emit it *)
@@ -282,7 +273,6 @@ module Impl (Channel : CHANNEL) :
                     (* Remove consumed bytes (including prefix garbage) from buffer *)
                     buffer := String.sub !buffer ~pos:consumed_len
                       ~len:(String.length !buffer - consumed_len);
-                    (* Emit parsed message *)
                     let%bind () = Pipe.write w parsed_msg in
                     (* Process remaining buffer *)
                     process_buffer ()

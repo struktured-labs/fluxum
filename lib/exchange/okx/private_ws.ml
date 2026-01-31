@@ -10,7 +10,7 @@ open Async
 let connect ~cfg:(module Cfg : Cfg.S) ()
   : (Ws.Private.message Pipe.Reader.t, [> `Auth_error of string | `Connection_error of string ]) Deferred.Result.t =
   let url = Ws.Endpoint.private_production in
-  Websocket_curl.connect ~url >>= function
+  Websocket_curl.connect ~url () >>= function
   | Error err ->
     return (Error (`Connection_error (Error.to_string_hum err)))
   | Ok ws ->

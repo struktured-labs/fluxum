@@ -17,7 +17,7 @@ let connect ~cfg:(module Cfg : Cfg.S) ()
     Log.Global.info "Kraken Private WS: obtained token";
     (* Step 2: Connect to private WS endpoint *)
     let url = Ws.Endpoint.private_url in
-    Websocket_curl.connect ~url >>= (function
+    Websocket_curl.connect ~url () >>= (function
     | Error err ->
       return (Error (`Connection_error (Error.to_string_hum err)))
     | Ok ws ->

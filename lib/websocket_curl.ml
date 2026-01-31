@@ -19,6 +19,9 @@ let compute_accept_key key =
 type t =
   { curl : Curl.t
   ; mutable closed : bool
+  ; leftover : bytes  (* Bytes read during HTTP upgrade that belong to the first WS frame *)
+  ; mutable leftover_len : int
+  ; fragment_buf : Buffer.t  (* Buffer for reassembling fragmented WebSocket messages *)
   }
 
 let connect ~url ?headers () =
@@ -94,8 +97,8 @@ let connect ~url ?headers () =
     )
   in
 
-  (* Read HTTP response using curl's recv *)
-  let%bind response_lines =
+  (* Read HTTP response using curl's recv, preserving any leftover bytes *)
+  let%bind (response_lines, leftover_bytes, leftover_length) =
     Deferred.Or_error.try_with (fun () ->
       In_thread.run (fun () ->
         let buffer = Buffer.create 4096 in
@@ -113,10 +116,23 @@ let connect ~url ?headers () =
             | false -> read_until_headers ()
         in
         let response = read_until_headers () in
-        (* Parse headers *)
-        let lines = String.split response ~on:'\n' in
-        List.map lines ~f:String.strip
-        |> List.filter ~f:(fun s -> not (String.is_empty s))
+        (* Split at \r\n\r\n boundary - save any leftover bytes for WS frames *)
+        let header_end =
+          match String.substr_index response ~pattern:"\r\n\r\n" with
+          | Some idx -> idx + 4
+          | None -> String.length response
+        in
+        let leftover_str = String.drop_prefix response header_end in
+        let leftover_bytes = Bytes.of_string leftover_str in
+        let leftover_length = String.length leftover_str in
+        (* Parse only the header portion *)
+        let header_portion = String.prefix response header_end in
+        let lines = String.split header_portion ~on:'\n' in
+        let parsed_lines =
+          List.map lines ~f:String.strip
+          |> List.filter ~f:(fun s -> not (String.is_empty s))
+        in
+        (parsed_lines, leftover_bytes, leftover_length)
       )
     )
   in
@@ -153,7 +169,8 @@ let connect ~url ?headers () =
     let expected_accept = compute_accept_key ws_key in
     match Hashtbl.find headers "sec-websocket-accept" with
     | Some actual when String.equal actual expected_accept ->
-      return { curl; closed = false }
+      return { curl; closed = false; leftover = leftover_bytes; leftover_len = leftover_length
+             ; fragment_buf = Buffer.create 4096 }
     | _ ->
       Deferred.Or_error.error_string "Invalid Sec-WebSocket-Accept"
 
@@ -233,55 +250,111 @@ let receive t =
   | false ->
     Deferred.Or_error.try_with (fun () ->
       In_thread.run (fun () ->
-        (* Read frame header (at least 2 bytes) *)
         let header_buf = Bytes.create 14 in
+        (* recv_exact: reads exactly len bytes, using leftover buffer first *)
         let rec recv_exact buf offset len =
           match len = 0 with
           | true -> ()
           | false ->
-            let received = Curl_ext.recv t.curl buf offset len in
-            match received = 0 with
-            | true -> failwith "Connection closed"
-            | false -> recv_exact buf (offset + received) (len - received)
-        in
-        recv_exact header_buf 0 2;
-
-        let byte0 = Bytes.get header_buf 0 |> Char.to_int in
-        let byte1 = Bytes.get header_buf 1 |> Char.to_int in
-
-        let _opcode = byte0 land 0x0F in
-        let masked = (byte1 land 0x80) <> 0 in
-        let payload_len_initial = byte1 land 0x7F in
-
-        (* Read extended payload length if needed *)
-        let payload_len =
-          match payload_len_initial < 126 with
-          | true -> payload_len_initial
-          | false ->
-            match payload_len_initial = 126 with
+            match t.leftover_len > 0 with
             | true ->
-              recv_exact header_buf 2 2;
-              (Bytes.get header_buf 2 |> Char.to_int) lsl 8
-              lor (Bytes.get header_buf 3 |> Char.to_int)
+              let to_copy = min len t.leftover_len in
+              Bytes.blit ~src:t.leftover ~src_pos:(Bytes.length t.leftover - t.leftover_len)
+                ~dst:buf ~dst_pos:offset ~len:to_copy;
+              t.leftover_len <- t.leftover_len - to_copy;
+              recv_exact buf (offset + to_copy) (len - to_copy)
             | false ->
-              recv_exact header_buf 2 8;
-              (* Use lower 32 bits *)
-              (Bytes.get header_buf 6 |> Char.to_int) lsl 24
-              lor (Bytes.get header_buf 7 |> Char.to_int) lsl 16
-              lor (Bytes.get header_buf 8 |> Char.to_int) lsl 8
-              lor (Bytes.get header_buf 9 |> Char.to_int)
+              let received = Curl_ext.recv t.curl buf offset len in
+              match received = 0 with
+              | true -> failwith "Connection closed"
+              | false -> recv_exact buf (offset + received) (len - received)
         in
 
-        match payload_len = 0 with
-        | true -> ""
-        | false ->
-          (* Skip mask if present (server shouldn't mask) *)
-          (match masked with true -> recv_exact header_buf 0 4 | false -> ());
+        (* Read one WebSocket frame and return (opcode, fin, payload) *)
+        let read_frame () =
+          recv_exact header_buf 0 2;
+          let byte0 = Bytes.get header_buf 0 |> Char.to_int in
+          let byte1 = Bytes.get header_buf 1 |> Char.to_int in
+          let opcode = byte0 land 0x0F in
+          let fin = (byte0 land 0x80) <> 0 in
+          let masked = (byte1 land 0x80) <> 0 in
+          let payload_len_initial = byte1 land 0x7F in
+          let payload_len =
+            match payload_len_initial < 126 with
+            | true -> payload_len_initial
+            | false ->
+              match payload_len_initial = 126 with
+              | true ->
+                recv_exact header_buf 2 2;
+                (Bytes.get header_buf 2 |> Char.to_int) lsl 8
+                lor (Bytes.get header_buf 3 |> Char.to_int)
+              | false ->
+                recv_exact header_buf 2 8;
+                (Bytes.get header_buf 6 |> Char.to_int) lsl 24
+                lor (Bytes.get header_buf 7 |> Char.to_int) lsl 16
+                lor (Bytes.get header_buf 8 |> Char.to_int) lsl 8
+                lor (Bytes.get header_buf 9 |> Char.to_int)
+          in
+          match payload_len = 0 with
+          | true -> (opcode, fin, "")
+          | false ->
+            (match masked with true -> recv_exact header_buf 0 4 | false -> ());
+            let payload_buf = Bytes.create payload_len in
+            recv_exact payload_buf 0 payload_len;
+            (opcode, fin, Bytes.to_string payload_buf)
+        in
 
-          (* Read payload *)
-          let payload_buf = Bytes.create payload_len in
-          recv_exact payload_buf 0 payload_len;
-          Bytes.to_string payload_buf
+        (* Handle WebSocket frame fragmentation:
+           - Continuation frames (opcode=0) are parts of a fragmented message
+           - Non-continuation frames (opcode=1/2) with FIN=true are complete messages
+           - Non-continuation frames with FIN=false start a new fragmented message
+           - During fragmentation, complete non-continuation frames (like heartbeats)
+             are returned immediately; continuation fragments are buffered
+           - fragment_buf persists across receive calls for multi-call reassembly *)
+        let rec read_message () =
+          let (opcode, fin, payload) = read_frame () in
+          match opcode with
+          | 0 ->
+            (* Continuation frame - part of a fragmented message *)
+            Buffer.add_string t.fragment_buf payload;
+            (match fin with
+             | true ->
+               (* Final fragment - return assembled message *)
+               let result = Buffer.contents t.fragment_buf in
+               Buffer.clear t.fragment_buf;
+               result
+             | false ->
+               (* More fragments expected - keep reading *)
+               read_message ())
+          | 8 ->
+            (* Close frame *)
+            failwith "WebSocket close frame received"
+          | 9 ->
+            (* Ping frame - ignore, continue reading *)
+            read_message ()
+          | 10 ->
+            (* Pong frame - ignore, continue reading *)
+            read_message ()
+          | _ ->
+            (* Text (1) or Binary (2) frame *)
+            (match fin with
+             | true ->
+               (* Complete message in a single frame *)
+               (match Buffer.length t.fragment_buf > 0 with
+                | true ->
+                  (* We're in the middle of reassembling a fragmented message,
+                     but received a complete independent message (e.g., heartbeat).
+                     Return the independent message; fragments continue next call. *)
+                  payload
+                | false ->
+                  payload)
+             | false ->
+               (* Start of a new fragmented message *)
+               Buffer.clear t.fragment_buf;
+               Buffer.add_string t.fragment_buf payload;
+               read_message ())
+        in
+        read_message ()
       )
     )
     >>| function
