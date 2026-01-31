@@ -59,15 +59,34 @@ module Events = struct
 
   (** Create session events *)
   let create
+      ~cfg:(module Cfg : Cfg.S)
       ?(symbols : Fluxum.Types.Symbol.t list = [])
       ?order_ids:_
       ()
     : t Deferred.t =
     Log.Global.info "OKX Events.create: start symbols=%d" (List.length symbols);
 
-    (* Balance pipe - placeholder for now *)
-    let balance_reader, _balance_writer = Pipe.create () in
-    let balance_pipe = balance_reader in
+    (* Balance pipe - REST polling every 5s *)
+    let balance_pipe =
+      Auto_restart.pipe ~name:"okx_balance_poll" ~create_pipe:(fun () ->
+        let reader, writer = Pipe.create () in
+        let rec poll_loop () =
+          V5.Account_balance.request (module Cfg) { ccy = None } >>= function
+          | `Ok resp ->
+            let details = List.concat_map resp.data ~f:(fun acct -> acct.details) in
+            Deferred.List.iter ~how:`Sequential details ~f:(fun detail ->
+              Pipe.write writer detail)
+            >>= fun () ->
+            after (Time_float_unix.Span.of_sec 5.0) >>= poll_loop
+          | #Rest.Error.t as err ->
+            Log.Global.error "OKX balance poll failed: %s"
+              (Sexp.to_string (Rest.Error.sexp_of_t err));
+            after (Time_float_unix.Span.of_sec 10.0) >>= poll_loop
+        in
+        don't_wait_for (poll_loop ());
+        return reader
+      ) ()
+    in
 
     (* Market data pipes - one per symbol with auto-restart *)
     let market_data =
@@ -220,6 +239,7 @@ type t =
 
 (** Create session *)
 let create
+    ~cfg:(module Cfg : Cfg.S)
     ?(symbols : Fluxum.Types.Symbol.t list = [])
     ?order_ids
     ()
@@ -233,7 +253,7 @@ let create
   don't_wait_for (Pipe.write state_changes_writer State.Connecting);
 
   (* Create events *)
-  let%bind events = Events.create ~symbols ?order_ids () in
+  let%bind events = Events.create ~cfg:(module Cfg) ~symbols ?order_ids () in
 
   (* Update state to Ready *)
   let state = State.Ready in
