@@ -49,7 +49,7 @@ let test_types () =
     ("name", `String "Wrapped Ether");
     ("decimals", `Int 18);
   ] in
-  (match Uniswapv3.Types.token_of_yojson token_json with
+  (match Uniswapv3.Uni_types.token_of_yojson token_json with
    | Ok token ->
      test_assert "Token parses" true;
      test_assert "Token symbol" (String.equal token.symbol "WETH");
@@ -78,7 +78,7 @@ let test_types () =
     ("volumeUSD", `Float 1234567.89);
     ("txCount", `Int 567890);
   ] in
-  (match Uniswapv3.Types.pool_of_yojson pool_json with
+  (match Uniswapv3.Uni_types.pool_of_yojson pool_json with
    | Ok pool ->
      test_assert "Pool parses" true;
      test_assert "Pool token0 symbol" (String.equal pool.token0.symbol "USDC");
@@ -98,7 +98,7 @@ let test_types () =
     ("sender", `String "0xsender");
     ("recipient", `String "0xrecipient");
   ] in
-  (match Uniswapv3.Types.swap_of_yojson swap_json with
+  (match Uniswapv3.Uni_types.swap_of_yojson swap_json with
    | Ok swap ->
      test_assert "Swap parses" true;
      test_assert "Swap timestamp" (String.equal swap.timestamp "1640000000");
@@ -116,7 +116,7 @@ let test_types () =
     ("price0", `Float 1500.25);
     ("price1", `Float 0.000666);
   ] in
-  (match Uniswapv3.Types.tick_of_yojson tick_json with
+  (match Uniswapv3.Uni_types.tick_of_yojson tick_json with
    | Ok tick ->
      test_assert "Tick parses" true;
      test_assert "Tick index" (Int.equal tick.tickIdx 276324);

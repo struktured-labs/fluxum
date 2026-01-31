@@ -14,6 +14,7 @@ let bitrue_command = Bitrue.command
 let dydx_command = Dydx.command
 let jupiter_command = Jupiter.command
 let oneinch_command = Oneinch.command
+let uniswapv3_command = Uniswapv3.command
 
 (* Gemini adapter helpers *)
 let get_gemini_balances cfg =
@@ -1621,6 +1622,7 @@ let command =
     ; ("dydx", dydx_command)
     ; ("jupiter", jupiter_command)
     ; ("1inch", oneinch_command)
+    ; ("uniswapv3", uniswapv3_command)
     ; ("api", api_command)
     ; ("backtest", backtest_command)
     ; ("bot", bot_command)

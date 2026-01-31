@@ -202,3 +202,170 @@ let recent_swaps ~cfg ~pool_id ?(first = 100) () =
          | None -> return (Error (`Json_parse "No swaps field")))
       | _ -> return (Error (`Json_parse "Expected object"))
     with ex -> return (Error (`Json_parse (Exn.to_string ex))))
+
+let pool_ticks ~cfg ~pool_id ?(first = 1000) () =
+  let query = sprintf {|
+    {
+      ticks(first: %d, where: { pool: "%s" }, orderBy: tickIdx) {
+        tickIdx
+        liquidityGross
+        liquidityNet
+        price0
+        price1
+      }
+    }
+  |} first pool_id in
+  let%bind data = make_graphql_request ~cfg ~query in
+  match data with
+  | Error e -> return (Error e)
+  | Ok json ->
+    (try
+      match json with
+      | `Assoc fields ->
+        (match List.Assoc.find fields ~equal:String.equal "ticks" with
+         | Some (`List ticks_json) ->
+           let tick_results = List.map ticks_json ~f:Types.tick_of_yojson in
+           let rec collect_results acc = function
+             | [] -> Ok (List.rev acc)
+             | Ok tick :: rest -> collect_results (tick :: acc) rest
+             | Error msg :: _ -> Error (`Json_parse msg)
+           in
+           return (collect_results [] tick_results)
+         | Some _ -> return (Error (`Json_parse "Expected ticks array"))
+         | None -> return (Error (`Json_parse "No ticks field")))
+      | _ -> return (Error (`Json_parse "Expected object"))
+    with ex -> return (Error (`Json_parse (Exn.to_string ex))))
+
+let pools_for_pair ~cfg ~token0 ~token1 ?(first = 10) () =
+  let token0_lower = String.lowercase token0 in
+  let token1_lower = String.lowercase token1 in
+  let query = sprintf {|
+    {
+      pools(first: %d, where: {
+        or: [
+          { token0_: { symbol_contains_nocase: "%s" }, token1_: { symbol_contains_nocase: "%s" } },
+          { token0_: { symbol_contains_nocase: "%s" }, token1_: { symbol_contains_nocase: "%s" } }
+        ]
+      }, orderBy: volumeUSD, orderDirection: desc) {
+        id
+        token0 {
+          id
+          symbol
+          name
+          decimals
+        }
+        token1 {
+          id
+          symbol
+          name
+          decimals
+        }
+        feeTier
+        liquidity
+        sqrtPrice
+        tick
+        volumeUSD
+        txCount
+      }
+    }
+  |} first token0_lower token1_lower token1_lower token0_lower in
+  let%bind data = make_graphql_request ~cfg ~query in
+  match data with
+  | Error e -> return (Error e)
+  | Ok json ->
+    (try
+      match json with
+      | `Assoc fields ->
+        (match List.Assoc.find fields ~equal:String.equal "pools" with
+         | Some (`List pools_json) ->
+           let pool_results = List.map pools_json ~f:Types.pool_of_yojson in
+           let rec collect_results acc = function
+             | [] -> Ok (List.rev acc)
+             | Ok pool :: rest -> collect_results (pool :: acc) rest
+             | Error msg :: _ -> Error (`Json_parse msg)
+           in
+           return (collect_results [] pool_results)
+         | Some _ -> return (Error (`Json_parse "Expected pools array"))
+         | None -> return (Error (`Json_parse "No pools field")))
+      | _ -> return (Error (`Json_parse "Expected object"))
+    with ex -> return (Error (`Json_parse (Exn.to_string ex))))
+
+type pool_day_datum = {
+  date : int;
+  volumeUSD : float;
+  tvlUSD : float;
+  open_ : float [@key "open"];
+  high : float;
+  low : float;
+  close : float;
+} [@@deriving yojson { strict = false }]
+
+let pool_day_data ~cfg ~pool_id ?(days = 7) () =
+  let query = sprintf {|
+    {
+      poolDayDatas(first: %d, where: { pool: "%s" }, orderBy: date, orderDirection: desc) {
+        date
+        volumeUSD
+        tvlUSD
+        open
+        high
+        low
+        close
+      }
+    }
+  |} days pool_id in
+  let%bind data = make_graphql_request ~cfg ~query in
+  match data with
+  | Error e -> return (Error e)
+  | Ok json ->
+    (try
+      match json with
+      | `Assoc fields ->
+        (match List.Assoc.find fields ~equal:String.equal "poolDayDatas" with
+         | Some (`List day_json) ->
+           let day_results = List.map day_json ~f:pool_day_datum_of_yojson in
+           let rec collect_results acc = function
+             | [] -> Ok (List.rev acc)
+             | Ok d :: rest -> collect_results (d :: acc) rest
+             | Error msg :: _ -> Error (`Json_parse msg)
+           in
+           return (collect_results [] day_results)
+         | Some _ -> return (Error (`Json_parse "Expected poolDayDatas array"))
+         | None -> return (Error (`Json_parse "No poolDayDatas field")))
+      | _ -> return (Error (`Json_parse "Expected object"))
+    with ex -> return (Error (`Json_parse (Exn.to_string ex))))
+
+let swaps_for_sender ~cfg ~sender ?(first = 100) () =
+  let query = sprintf {|
+    {
+      swaps(first: %d, where: { sender: "%s" }, orderBy: timestamp, orderDirection: desc) {
+        id
+        timestamp
+        amount0
+        amount1
+        amountUSD
+        sender
+        recipient
+      }
+    }
+  |} first sender in
+  let%bind data = make_graphql_request ~cfg ~query in
+  match data with
+  | Error e -> return (Error e)
+  | Ok json ->
+    (try
+      match json with
+      | `Assoc fields ->
+        (match List.Assoc.find fields ~equal:String.equal "swaps" with
+         | Some (`List swaps_json) ->
+           let swap_results = List.map swaps_json ~f:Types.swap_of_yojson in
+           let rec collect_results acc = function
+             | [] -> Ok (List.rev acc)
+             | Ok swap :: rest -> collect_results (swap :: acc) rest
+             | Error msg :: _ -> Error (`Json_parse msg)
+           in
+           return (collect_results [] swap_results)
+         | Some _ -> return (Error (`Json_parse "Expected swaps array"))
+         | None -> return (Error (`Json_parse "No swaps field")))
+      | _ -> return (Error (`Json_parse "Expected object"))
+    with ex -> return (Error (`Json_parse (Exn.to_string ex))))

@@ -17,6 +17,7 @@ module Venue = struct
     | Gmx       (** GMX - DeFi perpetuals (planned) *)
     | Aave      (** Aave - DeFi lending (planned) *)
     | Compound  (** Compound - DeFi lending (planned) *)
+    | Uniswap_v3 (** Uniswap V3 - Concentrated liquidity DEX *)
   [@@deriving sexp, compare, equal]
 
   let to_string = function
@@ -35,9 +36,10 @@ module Venue = struct
     | Gmx -> "GMX"
     | Aave -> "Aave"
     | Compound -> "Compound"
+    | Uniswap_v3 -> "Uniswap V3"
 
   let is_defi = function
-    | Dydx | Jupiter | OneInch | Gmx | Aave | Compound -> true
+    | Dydx | Jupiter | OneInch | Gmx | Aave | Compound | Uniswap_v3 -> true
     | Gemini | Kraken | Mexc | Coinbase | Binance | Bybit | Okx | Hyperliquid | Bitrue -> false
 end
 

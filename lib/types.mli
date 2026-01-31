@@ -44,13 +44,14 @@ module Venue : sig
     | Gmx           (** GMX - DeFi perpetuals (planned) *)
     | Aave          (** Aave - DeFi lending (planned) *)
     | Compound      (** Compound - DeFi lending (planned) *)
+    | Uniswap_v3    (** Uniswap V3 - Concentrated liquidity DEX *)
   [@@deriving sexp, compare, equal]
 
   val to_string : t -> string
   (** Human-readable exchange name *)
 
   val is_defi : t -> bool
-  (** @return true for decentralized exchanges (dYdX, Jupiter, 1inch, GMX, Aave, Compound) *)
+  (** @return true for decentralized exchanges (dYdX, Jupiter, 1inch, GMX, Aave, Compound, Uniswap V3) *)
 end
 
 (** {1 Trading Pair Identifiers} *)

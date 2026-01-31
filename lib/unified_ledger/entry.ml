@@ -54,6 +54,7 @@ module Venue = struct
     | Gmx -> Other "Gmx"
     | Aave -> Other "Aave"
     | Compound -> Other "Compound"
+    | Uniswap_v3 -> Other "Uniswap_v3"
 
   let to_string = function
     | Gemini -> "Gemini"

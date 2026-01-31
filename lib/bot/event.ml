@@ -76,6 +76,7 @@ module Venue = struct
     | Gmx -> Other "Gmx"
     | Aave -> Other "Aave"
     | Compound -> Other "Compound"
+    | Uniswap_v3 -> Other "Uniswap_v3"
 
   let to_fluxum_venue : t -> Fluxum.Types.Venue.t option = function
     | Gemini -> Some Gemini
