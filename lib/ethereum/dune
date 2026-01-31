@@ -1,0 +1,5 @@
+(library
+ (name ethereum)
+ (public_name fluxum.ethereum)
+ (libraries core async cohttp-async yojson digestif secp256k1 hex)
+ (preprocess (pps ppx_jane ppx_deriving_yojson)))
