@@ -268,6 +268,186 @@ let parse_message (msg : string) : Message.t =
     Message.Error (sprintf "Parse error: %s" (Exn.to_string e))
 
 (* ============================================================ *)
+(* Authentication *)
+(* ============================================================ *)
+
+module Auth = struct
+  (** HMAC-SHA256 for WS auth (same algo as Rest.Signature but with Unix epoch timestamp) *)
+  let hmac_sha256 ~secret ~message =
+    let block_size = 64 in
+    let secret_key =
+      match String.length secret > block_size with
+      | true -> Digestif.SHA256.digest_string secret |> Digestif.SHA256.to_raw_string
+      | false -> secret ^ String.make (block_size - String.length secret) '\x00'
+    in
+    let ipad = String.init block_size ~f:(fun i ->
+      Char.of_int_exn (Char.to_int secret_key.[i] lxor 0x36))
+    in
+    let opad = String.init block_size ~f:(fun i ->
+      Char.of_int_exn (Char.to_int secret_key.[i] lxor 0x5c))
+    in
+    let inner_hash = Digestif.SHA256.digest_string (ipad ^ message) |> Digestif.SHA256.to_raw_string in
+    Digestif.SHA256.digest_string (opad ^ inner_hash) |> Digestif.SHA256.to_raw_string
+
+  (** Generate OKX WebSocket login message.
+      OKX private WS uses HMAC-SHA256: sign(timestamp + "GET" + "/users/self/verify")
+      where timestamp is Unix epoch seconds as a string. *)
+  let login_message ~api_key ~api_secret ~passphrase : string =
+    let timestamp = sprintf "%d" (Float.to_int (Unix.gettimeofday ())) in
+    let message = timestamp ^ "GET" ^ "/users/self/verify" in
+    let sign_raw = hmac_sha256 ~secret:api_secret ~message in
+    let sign_b64 = Base64.encode_exn sign_raw in
+    Yojson.Safe.to_string
+      (`Assoc [
+        ("op", `String "login");
+        ("args", `List [
+          `Assoc [
+            ("apiKey", `String api_key);
+            ("passphrase", `String passphrase);
+            ("timestamp", `String timestamp);
+            ("sign", `String sign_b64);
+          ]
+        ]);
+      ])
+end
+
+(* ============================================================ *)
+(* Private Channel Types *)
+(* ============================================================ *)
+
+module Private = struct
+  (** Order update from private orders channel *)
+  type order_data = {
+    instId : string;
+    ordId : string;
+    clOrdId : string;
+    px : string;
+    sz : string;
+    side : string;
+    ordType : string;
+    state : string;
+    fillPx : string;
+    fillSz : string;
+    avgPx : string;
+    fee : string;
+    feeCcy : string;
+    uTime : string;
+    cTime : string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Account balance update from private account channel *)
+  type account_data = {
+    ccy : string;
+    availBal : string;
+    cashBal : string;
+    frozenBal : string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type message =
+    | Orders of order_data list
+    | Account of account_data list
+    | LoginSuccess
+    | LoginError of string
+    | Unknown of string
+  [@@deriving sexp]
+
+  (** Subscribe to private channels after login *)
+  let subscribe_orders ?(inst_type = "SPOT") () : string =
+    Yojson.Safe.to_string
+      (`Assoc [
+        ("op", `String "subscribe");
+        ("args", `List [
+          `Assoc [
+            ("channel", `String "orders");
+            ("instType", `String inst_type);
+          ]
+        ]);
+      ])
+
+  let subscribe_account () : string =
+    Yojson.Safe.to_string
+      (`Assoc [
+        ("op", `String "subscribe");
+        ("args", `List [
+          `Assoc [
+            ("channel", `String "account");
+          ]
+        ]);
+      ])
+
+  (** Parse a private channel message *)
+  let parse_message (msg : string) : message =
+    try
+      let json = Yojson.Safe.from_string msg in
+      (* Check for login response *)
+      let event_opt =
+        try Some (Yojson.Safe.Util.member "event" json |> Yojson.Safe.Util.to_string)
+        with _ -> None
+      in
+      match event_opt with
+      | Some "login" ->
+        let code =
+          try Yojson.Safe.Util.member "code" json |> Yojson.Safe.Util.to_string
+          with _ -> ""
+        in
+        (match String.equal code "0" with
+         | true -> LoginSuccess
+         | false ->
+           let err_msg =
+             try Yojson.Safe.Util.member "msg" json |> Yojson.Safe.Util.to_string
+             with _ -> "unknown error"
+           in
+           LoginError err_msg)
+      | Some "error" ->
+        let err_msg =
+          try Yojson.Safe.Util.member "msg" json |> Yojson.Safe.Util.to_string
+          with _ -> "unknown error"
+        in
+        LoginError err_msg
+      | _ ->
+        (* Data message with arg and data fields *)
+        let arg = Yojson.Safe.Util.member "arg" json in
+        let data = Yojson.Safe.Util.member "data" json in
+        let channel =
+          try Yojson.Safe.Util.member "channel" arg |> Yojson.Safe.Util.to_string
+          with _ -> ""
+        in
+        match channel with
+        | "orders" ->
+          (match data with
+           | `List items ->
+             let orders = List.filter_map items ~f:(fun item ->
+               match order_data_of_yojson item with
+               | Ok order -> Some order
+               | Error _ -> None)
+             in
+             Orders orders
+           | _ -> Unknown msg)
+        | "account" ->
+          (match data with
+           | `List items ->
+             let accounts = List.filter_map items ~f:(fun item ->
+               (* Account data has nested details *)
+               let details =
+                 try Yojson.Safe.Util.member "details" item |> function
+                   | `List detail_items ->
+                     List.filter_map detail_items ~f:(fun d ->
+                       match account_data_of_yojson d with
+                       | Ok acct -> Some acct
+                       | Error _ -> None)
+                   | _ -> []
+                 with _ -> []
+               in
+               Some details)
+             in
+             Account (List.concat accounts)
+           | _ -> Unknown msg)
+        | _ -> Unknown msg
+    with e ->
+      Unknown (sprintf "Parse error: %s" (Exn.to_string e))
+end
+
+(* ============================================================ *)
 (* WebSocket Client *)
 (* ============================================================ *)
 

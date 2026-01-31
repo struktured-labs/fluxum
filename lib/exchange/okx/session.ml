@@ -214,9 +214,42 @@ module Events = struct
       )
     in
 
-    (* Order events pipe - placeholder (WebSocket private channel needed) *)
-    let order_events_reader, _order_events_writer = Pipe.create () in
-    let order_events_pipe = order_events_reader in
+    (* Order events pipe - private WebSocket with auto-restart *)
+    let order_events_pipe =
+      Auto_restart.pipe ~name:"okx_order_events" ~create_pipe:(fun () ->
+        Private_ws.connect ~cfg:(module Cfg) () >>| function
+        | Ok msg_pipe ->
+          let order_reader, order_writer = Pipe.create () in
+          don't_wait_for (
+            Pipe.iter msg_pipe ~f:(fun msg ->
+              match msg with
+              | Ws.Private.Orders orders ->
+                Deferred.List.iter ~how:`Sequential orders ~f:(fun order ->
+                  (* Convert Ws.Private.order_data to V5.Place_order response *)
+                  let resp : V5.Place_order.T.response =
+                    { data =
+                      [{ ordId = order.ordId
+                       ; clOrdId = order.clOrdId
+                       ; sCode = "0"
+                       ; sMsg = ""
+                       }]
+                    }
+                  in
+                  Pipe.write order_writer resp)
+              | Ws.Private.Account _accts ->
+                Deferred.unit
+              | Ws.Private.LoginSuccess | Ws.Private.LoginError _ ->
+                Deferred.unit
+              | Ws.Private.Unknown _ ->
+                Deferred.unit)
+            >>| fun () -> Pipe.close order_writer);
+          order_reader
+        | Error _err ->
+          Log.Global.error "OKX private WS connection failed, order events unavailable";
+          let reader, _writer = Pipe.create () in
+          reader
+      ) ()
+    in
 
     return {
       symbols;
