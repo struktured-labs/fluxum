@@ -2,18 +2,17 @@
 
     Implements Exchange_intf.S for Uniswap V3 concentrated liquidity DEX.
 
-    {b Status:} Read-side complete, swap execution requires Phase 3.
-
     {b Features:}
     - Pool discovery and info from The Graph subgraph
     - Virtual order book from tick data
     - Recent swap history
     - Spot price and quote from concentrated liquidity math
-    - Balance querying (placeholder, Phase 3 wires ERC-20)
+    - ETH balance querying via JSON-RPC
+    - On-chain swap execution via SwapRouter02
 
     {b Authentication:}
     - Public subgraph queries require no auth
-    - Swap execution requires wallet private key (Phase 3)
+    - Swap execution requires wallet private key (UNISWAP_PRIVATE_KEY)
 *)
 
 open Core
@@ -93,15 +92,86 @@ module Adapter = struct
     end
   end
 
-  let place_order _t _req =
-    Deferred.return (Error (`GraphQL "Swap execution not yet implemented (Phase 3)"))
+  let place_order t (req : Native.Order.request) =
+    match t.cfg.private_key_hex, t.cfg.wallet_address with
+    | None, _ -> Deferred.return (Error (`GraphQL "Private key not configured"))
+    | _, None -> Deferred.return (Error (`GraphQL "Wallet address not configured"))
+    | Some _key, Some wallet ->
+      (* Get pool info to determine fee tier *)
+      let%bind pool_result = Rest.pool_by_id ~cfg:t.cfg ~pool_id:req.pool_id in
+      (match pool_result with
+       | Error e -> return (Error e)
+       | Ok pool ->
+         let decimals =
+           match String.equal (String.lowercase req.token_in) (String.lowercase pool.token0.id) with
+           | true -> pool.token0.decimals
+           | false -> pool.token1.decimals
+         in
+         let amount_in_hex = Ethereum.Abi.uint256_of_float ~decimals req.amount_in in
+         (* Calculate minimum output with slippage *)
+         let spot_result = Pool_common.Concentrated.price_from_sqrt_price_x96
+           ~sqrt_price_x96:pool.sqrtPrice
+           ~decimals0:pool.token0.decimals
+           ~decimals1:pool.token1.decimals
+         in
+         let amount_out_min_hex = match spot_result with
+           | Error _ -> "0"
+           | Ok spot ->
+             let is_token0_in = String.equal (String.lowercase req.token_in) (String.lowercase pool.token0.id) in
+             let expected_out = match is_token0_in with
+               | true -> req.amount_in *. spot
+               | false -> req.amount_in /. spot
+             in
+             let slippage = Float.of_int req.slippage_bps /. 10000.0 in
+             let min_out = expected_out *. (1.0 -. slippage) in
+             let out_decimals = match is_token0_in with
+               | true -> pool.token1.decimals
+               | false -> pool.token0.decimals
+             in
+             Ethereum.Abi.uint256_of_float ~decimals:out_decimals min_out
+         in
+         let params : Swap_router.exact_input_single_params = {
+           token_in = req.token_in;
+           token_out = req.token_out;
+           fee = pool.feeTier;
+           recipient = wallet;
+           amount_in = amount_in_hex;
+           amount_out_minimum = amount_out_min_hex;
+           sqrt_price_limit_x96 = "0";
+         } in
+         let%bind swap_result = Swap_router.exact_input_single ~cfg:t.cfg ~params in
+         (match swap_result with
+          | Ok tx_hash ->
+            return (Ok { Native.Order.tx_hash; amount_out = 0.0 })
+          | Error (`Swap_error msg) -> return (Error (`GraphQL msg))
+          | Error (`Rpc msg) -> return (Error (`GraphQL msg))
+          | Error (`Network msg) -> return (Error (`Network msg))
+          | Error (`Json_parse msg) -> return (Error (`Json_parse msg))))
 
   let cancel_order _t _id =
     Deferred.return (Error (`GraphQL "DEX swaps are atomic and cannot be cancelled"))
 
-  let balances _t =
-    (* Placeholder - Phase 3 wires ERC-20 balance polling *)
-    Deferred.return (Ok [])
+  let balances t =
+    match t.cfg.wallet_address with
+    | None -> Deferred.return (Ok [])
+    | Some owner ->
+      (* Query ETH balance *)
+      let rpc_url = t.cfg.rpc_url in
+      let%bind eth_result = Ethereum.Rpc.eth_get_balance ~rpc_url ~address:owner in
+      let eth_balance = match eth_result with
+        | Ok hex ->
+          let wei = Float.of_string ("0x" ^ (match String.is_prefix hex ~prefix:"0x" with
+            | true -> String.drop_prefix hex 2
+            | false -> hex))
+          in
+          [{ Types.Balance.currency = "ETH"
+           ; available = wei /. 1e18
+           ; locked = 0.0
+           ; total = wei /. 1e18
+           ; venue = Venue.t }]
+        | Error _ -> []
+      in
+      Deferred.return (Ok eth_balance)
 
   let get_order_status _t _id =
     Deferred.return (Error (`GraphQL "Order status lookup not yet implemented"))

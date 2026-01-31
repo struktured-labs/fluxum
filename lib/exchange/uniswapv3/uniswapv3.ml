@@ -10,6 +10,7 @@ module Pool_adapter = Pool_adapter
 module Order_book = Order_book
 module Ledger = Ledger
 module Session = Session
+module Swap_router = Swap_router
 module Unified_adapter = Unified_adapter
 module Fluxum_adapter = Fluxum_adapter
 
@@ -202,6 +203,105 @@ let session_command : string * Command.t =
         | None -> ());
        Deferred.never ()))
 
+let swap_command : string * Command.t =
+  ("swap", Command.async
+    ~summary:"Execute a token swap via SwapRouter02"
+    (let%map_open.Command pool_id = flag "--pool-id" (required string)
+        ~doc:"STRING Pool address"
+     and amount = flag "--amount" (required float)
+        ~doc:"FLOAT Amount of input token"
+     and token_in = flag "--from" (required string)
+        ~doc:"STRING Input token symbol"
+     and token_out = flag "--to" (required string)
+        ~doc:"STRING Output token symbol"
+     and slippage = flag "--slippage" (optional_with_default 0.5 float)
+        ~doc:"FLOAT Max slippage in percent (default: 0.5)"
+     and dry_run = flag "--dry-run" no_arg
+        ~doc:" Show quote without executing"
+     in
+     fun () ->
+       let cfg = Cfg.of_env () in
+       (* Validate wallet config *)
+       (match cfg.wallet_address, cfg.private_key_hex with
+        | None, _ ->
+          eprintf "Error: UNISWAP_WALLET_ADDRESS not set\n";
+          Deferred.unit
+        | _, None ->
+          eprintf "Error: UNISWAP_PRIVATE_KEY not set\n";
+          Deferred.unit
+        | Some wallet, Some _key ->
+          let%bind pool_result = Rest.pool_by_id ~cfg ~pool_id in
+          (match pool_result with
+           | Error e ->
+             eprintf "Error fetching pool: %s\n" (Sexp.to_string_hum (Rest.sexp_of_error e));
+             Deferred.unit
+           | Ok pool ->
+             (* Resolve token addresses from symbols *)
+             let token_in_addr, token_out_addr, decimals_in, decimals_out =
+               match String.equal (String.uppercase token_in) (String.uppercase pool.token0.symbol) with
+               | true ->
+                 pool.token0.id, pool.token1.id, pool.token0.decimals, pool.token1.decimals
+               | false ->
+                 pool.token1.id, pool.token0.id, pool.token1.decimals, pool.token0.decimals
+             in
+             (* Get and show quote first *)
+             (match Pool_adapter.quote pool ~amount_in:amount ~token_in ~token_out with
+              | Ok q ->
+                printf "Swap Quote:\n";
+                printf "  Pool: %s (%s/%s, fee: %.2f%%)\n" pool_id pool.token0.symbol pool.token1.symbol
+                  (Float.of_int pool.feeTier /. 10000.0);
+                printf "  Input:  %.6f %s (%s)\n" amount token_in token_in_addr;
+                printf "  Output: %.6f %s (%s)\n" q.amount_out token_out token_out_addr;
+                printf "  Effective price: %.8f\n" q.effective_price;
+                printf "  Price impact: %.4f%%\n" q.price_impact_pct;
+                printf "  Max slippage: %.2f%%\n" slippage;
+                let min_out = q.amount_out *. (1.0 -. slippage /. 100.0) in
+                printf "  Min output: %.6f %s\n" min_out token_out;
+                printf "  Fee: %.6f\n\n" q.fee_amount;
+                (match dry_run with
+                 | true ->
+                   printf "[Dry run - no transaction submitted]\n";
+                   Deferred.unit
+                 | false ->
+                   let slippage_bps = Float.to_int (slippage *. 100.0) in
+                   let amount_in_hex = Ethereum.Abi.uint256_of_float ~decimals:decimals_in amount in
+                   let amount_out_min_hex = Ethereum.Abi.uint256_of_float ~decimals:decimals_out min_out in
+                   let params : Swap_router.exact_input_single_params = {
+                     token_in = token_in_addr;
+                     token_out = token_out_addr;
+                     fee = pool.feeTier;
+                     recipient = wallet;
+                     amount_in = amount_in_hex;
+                     amount_out_minimum = amount_out_min_hex;
+                     sqrt_price_limit_x96 = "0";
+                   } in
+                   let _ = slippage_bps in
+                   printf "Submitting swap transaction...\n";
+                   let%bind result = Swap_router.exact_input_single ~cfg ~params in
+                   (match result with
+                    | Ok tx_hash ->
+                      printf "Transaction submitted: %s\n" tx_hash;
+                      printf "Waiting for confirmation...\n";
+                      let%bind receipt = Swap_router.wait_for_receipt ~cfg ~tx_hash () in
+                      (match receipt with
+                       | Ok (Some _receipt) ->
+                         printf "Transaction confirmed!\n";
+                         Deferred.unit
+                       | Ok None ->
+                         printf "No receipt yet (timeout)\n";
+                         Deferred.unit
+                       | Error e ->
+                         eprintf "Error waiting for receipt: %s\n"
+                           (Sexp.to_string_hum (Swap_router.sexp_of_error e));
+                         Deferred.unit)
+                    | Error e ->
+                      eprintf "Swap failed: %s\n"
+                        (Sexp.to_string_hum (Swap_router.sexp_of_error e));
+                      Deferred.unit))
+              | Error msg ->
+                eprintf "Quote error: %s\n" msg;
+                Deferred.unit)))))
+
 let command : Command.t =
   Command.group ~summary:"Uniswap V3 DEX Commands"
     [ pools_command
@@ -211,4 +311,5 @@ let command : Command.t =
     ; recent_swaps_command
     ; orderbook_command
     ; session_command
+    ; swap_command
     ]
