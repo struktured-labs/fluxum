@@ -428,6 +428,7 @@ module Reject_reason = struct
       | `Self_cross_prevented
       | `Immediate_or_cancel_would_post
       | `Maker_or_cancel_would_take
+      | `Requested
       ]
     [@@deriving sexp, yojson, enumerate, compare, equal]
 
@@ -437,6 +438,7 @@ module Reject_reason = struct
       | `Self_cross_prevented -> "SelfCrossPrevented"
       | `Immediate_or_cancel_would_post -> "ImmediateOrCancelWouldPost"
       | `Maker_or_cancel_would_take -> "MakerOrCancelWouldTake"
+      | `Requested -> "Requested"
   end
 
   include T

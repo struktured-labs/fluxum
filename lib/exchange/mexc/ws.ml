@@ -553,7 +553,7 @@ let connect ?(url = Endpoint.public_url) ~streams () : t Deferred.Or_error.t =
   let uri = Uri.of_string url in
 
   (* Connect using websocket_curl (libcurl-based, works with CloudFront) *)
-  let%bind ws_result = Websocket_curl.connect ~url in
+  let%bind ws_result = Websocket_curl.connect ~url () in
 
   match ws_result with
   | Error err ->

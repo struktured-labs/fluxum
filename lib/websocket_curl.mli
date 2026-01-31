@@ -4,8 +4,9 @@ open Async
 
 type t
 
-(** Connect to a WebSocket URL *)
-val connect : url:string -> t Deferred.Or_error.t
+(** Connect to a WebSocket URL.
+    @param headers Optional HTTP headers as (name, value) pairs to include in the upgrade request *)
+val connect : url:string -> ?headers:(string * string) list -> unit -> t Deferred.Or_error.t
 
 (** Send a text message *)
 val send : t -> string -> unit Deferred.t

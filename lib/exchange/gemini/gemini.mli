@@ -88,6 +88,7 @@ module V1 : sig
       | `Self_cross_prevented
       | `Immediate_or_cancel_would_post
       | `Maker_or_cancel_would_take
+      | `Requested
     ]
     [@@deriving sexp, yojson, enumerate, compare, equal]
 

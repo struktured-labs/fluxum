@@ -21,7 +21,7 @@ type t =
   ; mutable closed : bool
   }
 
-let connect ~url =
+let connect ~url ?headers () =
   let open Deferred.Or_error.Let_syntax in
 
   (* Parse URL for building WebSocket upgrade request *)
@@ -60,17 +60,20 @@ let connect ~url =
 
   (* Build and send WebSocket upgrade request *)
   let ws_key = random_key () in
+  let extra_headers = match headers with
+    | None -> []
+    | Some h ->
+      List.map h ~f:(fun (name, value) -> sprintf "%s: %s" name value)
+  in
   let request = String.concat ~sep:"\r\n"
-    [ sprintf "GET %s HTTP/1.1" path
-    ; sprintf "Host: %s" host
-    ; "Upgrade: websocket"
-    ; "Connection: Upgrade"
-    ; sprintf "Sec-WebSocket-Key: %s" ws_key
-    ; "Sec-WebSocket-Version: 13"
-    ; sprintf "Origin: https://%s" host
-    ; ""
-    ; ""
-    ] in
+    ([ sprintf "GET %s HTTP/1.1" path
+     ; sprintf "Host: %s" host
+     ; "Upgrade: websocket"
+     ; "Connection: Upgrade"
+     ; sprintf "Sec-WebSocket-Key: %s" ws_key
+     ; "Sec-WebSocket-Version: 13"
+     ; sprintf "Origin: https://%s" host
+     ] @ extra_headers @ [ ""; "" ]) in
 
   (* Send using curl's send (goes through TLS) *)
   let%bind () =

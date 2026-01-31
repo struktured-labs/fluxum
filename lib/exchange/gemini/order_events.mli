@@ -69,6 +69,7 @@ end
       | `Self_cross_prevented
       | `Immediate_or_cancel_would_post
       | `Maker_or_cancel_would_take
+      | `Requested
       ] [@@deriving sexp, enumerate]
 
   include Json.ENUM_STRING with type t := t

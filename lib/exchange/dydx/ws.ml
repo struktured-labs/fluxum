@@ -56,7 +56,7 @@ type trades_contents = {
 (** Generic WebSocket connection *)
 
 let connect ~url =
-  match%bind Websocket_curl.connect ~url with
+  match%bind Websocket_curl.connect ~url () with
   | Ok conn -> return conn
   | Error err -> failwith (Error.to_string_hum err)
 

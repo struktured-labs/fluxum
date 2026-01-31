@@ -25,7 +25,7 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
   Log.Global.info "Gemini libcurl connecting to: %s" url;
 
   (* Connect using websocket_curl *)
-  let%bind ws_result = Websocket_curl.connect ~url in
+  let%bind ws_result = Websocket_curl.connect ~url () in
 
   match ws_result with
   | Error err ->

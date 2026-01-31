@@ -19,7 +19,7 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.mainnet) () : (t, 
   let uri = Uri.of_string url in
 
   (* Connect using websocket_curl *)
-  let%bind ws_result = Websocket_curl.connect ~url in
+  let%bind ws_result = Websocket_curl.connect ~url () in
 
   match ws_result with
   | Error err ->

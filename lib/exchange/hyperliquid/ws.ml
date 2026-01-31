@@ -339,7 +339,7 @@ let connect ?(url = Endpoint.mainnet) ?(streams = []) () : t Deferred.Or_error.t
   let uri = Uri.of_string url in
 
   (* Connect using websocket_curl *)
-  let%bind ws_result = Websocket_curl.connect ~url in
+  let%bind ws_result = Websocket_curl.connect ~url () in
 
   match ws_result with
   | Error err ->

@@ -117,7 +117,7 @@ type connection = {
 let connect ~cfg ~channels () : (connection, string) Deferred.Result.t =
   let open Deferred.Result.Let_syntax in
 
-  let%bind ws = Websocket_curl.connect ~url:cfg.Cfg.ws_url
+  let%bind ws = Websocket_curl.connect ~url:cfg.Cfg.ws_url ()
     |> Deferred.Result.map_error ~f:(fun err ->
       sprintf "WebSocket connection failed: %s" (Core.Error.to_string_hum err))
   in

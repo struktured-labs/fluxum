@@ -27,7 +27,7 @@ let connect ~(subscriptions : subscription list) ?(url = Ws.Endpoint.public_url)
   let uri = Uri.of_string url in
 
   (* Connect using websocket_curl *)
-  let%bind ws_result = Websocket_curl.connect ~url in
+  let%bind ws_result = Websocket_curl.connect ~url () in
 
   match ws_result with
   | Error err ->

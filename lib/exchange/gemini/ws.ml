@@ -157,10 +157,7 @@ module Impl (Channel : CHANNEL) :
         Nonce.Request.(make ~nonce ~request:path ~payload () >>| to_yojson)
         >>| fun s -> Yojson.Safe.to_string s |> Option.some
     in
-    let _headers =
-      (* TODO: websocket_curl doesn't support custom headers yet.
-         This means authenticated WebSocket connections will fail.
-         Need to extend websocket_curl or use a different approach. *)
+    let headers =
       ( match Channel.authentication with
       | `Private ->
         Option.map
@@ -170,7 +167,7 @@ module Impl (Channel : CHANNEL) :
       |> Option.value ~default:(Cohttp.Header.init ())
     in
     let url = Uri.to_string uri in
-    let%bind ws_result = Websocket_curl.connect ~url in
+    let%bind ws_result = Websocket_curl.connect ~url ~headers:(Cohttp.Header.to_list headers) () in
     match ws_result with
     | Error _err ->
       (* Return a pipe with a single error *)

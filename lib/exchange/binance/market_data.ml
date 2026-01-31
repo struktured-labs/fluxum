@@ -28,7 +28,7 @@ let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.data_stream) () : 
   let uri = Uri.of_string full_url in
 
   (* Connect using websocket_curl *)
-  let%bind ws_result = Websocket_curl.connect ~url:full_url in
+  let%bind ws_result = Websocket_curl.connect ~url:full_url () in
 
   match ws_result with
   | Error err ->
