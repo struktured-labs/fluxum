@@ -11,6 +11,7 @@ module Order_book = Order_book
 module Ledger = Ledger
 module Session = Session
 module Unified_adapter = Unified_adapter
+module Unified_cmd = Unified_cmd
 module Fluxum_adapter = Fluxum_adapter
 
 let cfg = (module Cfg.Production : Cfg.S)
@@ -161,4 +162,5 @@ let command : Command.t =
     ; klines_command
     ; balances_command
     ; open_orders_command
+    ; Unified_cmd.command
     ]
