@@ -906,6 +906,19 @@ module Cancel_all = struct
   include Rest.Make_no_arg (T)
 end
 
+(** Get WebSocket authentication token *)
+module Websocket_token = struct
+  module T = struct
+    let name = "websocket-token"
+    let endpoint = "GetWebSocketsToken"
+    type request = unit [@@deriving sexp]
+    let request_to_params () = []
+    type response = { token : string } [@@deriving sexp, of_yojson]
+  end
+  include T
+  include Rest.Make_no_arg (T)
+end
+
 (** Backwards compatibility wrappers (non-typed versions) *)
 
 (** Get account balances - returns raw JSON *)

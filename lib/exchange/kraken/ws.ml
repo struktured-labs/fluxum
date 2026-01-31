@@ -179,6 +179,17 @@ module Private = struct
         ];
       ])
 
+  (** Generate authentication message for own-trades subscription *)
+  let auth_trades_message ~signature : string =
+    Yojson.Safe.to_string
+      (`Assoc [
+        "event", `String "subscribe";
+        "subscription", `Assoc [
+          "name", `String "ownTrades";
+          "token", `String signature;
+        ];
+      ])
+
   (** Generate unsubscribe message for own-orders *)
   let unsubscribe_message ~signature : string =
     Yojson.Safe.to_string 

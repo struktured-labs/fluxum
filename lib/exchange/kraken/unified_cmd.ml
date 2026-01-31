@@ -148,21 +148,24 @@ module Session = struct
   let name = "session"
 
   let command : string * Command.t =
+    let open Command.Let_syntax in
     (name, Command.async
       ~summary:"Create session with all event streams"
-      (Command.Param.(
-        let symbols = flag "--symbols"
+      [%map_open
+        let symbols_str = flag "--symbols"
           (required string)
           ~doc:"STRING comma-separated trading symbols (e.g., BTC/USD,ETH/USD)"
         and limit = flag "--limit"
           (optional_with_default 50 int)
           ~doc:"INT number of events to show per stream (default 50)"
+        and config = Cfg.param
         in
-        return (fun symbols_str limit () ->
+        fun () ->
+          let cfg = Cfg.or_default config in
           let symbol_list = String.split symbols_str ~on:',' |> List.map ~f:String.strip in
           printf "Creating session for: %s\n\n" (String.concat ~sep:", " symbol_list);
 
-          Session.create ~symbols:symbol_list ()
+          Session.create ~cfg ~symbols:symbol_list ()
           >>= fun session ->
 
           printf "Session state: %s\n"
@@ -231,10 +234,8 @@ module Session = struct
           Session.close session
           >>= fun () ->
           printf "\nSession closed.\n";
-          Deferred.unit)
-        <*> symbols
-        <*> limit
-      )))
+          Deferred.unit
+      ])
 end
 
 let command : string * Command.t =

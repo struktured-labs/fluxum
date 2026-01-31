@@ -55,15 +55,33 @@ module Events = struct
 
   (** Create session events *)
   let create
+      ~cfg:(module Cfg : Cfg.S)
       ?(symbols : Fluxum.Types.Symbol.t list = [])
       ?order_ids:_
       ()
     : t Deferred.t =
     Log.Global.info "Events.create: start symbols=%d" (List.length symbols);
 
-    (* Balance pipe - placeholder for now *)
-    let balance_reader, _balance_writer = Pipe.create () in
-    let balance_pipe = balance_reader in
+    (* Balance pipe - REST polling every 5s *)
+    let balance_pipe =
+      Auto_restart.pipe ~name:"kraken_balance_poll" ~create_pipe:(fun () ->
+        let reader, writer = Pipe.create () in
+        let rec poll_loop () =
+          V1.Balances.post (module Cfg) () >>= function
+          | `Ok balances ->
+            Deferred.List.iter ~how:`Sequential balances ~f:(fun balance ->
+              Pipe.write writer balance)
+            >>= fun () ->
+            after (Time_float_unix.Span.of_sec 5.0) >>= poll_loop
+          | #Rest.Error.post as err ->
+            Log.Global.error "Kraken balance poll failed: %s"
+              (Sexp.to_string (Rest.Error.sexp_of_post err));
+            after (Time_float_unix.Span.of_sec 10.0) >>= poll_loop
+        in
+        don't_wait_for (poll_loop ());
+        return reader
+      ) ()
+    in
 
     (* Market data pipes - one per symbol *)
     let market_data =
@@ -195,9 +213,61 @@ module Events = struct
       )
     in
 
-    (* Order events pipe - placeholder *)
-    let order_events_reader, _order_events_writer = Pipe.create () in
-    let order_events_pipe = order_events_reader in
+    (* Order events pipe - private WebSocket with auto-restart *)
+    let order_events_pipe =
+      Auto_restart.pipe ~name:"kraken_order_events" ~create_pipe:(fun () ->
+        Private_ws.connect ~cfg:(module Cfg) () >>| function
+        | Ok msg_pipe ->
+          let order_reader, order_writer = Pipe.create () in
+          don't_wait_for (
+            Pipe.iter msg_pipe ~f:(fun msg ->
+              match msg with
+              | Ws.Private.Own_orders orders ->
+                Deferred.List.iter ~how:`Sequential orders ~f:(fun (order_id, update) ->
+                  (* Convert Private.Order_update to V1.Open_orders.Order *)
+                  let order : V1.Open_orders.Order.t =
+                    { refid = None
+                    ; userref = Option.value update.userref ~default:0
+                    ; status = Common.Order_status.to_string update.status
+                    ; reason = None
+                    ; opentm = Option.value update.lastupdated ~default:0.0
+                    ; closetm = 0.0
+                    ; starttm = 0.0
+                    ; expiretm = 0.0
+                    ; descr = { pair = update.descr.pair
+                               ; type_ = update.descr.type_
+                               ; ordertype = update.descr.ordertype
+                               ; price = update.descr.price
+                               ; price2 = update.descr.price2
+                               ; leverage = update.descr.leverage
+                               ; order = update.descr.order
+                               ; close = update.descr.close
+                               }
+                    ; vol = update.vol
+                    ; vol_exec = update.vol_exec
+                    ; cost = update.cost
+                    ; fee = update.fee
+                    ; price = update.avg_price
+                    ; stopprice = update.stop_price
+                    ; limitprice = update.limit_price
+                    ; misc = update.misc
+                    ; oflags = update.oflags
+                    }
+                  in
+                  let _ = order_id in
+                  Pipe.write order_writer order)
+              | Ws.Private.Own_trades _trades ->
+                Deferred.unit
+              | Ws.Private.Pong ->
+                Deferred.unit)
+            >>| fun () -> Pipe.close order_writer);
+          order_reader
+        | Error _err ->
+          Log.Global.error "Kraken private WS connection failed, order events unavailable";
+          let reader, _writer = Pipe.create () in
+          reader
+      ) ()
+    in
 
     return {
       symbols;
@@ -220,6 +290,7 @@ type t =
 
 (** Create session *)
 let create
+    ~cfg:(module Cfg : Cfg.S)
     ?(symbols : Fluxum.Types.Symbol.t list = [])
     ?order_ids
     ()
@@ -233,7 +304,7 @@ let create
   don't_wait_for (Pipe.write state_changes_writer State.Connecting);
 
   (* Create events *)
-  let%bind events = Events.create ~symbols ?order_ids () in
+  let%bind events = Events.create ~cfg:(module Cfg) ~symbols ?order_ids () in
 
   (* Update state to Ready *)
   let state = State.Ready in
