@@ -15,6 +15,8 @@ module Error : sig
     | `Service_unavailable of string
     | `Not_acceptable of string
     | `Unauthorized of string
+    | `Bad_gateway of string
+    | `Gateway_timeout of string
     ]
   [@@deriving sexp]
 

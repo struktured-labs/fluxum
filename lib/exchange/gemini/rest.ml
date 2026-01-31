@@ -5,6 +5,8 @@ module Error = struct
     | `Service_unavailable of string
     | `Not_acceptable of string
     | `Unauthorized of string
+    | `Bad_gateway of string
+    | `Gateway_timeout of string
     ]
   [@@deriving sexp]
 
@@ -146,11 +148,15 @@ end = struct
       Cohttp_async.Body.to_string body >>| fun body -> `Bad_request body
     | `Service_unavailable ->
       Cohttp_async.Body.to_string body >>| fun body -> `Service_unavailable body
+    | `Bad_gateway ->
+      Cohttp_async.Body.to_string body >>| fun body -> `Bad_gateway body
+    | `Gateway_timeout ->
+      Cohttp_async.Body.to_string body >>| fun body -> `Gateway_timeout body
     | (code : Cohttp.Code.status_code) ->
       Cohttp_async.Body.to_string body >>| fun body ->
-      failwiths ~here:[%here]
-        (sprintf "unexpected status code (body=%S)" body)
-        code Cohttp.Code.sexp_of_status_code
+      let msg = sprintf "HTTP %s (body=%S)"
+        (Cohttp.Code.string_of_status code) body in
+      `Service_unavailable msg
 end
 
 module Make (Operation : Operation.S) = struct

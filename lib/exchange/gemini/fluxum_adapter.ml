@@ -569,6 +569,8 @@ module Adapter = struct
       | `Service_unavailable msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "503"; message = msg }
       | `Not_acceptable msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "406"; message = msg }
       | `Unauthorized _ -> Types.Error.Auth_failed
+      | `Bad_gateway msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "502"; message = msg }
+      | `Gateway_timeout msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "504"; message = msg }
       | `Json_parse_error { message; body = _ } -> Types.Error.Exchange_specific { venue = Venue.t; code = "json"; message }
       | `Error { reason; message } -> Types.Error.Exchange_specific { venue = Venue.t; code = reason; message }
     end
