@@ -69,10 +69,9 @@ module Side = struct
       Returns Error if side is unrecognized.
   *)
   let of_string (s : string) : (Types.Side.t, string) Result.t =
-    let lower = String.lowercase s in
-    match lower with
-    | "buy" | "b" | "bid" -> Ok Types.Side.Buy
-    | "sell" | "s" | "ask" -> Ok Types.Side.Sell
+    match s with
+    | "buy" | "Buy" | "BUY" | "b" | "B" | "bid" | "Bid" | "BID" -> Ok Types.Side.Buy
+    | "sell" | "Sell" | "SELL" | "s" | "S" | "ask" | "Ask" | "ASK" -> Ok Types.Side.Sell
     | _ -> Error (sprintf "Unrecognized side: %s" s)
 
   (** Version with default fallback (for backwards compatibility).
@@ -99,13 +98,21 @@ module Order_status = struct
       Returns Error if status is unrecognized.
   *)
   let of_string (s : string) : (Types.Order_status.t, string) Result.t =
-    let lower = String.lowercase s in
-    match lower with
-    | "new" | "pending" | "open" | "accepted" -> Ok Types.Order_status.New
-    | "filled" | "closed" | "executed" -> Ok Types.Order_status.Filled
-    | "canceled" | "cancelled" | "expired" -> Ok Types.Order_status.Canceled
-    | "partially_filled" | "partial" -> Ok Types.Order_status.Partially_filled
-    | "rejected" -> Ok (Types.Order_status.Rejected "Order rejected")
+    match s with
+    | "new" | "New" | "NEW" | "pending" | "Pending" | "PENDING"
+    | "open" | "Open" | "OPEN" | "accepted" | "Accepted" | "ACCEPTED" ->
+      Ok Types.Order_status.New
+    | "filled" | "Filled" | "FILLED" | "closed" | "Closed" | "CLOSED"
+    | "executed" | "Executed" | "EXECUTED" ->
+      Ok Types.Order_status.Filled
+    | "canceled" | "Canceled" | "CANCELED" | "cancelled" | "Cancelled" | "CANCELLED"
+    | "expired" | "Expired" | "EXPIRED" ->
+      Ok Types.Order_status.Canceled
+    | "partially_filled" | "Partially_filled" | "PARTIALLY_FILLED"
+    | "partial" | "Partial" | "PARTIAL" ->
+      Ok Types.Order_status.Partially_filled
+    | "rejected" | "Rejected" | "REJECTED" ->
+      Ok (Types.Order_status.Rejected "Order rejected")
     | _ -> Error (sprintf "Unrecognized order status: %s" s)
 
   (** Version with default fallback (for backwards compatibility).
@@ -133,11 +140,13 @@ module Order_type = struct
       Returns Error if order type is unrecognized.
   *)
   let of_string (s : string) : (Types.Order_kind.t, string) Result.t =
-    let lower = String.lowercase s in
-    match lower with
-    | "market" -> Ok Types.Order_kind.Market
-    | "limit" -> Ok (Types.Order_kind.Limit 0.0)  (* Price filled by caller *)
-    | "post_only" | "maker_only" | "limit_maker" -> Ok (Types.Order_kind.Post_only_limit 0.0)
+    match s with
+    | "market" | "Market" | "MARKET" -> Ok Types.Order_kind.Market
+    | "limit" | "Limit" | "LIMIT" -> Ok (Types.Order_kind.Limit 0.0)  (* Price filled by caller *)
+    | "post_only" | "Post_only" | "POST_ONLY"
+    | "maker_only" | "Maker_only" | "MAKER_ONLY"
+    | "limit_maker" | "Limit_maker" | "LIMIT_MAKER" ->
+      Ok (Types.Order_kind.Post_only_limit 0.0)
     | _ -> Error (sprintf "Unrecognized order type: %s" s)
 
   (** Version with default fallback (for backwards compatibility).
