@@ -83,7 +83,7 @@ module Book = struct
           let updated_book = update_from_message book data contents in
           (updated_book, updated_book)
       | Error (`Json_parse_error msg) ->
-          Core.printf "Parse error: %s\n" msg;
+          Log.Global.error "dYdX orderbook parse error: %s" msg;
           (book, book)
     ) in
 

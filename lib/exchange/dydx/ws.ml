@@ -157,7 +157,7 @@ let create_message_pipe ~conn =
            read_loop ()
          with
          | Yojson.Json_error err ->
-             Core.printf "JSON parse error: %s\n" err;
+             Log.Global.error "dYdX WS JSON parse error: %s" err;
              read_loop ())
     | None ->
         Pipe.close w;
