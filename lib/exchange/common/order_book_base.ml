@@ -129,18 +129,39 @@ end) = struct
       let ask = best_ask t in
       ask.price -. bid.price
 
-    (** Get top N bids (O(n) via lazy sequence, not O(k) via full alist) *)
+    (** Find a bid price level. O(log n) via Map.find. *)
+    let find_bid t ~price = Map.find t.bids price
+
+    (** Find an ask price level. O(log n) via Map.find. *)
+    let find_ask t ~price = Map.find t.asks price
+
+    (** Get top N bids as Price_level.t list *)
     let best_n_bids t ~n () =
       Map.to_sequence t.bids
       |> Fn.flip Sequence.take n
       |> Sequence.map ~f:snd
       |> Sequence.to_list
 
-    (** Get top N asks (O(n) via lazy sequence, not O(k) via full alist) *)
+    (** Get top N asks as Price_level.t list *)
     let best_n_asks t ~n () =
       Map.to_sequence t.asks
       |> Fn.flip Sequence.take n
       |> Sequence.map ~f:snd
+      |> Sequence.to_list
+
+    (** Get top N bids, mapping each level directly to avoid intermediate list.
+        Use when the caller needs a different type than Price_level.t. *)
+    let best_n_bids_map t ~n ~f =
+      Map.to_sequence t.bids
+      |> Fn.flip Sequence.take n
+      |> Sequence.map ~f:(fun (_key, level) -> f level)
+      |> Sequence.to_list
+
+    (** Get top N asks, mapping each level directly to avoid intermediate list. *)
+    let best_n_asks_map t ~n ~f =
+      Map.to_sequence t.asks
+      |> Fn.flip Sequence.take n
+      |> Sequence.map ~f:(fun (_key, level) -> f level)
       |> Sequence.to_list
 
     (** Get all bids *)

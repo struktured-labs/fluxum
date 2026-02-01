@@ -211,6 +211,14 @@ end) : sig
         Returns 0.0 if either side is empty. *)
     val spread : t -> float
 
+    (** {1 Level Lookups} *)
+
+    (** Find a bid level by price. O(log n). *)
+    val find_bid : t -> price:float -> Price_level.t option
+
+    (** Find an ask level by price. O(log n). *)
+    val find_ask : t -> price:float -> Price_level.t option
+
     (** {1 Level Queries} *)
 
     (** Get the best N bid levels (highest prices first).
@@ -224,6 +232,20 @@ end) : sig
         @param n Number of levels to return
         @return List of up to N levels, sorted ascending by price *)
     val best_n_asks : t -> n:int -> unit -> Price_level.t list
+
+    (** Get the best N bid levels, mapping each level directly.
+        Avoids intermediate Price_level.t list allocation.
+
+        @param n Number of levels
+        @param f Mapping function applied to each level *)
+    val best_n_bids_map : t -> n:int -> f:(Price_level.t -> 'a) -> 'a list
+
+    (** Get the best N ask levels, mapping each level directly.
+        Avoids intermediate Price_level.t list allocation.
+
+        @param n Number of levels
+        @param f Mapping function applied to each level *)
+    val best_n_asks_map : t -> n:int -> f:(Price_level.t -> 'a) -> 'a list
 
     (** Get all bid levels (best first). *)
     val all_bids : t -> Price_level.t list

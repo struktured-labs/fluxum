@@ -111,10 +111,8 @@ module Book = struct
 
   (** Generic level extraction from any exchange book
 
-      This eliminates 12 duplicated blocks (6 exchanges × 2 sides).
-
       @param book_opt Optional exchange book
-      @param extract_levels Function to get levels from book
+      @param extract_levels Function to get levels from book, mapping directly
       @param exchange Exchange source identifier
       @return List of (price, attributed_level) tuples
   *)
@@ -136,20 +134,21 @@ module Book = struct
         let volume = get_volume level in
         (price, { Attributed_level.price; volume; exchange }))
 
-  (** Helper for exchanges using Exchange_common.Order_book_base.Price_level.t *)
-  let extract_common_levels
+  (** Helper for exchanges using Exchange_common.Order_book_base.Price_level.t.
+      Uses best_n_*_map to build attributed levels directly, skipping
+      intermediate Price_level.t list allocation. *)
+  let extract_common_levels_mapped
     (type book)
     ~(book_opt : book option)
-    ~(extract_levels : book -> Exchange_common.Order_book_base.Price_level.t list)
+    ~(extract_mapped : book -> f:(Exchange_common.Order_book_base.Price_level.t -> (float * Attributed_level.t)) -> (float * Attributed_level.t) list)
     ~(exchange : exchange_source)
     : (float * Attributed_level.t) list
     =
-    extract_levels_generic
-      ~book_opt
-      ~extract_levels
-      ~get_price:(fun (level : Exchange_common.Order_book_base.Price_level.t) -> level.price)
-      ~get_volume:(fun level -> level.volume)
-      ~exchange
+    match book_opt with
+    | None -> []
+    | Some book ->
+      extract_mapped book ~f:(fun (level : Exchange_common.Order_book_base.Price_level.t) ->
+        (level.price, { Attributed_level.price = level.price; volume = level.volume; exchange }))
 
   (** Rebuild consolidated book from exchange books *)
   let rebuild t =
@@ -166,45 +165,46 @@ module Book = struct
         ~get_volume:(fun level -> level.volume)
         ~exchange:Gemini
       in
-      (* Most exchanges use Exchange_common.Order_book_base.Price_level.t *)
-      let kraken_bids = extract_common_levels
+      (* Most exchanges use Exchange_common.Order_book_base - mapped extraction
+         avoids intermediate Price_level.t list allocation *)
+      let kraken_bids = extract_common_levels_mapped
         ~book_opt:t.kraken_book
-        ~extract_levels:(fun book -> Kraken.Order_book.Book.best_n_bids book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Kraken.Order_book.Book.best_n_bids_map book ~n:100 ~f)
         ~exchange:Kraken
       in
-      let hyperliquid_bids = extract_common_levels
+      let hyperliquid_bids = extract_common_levels_mapped
         ~book_opt:t.hyperliquid_book
-        ~extract_levels:(fun book -> Hyperliquid.Order_book.Book.best_n_bids book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Hyperliquid.Order_book.Book.best_n_bids_map book ~n:100 ~f)
         ~exchange:Hyperliquid
       in
-      let bitrue_bids = extract_common_levels
+      let bitrue_bids = extract_common_levels_mapped
         ~book_opt:t.bitrue_book
-        ~extract_levels:(fun book -> Bitrue.Order_book.Book.best_n_bids book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Bitrue.Order_book.Book.best_n_bids_map book ~n:100 ~f)
         ~exchange:Bitrue
       in
-      let binance_bids = extract_common_levels
+      let binance_bids = extract_common_levels_mapped
         ~book_opt:t.binance_book
-        ~extract_levels:(fun book -> Binance.Order_book.Book.best_n_bids book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Binance.Order_book.Book.best_n_bids_map book ~n:100 ~f)
         ~exchange:Binance
       in
-      let coinbase_bids = extract_common_levels
+      let coinbase_bids = extract_common_levels_mapped
         ~book_opt:t.coinbase_book
-        ~extract_levels:(fun book -> Coinbase.Order_book.Book.best_n_bids book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Coinbase.Order_book.Book.best_n_bids_map book ~n:100 ~f)
         ~exchange:Coinbase
       in
-      let mexc_bids = extract_common_levels
+      let mexc_bids = extract_common_levels_mapped
         ~book_opt:t.mexc_book
-        ~extract_levels:(fun book -> Mexc.Order_book.Book.best_n_bids book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Mexc.Order_book.Book.best_n_bids_map book ~n:100 ~f)
         ~exchange:Mexc
       in
-      let bybit_bids = extract_common_levels
+      let bybit_bids = extract_common_levels_mapped
         ~book_opt:t.bybit_book
-        ~extract_levels:(fun book -> Bybit.Order_book.Book.best_n_bids book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Bybit.Order_book.Book.best_n_bids_map book ~n:100 ~f)
         ~exchange:Bybit
       in
-      let okx_bids = extract_common_levels
+      let okx_bids = extract_common_levels_mapped
         ~book_opt:t.okx_book
-        ~extract_levels:(fun book -> Okx.Order_book.Book.best_n_bids book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Okx.Order_book.Book.best_n_bids_map book ~n:100 ~f)
         ~exchange:Okx
       in
       [gemini_bids; kraken_bids; hyperliquid_bids; bitrue_bids; binance_bids; coinbase_bids; mexc_bids; bybit_bids; okx_bids]
@@ -231,45 +231,45 @@ module Book = struct
         ~get_volume:(fun level -> level.volume)
         ~exchange:Gemini
       in
-      (* Most exchanges use Exchange_common.Order_book_Base.Price_level.t *)
-      let kraken_asks = extract_common_levels
+      (* Mapped extraction - avoids intermediate Price_level.t list *)
+      let kraken_asks = extract_common_levels_mapped
         ~book_opt:t.kraken_book
-        ~extract_levels:(fun book -> Kraken.Order_book.Book.best_n_asks book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Kraken.Order_book.Book.best_n_asks_map book ~n:100 ~f)
         ~exchange:Kraken
       in
-      let hyperliquid_asks = extract_common_levels
+      let hyperliquid_asks = extract_common_levels_mapped
         ~book_opt:t.hyperliquid_book
-        ~extract_levels:(fun book -> Hyperliquid.Order_book.Book.best_n_asks book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Hyperliquid.Order_book.Book.best_n_asks_map book ~n:100 ~f)
         ~exchange:Hyperliquid
       in
-      let bitrue_asks = extract_common_levels
+      let bitrue_asks = extract_common_levels_mapped
         ~book_opt:t.bitrue_book
-        ~extract_levels:(fun book -> Bitrue.Order_book.Book.best_n_asks book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Bitrue.Order_book.Book.best_n_asks_map book ~n:100 ~f)
         ~exchange:Bitrue
       in
-      let binance_asks = extract_common_levels
+      let binance_asks = extract_common_levels_mapped
         ~book_opt:t.binance_book
-        ~extract_levels:(fun book -> Binance.Order_book.Book.best_n_asks book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Binance.Order_book.Book.best_n_asks_map book ~n:100 ~f)
         ~exchange:Binance
       in
-      let coinbase_asks = extract_common_levels
+      let coinbase_asks = extract_common_levels_mapped
         ~book_opt:t.coinbase_book
-        ~extract_levels:(fun book -> Coinbase.Order_book.Book.best_n_asks book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Coinbase.Order_book.Book.best_n_asks_map book ~n:100 ~f)
         ~exchange:Coinbase
       in
-      let mexc_asks = extract_common_levels
+      let mexc_asks = extract_common_levels_mapped
         ~book_opt:t.mexc_book
-        ~extract_levels:(fun book -> Mexc.Order_book.Book.best_n_asks book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Mexc.Order_book.Book.best_n_asks_map book ~n:100 ~f)
         ~exchange:Mexc
       in
-      let bybit_asks = extract_common_levels
+      let bybit_asks = extract_common_levels_mapped
         ~book_opt:t.bybit_book
-        ~extract_levels:(fun book -> Bybit.Order_book.Book.best_n_asks book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Bybit.Order_book.Book.best_n_asks_map book ~n:100 ~f)
         ~exchange:Bybit
       in
-      let okx_asks = extract_common_levels
+      let okx_asks = extract_common_levels_mapped
         ~book_opt:t.okx_book
-        ~extract_levels:(fun book -> Okx.Order_book.Book.best_n_asks book ~n:100 ())
+        ~extract_mapped:(fun book ~f -> Okx.Order_book.Book.best_n_asks_map book ~n:100 ~f)
         ~exchange:Okx
       in
       [gemini_asks; kraken_asks; hyperliquid_asks; bitrue_asks; binance_asks; coinbase_asks; mexc_asks; bybit_asks; okx_asks]
