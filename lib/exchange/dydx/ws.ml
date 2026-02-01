@@ -58,7 +58,7 @@ type trades_contents = {
 let connect ~url =
   match%bind Websocket_curl.connect ~url () with
   | Ok conn -> return conn
-  | Error err -> failwith (Error.to_string_hum err)
+  | Error err -> raise_s [%message "dYdX WS connect failed" (err : Error.t)]
 
 let subscribe ~conn ~channel ~id ?(batched=true) () =
   let req = {
