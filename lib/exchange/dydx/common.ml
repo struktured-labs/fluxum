@@ -11,9 +11,14 @@ let side_to_string = function
   | SELL -> "SELL"
 
 let side_of_string = function
-  | "BUY" -> BUY
-  | "SELL" -> SELL
-  | s -> failwith (sprintf "Unknown side: %s" s)
+  | "BUY" -> Ok BUY
+  | "SELL" -> Ok SELL
+  | s -> Error (`Unknown_side s)
+
+let side_of_string_exn s =
+  match side_of_string s with
+  | Ok v -> v
+  | Error (`Unknown_side s) -> raise_s [%message "Unknown side" (s : string)]
 
 (** Order type *)
 type order_type =
@@ -52,13 +57,18 @@ type order_status =
 [@@deriving sexp, yojson]
 
 let order_status_of_string = function
-  | "BEST_EFFORT_OPENED" -> BEST_EFFORT_OPENED
-  | "OPEN" -> OPEN
-  | "FILLED" -> FILLED
-  | "CANCELED" -> CANCELED
-  | "BEST_EFFORT_CANCELED" -> BEST_EFFORT_CANCELED
-  | "UNTRIGGERED" -> UNTRIGGERED
-  | s -> failwith (sprintf "Unknown order status: %s" s)
+  | "BEST_EFFORT_OPENED" -> Ok BEST_EFFORT_OPENED
+  | "OPEN" -> Ok OPEN
+  | "FILLED" -> Ok FILLED
+  | "CANCELED" -> Ok CANCELED
+  | "BEST_EFFORT_CANCELED" -> Ok BEST_EFFORT_CANCELED
+  | "UNTRIGGERED" -> Ok UNTRIGGERED
+  | s -> Error (`Unknown_order_status s)
+
+let order_status_of_string_exn s =
+  match order_status_of_string s with
+  | Ok v -> v
+  | Error (`Unknown_order_status s) -> raise_s [%message "Unknown order status" (s : string)]
 
 (** Position status *)
 type position_status =

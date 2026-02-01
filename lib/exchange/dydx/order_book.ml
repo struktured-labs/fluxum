@@ -7,7 +7,7 @@ module Config = struct
   let sexp_of_symbol s = Sexp.Atom s
   let symbol_of_sexp = function
     | Sexp.Atom s -> s
-    | _ -> failwith "Invalid symbol sexp"
+    | sexp -> raise_s [%message "Invalid symbol sexp" (sexp : Sexp.t)]
   let compare_symbol = String.compare
 
   type metadata = {

@@ -120,9 +120,14 @@ let load ~path =
   match deserialize_snapshot contents with
   | Ok entries ->
     let t = create () in
-    return (restore t entries)
+    return (Ok (restore t entries))
   | Error e ->
-    failwithf "Failed to load ledger: %s" (Error.to_string_hum e) ()
+    return (Error e)
+
+let load_exn ~path =
+  load ~path >>| function
+  | Ok t -> t
+  | Error e -> raise_s [%message "Failed to load ledger" (path : string) (e : Error.t)]
 
 (** Get total P&L across all entries *)
 let total_pnl t =
