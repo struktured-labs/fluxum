@@ -45,9 +45,69 @@ module Events = struct
   let create ~cfg ?(symbols = []) () : t Deferred.t =
     Log.Global.info "Uniswap V3 Events.create: start pools=%d" (List.length symbols);
 
-    (* Balance pipe - placeholder (Phase 3 wires ERC-20 balance polling) *)
-    let balance_reader, _balance_writer = Pipe.create () in
-    let balance_pipe = balance_reader in
+    (* Balance pipe - polls ETH + ERC-20 balances for tokens in subscribed pools *)
+    let balance_pipe =
+      match cfg.Cfg.wallet_address with
+      | None ->
+        (* No wallet configured, emit nothing *)
+        let reader, _writer = Pipe.create () in
+        reader
+      | Some owner ->
+        Auto_restart.pipe ~name:"uniswapv3_balance_poll" ~create_pipe:(fun () ->
+          let reader, writer = Pipe.create () in
+          (* Discover token addresses from subscribed pool IDs *)
+          let%bind token_infos =
+            Deferred.List.filter_map symbols ~how:`Sequential ~f:(fun pool_id ->
+              Rest.pool_by_id ~cfg ~pool_id >>| function
+              | Ok pool ->
+                Some [ (pool.token0.id, pool.token0.symbol, pool.token0.decimals)
+                     ; (pool.token1.id, pool.token1.symbol, pool.token1.decimals) ]
+              | Error _ -> None)
+            >>| List.concat
+            >>| List.dedup_and_sort ~compare:(fun (a, _, _) (b, _, _) -> String.compare a b)
+          in
+          let rpc_url = cfg.Cfg.rpc_url in
+          let rec poll_loop () =
+            (* ETH balance *)
+            let%bind eth_bal =
+              Ethereum.Rpc.eth_get_balance ~rpc_url ~address:owner >>| function
+              | Ok hex ->
+                let wei = Float.of_string ("0x" ^ (match String.is_prefix hex ~prefix:"0x" with
+                  | true -> String.drop_prefix hex 2 | false -> hex)) in
+                [{ Fluxum.Types.Balance.currency = "ETH"
+                 ; available = wei /. 1e18; locked = 0.0; total = wei /. 1e18
+                 ; venue = Fluxum.Types.Venue.Uniswap_v3 }]
+              | Error _ -> []
+            in
+            (* ERC-20 balances *)
+            let%bind token_bals =
+              Deferred.List.filter_map token_infos ~how:`Sequential
+                ~f:(fun (token_addr, symbol, decimals) ->
+                  Ethereum.Erc20.balance_of ~rpc_url ~token:token_addr ~owner >>| function
+                  | Ok hex ->
+                    let raw = Float.of_string ("0x" ^ (match String.is_prefix hex ~prefix:"0x" with
+                      | true -> String.drop_prefix hex 2 | false -> hex)) in
+                    let divisor = Float.of_int (Int.pow 10 decimals) in
+                    let amount = raw /. divisor in
+                    (match Float.(amount > 0.) with
+                     | true ->
+                       Some { Fluxum.Types.Balance.currency = symbol
+                            ; available = amount; locked = 0.0; total = amount
+                            ; venue = Fluxum.Types.Venue.Uniswap_v3 }
+                     | false -> None)
+                  | Error _ -> None)
+            in
+            let all_balances = eth_bal @ token_bals in
+            let%bind () =
+              Deferred.List.iter ~how:`Sequential all_balances ~f:(fun bal ->
+                Pipe.write writer bal)
+            in
+            after (Time_float_unix.Span.of_sec 30.0) >>= poll_loop
+          in
+          don't_wait_for (poll_loop ());
+          return reader
+        ) ()
+    in
 
     (* Market data pipes - poll pool_by_id per pool *)
     let market_data =

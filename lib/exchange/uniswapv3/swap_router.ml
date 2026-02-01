@@ -115,14 +115,10 @@ let ensure_approval ~(cfg : Cfg.t) ~token_in ~amount_in ~private_key ~from_addre
 let exact_input_single ~(cfg : Cfg.t) ~(params : exact_input_single_params)
   : (string, [> error]) Deferred.Result.t =
   let rpc_url = cfg.rpc_url in
-  let private_key = match cfg.private_key_hex with
-    | Some key -> key
-    | None -> failwith "Private key not configured"
-  in
-  let from_address = match cfg.wallet_address with
-    | Some addr -> addr
-    | None -> failwith "Wallet address not configured"
-  in
+  match cfg.private_key_hex, cfg.wallet_address with
+  | None, _ -> return (Error (`Swap_error "Private key not configured"))
+  | _, None -> return (Error (`Swap_error "Wallet address not configured"))
+  | Some private_key, Some from_address ->
 
   (* 1. Ensure approval *)
   let%bind approval = ensure_approval ~cfg ~token_in:params.token_in
