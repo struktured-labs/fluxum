@@ -11,6 +11,7 @@ let mexc_command = Mexc.command
 let hyperliquid_command = Hyperliquid.command
 let coinbase_command = Coinbase.command
 let bitrue_command = Bitrue.command
+let bitstamp_command = Bitstamp.command
 let dydx_command = Dydx.command
 let jupiter_command = Jupiter.command
 let oneinch_command = Oneinch.command
@@ -1619,6 +1620,7 @@ let command =
     ; ("hyperliquid", hyperliquid_command)
     ; ("coinbase", coinbase_command)
     ; ("bitrue", bitrue_command)
+    ; ("bitstamp", bitstamp_command)
     ; ("dydx", dydx_command)
     ; ("jupiter", jupiter_command)
     ; ("1inch", oneinch_command)

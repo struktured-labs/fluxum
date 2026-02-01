@@ -29,6 +29,7 @@ module Venue = struct
       | Okx
       | Hyperliquid
       | Bitrue
+      | Bitstamp
       | Dydx
       | Jupiter
       | OneInch
@@ -48,6 +49,7 @@ module Venue = struct
     | Okx -> Okx
     | Hyperliquid -> Hyperliquid
     | Bitrue -> Bitrue
+    | Bitstamp -> Bitstamp
     | Dydx -> Dydx
     | Jupiter -> Jupiter
     | OneInch -> OneInch
@@ -66,6 +68,7 @@ module Venue = struct
     | Okx -> "OKX"
     | Hyperliquid -> "Hyperliquid"
     | Bitrue -> "Bitrue"
+    | Bitstamp -> "Bitstamp"
     | Dydx -> "dYdX"
     | Jupiter -> "Jupiter"
     | OneInch -> "1inch"

@@ -1,7 +1,7 @@
 (executable
   (name cli)
   (public_name fluxum)
-  (libraries gemini kraken binance bybit okx mexc hyperliquid coinbase bitrue dydx jupiter oneinch backtest backtest_strategies bot pool_intf amm_pricing consolidated_pools sushiswap uniswapv3 curve balancer thena pancakeswap)
+  (libraries gemini kraken binance bybit okx mexc hyperliquid coinbase bitrue bitstamp dydx jupiter oneinch backtest backtest_strategies bot pool_intf amm_pricing consolidated_pools sushiswap uniswapv3 curve balancer thena pancakeswap)
   (modules cli)
   (package fluxum)
   (preprocess (pps ppx_jane))

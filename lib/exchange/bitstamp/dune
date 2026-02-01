@@ -1,6 +1,7 @@
 (library
  (name bitstamp)
  (public_name fluxum.bitstamp)
- (libraries core async cohttp cohttp-async cryptokit yojson ppx_deriving_yojson.runtime fluxum websocket_curl pool_intf amm_pricing pool_common)
+ (modules cfg types rest ws pool_adapter order_book ledger session fluxum_adapter unified_adapter bitstamp)
+ (libraries core async cohttp cohttp-async cryptokit yojson ppx_deriving_yojson.runtime fluxum exchange_common websocket_curl pool_intf amm_pricing pool_common)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))

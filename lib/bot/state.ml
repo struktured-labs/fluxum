@@ -19,7 +19,7 @@ let event_venue_to_entry_venue (venue : Event.Venue.t) : Unified_ledger.Entry.Ve
     | Event.Venue.Gemini -> Unified_ledger.Entry.Venue.Gemini
     | Kraken -> Kraken | Mexc -> Mexc | Coinbase -> Coinbase
     | Binance -> Binance | Bybit -> Bybit | Okx -> Okx | Hyperliquid -> Hyperliquid | Bitrue -> Bitrue
-    | Dydx -> Dydx | Jupiter -> Jupiter | OneInch -> OneInch
+    | Bitstamp -> Bitstamp | Dydx -> Dydx | Jupiter -> Jupiter | OneInch -> OneInch
     | Other s -> Other s
 
 (** Connection state per venue *)

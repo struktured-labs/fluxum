@@ -11,6 +11,7 @@ module Venue = struct
     | Okx
     | Hyperliquid
     | Bitrue
+    | Bitstamp  (** Bitstamp - European exchange *)
     | Dydx      (** dYdX v4 - DeFi perpetuals *)
     | Jupiter   (** Jupiter - Solana DEX aggregator *)
     | OneInch   (** 1inch - EVM DEX aggregator *)
@@ -30,6 +31,7 @@ module Venue = struct
     | Okx -> "OKX"
     | Hyperliquid -> "Hyperliquid"
     | Bitrue -> "Bitrue"
+    | Bitstamp -> "Bitstamp"
     | Dydx -> "dYdX"
     | Jupiter -> "Jupiter"
     | OneInch -> "1inch"
@@ -40,7 +42,7 @@ module Venue = struct
 
   let is_defi = function
     | Dydx | Jupiter | OneInch | Gmx | Aave | Compound | Uniswap_v3 -> true
-    | Gemini | Kraken | Mexc | Coinbase | Binance | Bybit | Okx | Hyperliquid | Bitrue -> false
+    | Gemini | Kraken | Mexc | Coinbase | Binance | Bybit | Okx | Hyperliquid | Bitrue | Bitstamp -> false
 end
 
 module Symbol = struct

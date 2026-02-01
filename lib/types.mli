@@ -38,6 +38,7 @@ module Venue : sig
     | Okx           (** OKX - Global CEX (derivatives and spot) *)
     | Hyperliquid   (** Hyperliquid - L1 derivatives DEX *)
     | Bitrue        (** Bitrue - Global CEX *)
+    | Bitstamp      (** Bitstamp - European CEX *)
     | Dydx          (** dYdX v4 - DeFi perpetuals *)
     | Jupiter       (** Jupiter - Solana DEX aggregator *)
     | OneInch       (** 1inch - EVM DEX aggregator *)
