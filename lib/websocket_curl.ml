@@ -174,13 +174,13 @@ let connect ~url ?headers () =
     | _ ->
       Deferred.Or_error.error_string "Invalid Sec-WebSocket-Accept"
 
-(* Encode WebSocket text frame *)
-let encode_text_frame payload =
+(* Encode a masked WebSocket frame with given opcode *)
+let encode_frame ~opcode payload =
   let len = String.length payload in
   let header = Buffer.create 14 in
 
-  (* FIN + Text opcode *)
-  Buffer.add_char header (Char.of_int_exn 0x81);
+  (* FIN + opcode *)
+  Buffer.add_char header (Char.of_int_exn (0x80 lor opcode));
 
   (* Mask bit + length *)
   (match len < 126 with
@@ -212,6 +212,27 @@ let encode_text_frame payload =
   done;
 
   Buffer.contents header
+
+(* Encode WebSocket text frame (opcode 1) *)
+let encode_text_frame payload = encode_frame ~opcode:1 payload
+
+(* Encode WebSocket pong frame (opcode 10) — echo ping payload per RFC 6455 *)
+let encode_pong_frame payload = encode_frame ~opcode:10 payload
+
+(* Blocking pong send — called from within In_thread.run receive context *)
+let send_pong_blocking t payload =
+  let frame = encode_pong_frame payload in
+  let bytes = Bytes.of_string frame in
+  let rec send_all offset =
+    match offset >= Bytes.length bytes with
+    | true -> ()
+    | false ->
+      let sent = Curl_ext.send t.curl bytes offset (Bytes.length bytes - offset) in
+      match sent = 0 with
+      | true -> ()  (* connection closing, recv loop will handle *)
+      | false -> send_all (offset + sent)
+  in
+  send_all 0
 
 let send t payload =
   match t.closed with
@@ -330,7 +351,8 @@ let receive t =
             (* Close frame *)
             failwith "WebSocket close frame received"
           | 9 ->
-            (* Ping frame - ignore, continue reading *)
+            (* Ping frame - respond with pong per RFC 6455 *)
+            send_pong_blocking t payload;
             read_message ()
           | 10 ->
             (* Pong frame - ignore, continue reading *)
