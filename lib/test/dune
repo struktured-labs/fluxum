@@ -13,6 +13,14 @@
  (preprocess (pps ppx_jane))
  (flags :standard -open Core -open Async))
 
+(library
+ (name websocket_curl_test)
+ (modules test_websocket_curl)
+ (libraries core async websocket_curl base64)
+ (inline_tests)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
+
 (executable
  (name run_normalize_common_tests)
  (modules run_normalize_common_tests)
