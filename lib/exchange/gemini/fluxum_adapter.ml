@@ -255,9 +255,9 @@ module Adapter = struct
         let%bind p = Fluxum.Normalize_common.Float_conv.price_of_string
           (Common.Decimal_string.to_string price) in
         Ok (match List.exists options ~f:(fun o -> Poly.equal o `Maker_or_cancel) with
-         | true -> Types.Order_kind.Post_only_limit p
-         | false -> Types.Order_kind.Limit p)
-      | _ -> Ok Types.Order_kind.Market
+         | true -> Types.Order_kind.post_only p
+         | false -> Types.Order_kind.limit p)
+      | _ -> Ok Types.Order_kind.market
 
     let side (s : Common.Side.t) : Types.Side.t =
       match s with
@@ -310,6 +310,7 @@ module Adapter = struct
       ; symbol = symbol_to_string r.symbol
       ; side = side r.side
       ; kind
+      ; time_in_force = Types.Time_in_force.GTC
       ; qty = qty_orig
       ; filled = qty_exec
       ; status
@@ -589,9 +590,10 @@ module Builder = struct
     let type_ = `Exchange_limit in
     let price, options =
       match kind with
-      | Types.Order_kind.Market -> (price_str_of 0.0, [])
-      | Types.Order_kind.Limit p -> (price_str_of p, [])
-      | Types.Order_kind.Post_only_limit p -> (price_str_of p, [ `Maker_or_cancel ])
+      | Types.Order_kind.Basic Market -> (price_str_of 0.0, [])
+      | Types.Order_kind.Basic (Limit p) -> (price_str_of p, [])
+      | Types.Order_kind.Basic (Post_only p) -> (price_str_of p, [ `Maker_or_cancel ])
+      | Types.Order_kind.Conditional _ -> (price_str_of 0.0, [])  (* Gemini doesn't support stop orders via this endpoint *)
     in
     V1.Order.New.
       { client_order_id = Client_order_id.of_string (sprintf "fluxum-%0.0f" (Time_float_unix.now () |> Time_float_unix.to_span_since_epoch |> Time_float_unix.Span.to_ms))

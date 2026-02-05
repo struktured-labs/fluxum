@@ -174,34 +174,43 @@ let test_order_type_conversions () =
 
   (* Test "market" *)
   (match Fluxum.Normalize_common.Order_type.of_string "market" with
-   | Ok Fluxum.Types.Order_kind.Market -> pass "market -> Market"
+   | Ok (Fluxum.Types.Order_kind.Basic Market) -> pass "market -> Market"
    | _ -> fail "market should be Market");
 
   (match Fluxum.Normalize_common.Order_type.of_string "MARKET" with
-   | Ok Fluxum.Types.Order_kind.Market -> pass "MARKET -> Market"
+   | Ok (Fluxum.Types.Order_kind.Basic Market) -> pass "MARKET -> Market"
    | _ -> fail "MARKET should be Market");
 
   (* Test "limit" *)
   (match Fluxum.Normalize_common.Order_type.of_string "limit" with
-   | Ok (Fluxum.Types.Order_kind.Limit _) -> pass "limit -> Limit"
+   | Ok (Fluxum.Types.Order_kind.Basic (Limit _)) -> pass "limit -> Limit"
    | _ -> fail "limit should be Limit");
 
   (match Fluxum.Normalize_common.Order_type.of_string "LIMIT" with
-   | Ok (Fluxum.Types.Order_kind.Limit _) -> pass "LIMIT -> Limit"
+   | Ok (Fluxum.Types.Order_kind.Basic (Limit _)) -> pass "LIMIT -> Limit"
    | _ -> fail "LIMIT should be Limit");
 
   (* Test "post_only" / "limit_maker" *)
   (match Fluxum.Normalize_common.Order_type.of_string "post_only" with
-   | Ok (Fluxum.Types.Order_kind.Post_only_limit _) -> pass "post_only -> Post_only_limit"
-   | _ -> fail "post_only should be Post_only_limit");
+   | Ok (Fluxum.Types.Order_kind.Basic (Post_only _)) -> pass "post_only -> Post_only"
+   | _ -> fail "post_only should be Post_only");
 
   (match Fluxum.Normalize_common.Order_type.of_string "maker_only" with
-   | Ok (Fluxum.Types.Order_kind.Post_only_limit _) -> pass "maker_only -> Post_only_limit"
-   | _ -> fail "maker_only should be Post_only_limit");
+   | Ok (Fluxum.Types.Order_kind.Basic (Post_only _)) -> pass "maker_only -> Post_only"
+   | _ -> fail "maker_only should be Post_only");
 
   (match Fluxum.Normalize_common.Order_type.of_string "limit_maker" with
-   | Ok (Fluxum.Types.Order_kind.Post_only_limit _) -> pass "limit_maker -> Post_only_limit"
-   | _ -> fail "limit_maker should be Post_only_limit");
+   | Ok (Fluxum.Types.Order_kind.Basic (Post_only _)) -> pass "limit_maker -> Post_only"
+   | _ -> fail "limit_maker should be Post_only");
+
+  (* Test stop orders *)
+  (match Fluxum.Normalize_common.Order_type.of_string "stop_loss" with
+   | Ok (Fluxum.Types.Order_kind.Conditional (Stop_market _)) -> pass "stop_loss -> Stop_market"
+   | _ -> fail "stop_loss should be Stop_market");
+
+  (match Fluxum.Normalize_common.Order_type.of_string "stop_limit" with
+   | Ok (Fluxum.Types.Order_kind.Conditional (Stop_limit _)) -> pass "stop_limit -> Stop_limit"
+   | _ -> fail "stop_limit should be Stop_limit");
 
   (* Test error case *)
   (match Fluxum.Normalize_common.Order_type.of_string "invalid" with

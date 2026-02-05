@@ -230,7 +230,8 @@ module Adapter = struct
         ; id = resp.ordId
         ; symbol = ""  (* Not provided in response *)
         ; side = Types.Side.Buy  (* Not provided - will be overridden *)
-        ; kind = Types.Order_kind.Market  (* Not provided - will be overridden *)
+        ; kind = Types.Order_kind.market  (* Not provided - will be overridden *)
+        ; time_in_force = Types.Time_in_force.GTC
         ; qty = 0.0  (* Not provided in place response *)
         ; filled = 0.0
         ; status = Types.Order_status.New
@@ -254,13 +255,13 @@ module Adapter = struct
       let%bind side = Fluxum.Normalize_common.Side.of_string status.side in
       let%bind kind =
         match String.lowercase status.ordType with
-        | "market" -> Ok Types.Order_kind.Market
+        | "market" -> Ok Types.Order_kind.market
         | "limit" ->
           let%map price = Fluxum.Normalize_common.Float_conv.price_of_string status.px in
-          Types.Order_kind.Limit price
+          Types.Order_kind.limit price
         | "post_only" ->
           let%map price = Fluxum.Normalize_common.Float_conv.price_of_string status.px in
-          Types.Order_kind.Post_only_limit price
+          Types.Order_kind.post_only price
         | t -> Error (sprintf "Unknown order type: %s" t)
       in
       let%bind order_status = order_status status in
@@ -271,6 +272,7 @@ module Adapter = struct
       ; symbol = status.instId
       ; side
       ; kind
+      ; time_in_force = Types.Time_in_force.GTC
       ; qty
       ; filled
       ; status = order_status

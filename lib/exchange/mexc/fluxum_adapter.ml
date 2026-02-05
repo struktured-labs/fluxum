@@ -252,13 +252,14 @@ module Adapter = struct
       let%bind kind =
         let%bind order_type = Fluxum.Normalize_common.Order_type.of_string resp.type_ in
         match order_type with
-        | Types.Order_kind.Limit _ ->
+        | Types.Order_kind.Basic (Limit _) ->
           let%map price = Fluxum.Normalize_common.Float_conv.price_of_string resp.price in
-          Types.Order_kind.Limit price
-        | Types.Order_kind.Post_only_limit _ ->
+          Types.Order_kind.limit price
+        | Types.Order_kind.Basic (Post_only _) ->
           let%map price = Fluxum.Normalize_common.Float_conv.price_of_string resp.price in
-          Types.Order_kind.Post_only_limit price
-        | Types.Order_kind.Market -> Ok Types.Order_kind.Market
+          Types.Order_kind.post_only price
+        | Types.Order_kind.Basic Market -> Ok Types.Order_kind.market
+        | _ -> Error (sprintf "Unsupported order kind: %s" resp.type_)
       in
       let%bind status = Fluxum.Normalize_common.Order_status.of_string resp.status in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string resp.origQty in
@@ -268,6 +269,7 @@ module Adapter = struct
         ; symbol = resp.symbol
         ; side
         ; kind
+        ; time_in_force = Types.Time_in_force.GTC
         ; qty
         ; filled
         ; status
@@ -292,13 +294,14 @@ module Adapter = struct
       let%bind kind =
         let%bind order_type = Fluxum.Normalize_common.Order_type.of_string status.type_ in
         match order_type with
-        | Types.Order_kind.Limit _ ->
+        | Types.Order_kind.Basic (Limit _) ->
           let%map price = Fluxum.Normalize_common.Float_conv.price_of_string status.price in
-          Types.Order_kind.Limit price
-        | Types.Order_kind.Post_only_limit _ ->
+          Types.Order_kind.limit price
+        | Types.Order_kind.Basic (Post_only _) ->
           let%map price = Fluxum.Normalize_common.Float_conv.price_of_string status.price in
-          Types.Order_kind.Post_only_limit price
-        | Types.Order_kind.Market -> Ok Types.Order_kind.Market
+          Types.Order_kind.post_only price
+        | Types.Order_kind.Basic Market -> Ok Types.Order_kind.market
+        | _ -> Error (sprintf "Unsupported order kind: %s" status.type_)
       in
       let%bind order_status = Fluxum.Normalize_common.Order_status.of_string status.status in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string status.origQty in
@@ -308,6 +311,7 @@ module Adapter = struct
         ; symbol = status.symbol
         ; side
         ; kind
+        ; time_in_force = Types.Time_in_force.GTC
         ; qty
         ; filled
         ; status = order_status
@@ -485,11 +489,14 @@ let make_order_request
   in
   let order_type, price =
     match kind with
-    | Types.Order_kind.Market -> (`MARKET : Common.Order_type.t), None
-    | Types.Order_kind.Limit p ->
+    | Types.Order_kind.Basic Market -> (`MARKET : Common.Order_type.t), None
+    | Types.Order_kind.Basic (Limit p) ->
       (`LIMIT : Common.Order_type.t), Some (Float.to_string p)
-    | Types.Order_kind.Post_only_limit p ->
+    | Types.Order_kind.Basic (Post_only p) ->
       (`LIMIT_MAKER : Common.Order_type.t), Some (Float.to_string p)
+    | Types.Order_kind.Conditional _ ->
+      (* MEXC doesn't support conditional orders via this endpoint *)
+      (`MARKET : Common.Order_type.t), None
   in
   V1.New_order.
     { symbol
@@ -501,6 +508,6 @@ let make_order_request
     ; newClientOrderId = None
     ; timeInForce =
         (match kind with
-        | Types.Order_kind.Market -> None
+        | Types.Order_kind.Basic Market -> None
         | _ -> Some (`GTC : Common.Time_in_force.t))
     }

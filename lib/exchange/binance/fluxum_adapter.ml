@@ -294,9 +294,9 @@ module Adapter = struct
       let%bind status = Fluxum.Normalize_common.Order_status.of_string resp.status in
       let%bind kind =
         match%bind Fluxum.Normalize_common.Order_type.of_string resp.type_ with
-        | Types.Order_kind.Limit _ ->
+        | Types.Order_kind.Basic (Limit _) ->
           let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string resp.price in
-          Ok (Types.Order_kind.Limit price)
+          Ok (Types.Order_kind.limit price)
         | other -> Ok other
       in
       Ok ({ venue = Venue.t
@@ -304,6 +304,7 @@ module Adapter = struct
       ; symbol = resp.symbol
       ; side
       ; kind
+      ; time_in_force = Types.Time_in_force.GTC
       ; qty
       ; filled
       ; status
@@ -328,9 +329,9 @@ module Adapter = struct
       let%bind order_status = Fluxum.Normalize_common.Order_status.of_string status.status in
       let%bind kind =
         match%bind Fluxum.Normalize_common.Order_type.of_string status.type_ with
-        | Types.Order_kind.Limit _ ->
+        | Types.Order_kind.Basic (Limit _) ->
           let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string status.price in
-          Ok (Types.Order_kind.Limit price)
+          Ok (Types.Order_kind.limit price)
         | other -> Ok other
       in
       Ok ({ venue = Venue.t
@@ -338,6 +339,7 @@ module Adapter = struct
       ; symbol = status.symbol
       ; side
       ; kind
+      ; time_in_force = Types.Time_in_force.GTC
       ; qty
       ; filled
       ; status = order_status
@@ -538,11 +540,14 @@ let make_order_request
   in
   let order_type, price =
     match kind with
-    | Types.Order_kind.Market -> (`MARKET : Common.Order_type.t), None
-    | Types.Order_kind.Limit p ->
+    | Types.Order_kind.Basic Market -> (`MARKET : Common.Order_type.t), None
+    | Types.Order_kind.Basic (Limit p) ->
       (`LIMIT : Common.Order_type.t), Some (Float.to_string p)
-    | Types.Order_kind.Post_only_limit p ->
+    | Types.Order_kind.Basic (Post_only p) ->
       (`LIMIT_MAKER : Common.Order_type.t), Some (Float.to_string p)
+    | Types.Order_kind.Conditional _ ->
+      (* Conditional orders not yet supported in Binance adapter *)
+      (`MARKET : Common.Order_type.t), None
   in
   V3.New_order.T.
     { symbol
@@ -554,7 +559,7 @@ let make_order_request
     ; newClientOrderId = None
     ; timeInForce =
         (match kind with
-        | Types.Order_kind.Market -> None
+        | Types.Order_kind.Basic Market -> None
         | _ -> Some (`GTC : Common.Time_in_force.t))
     ; stopPrice = None
     ; icebergQty = None

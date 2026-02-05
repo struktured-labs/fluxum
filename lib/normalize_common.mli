@@ -191,9 +191,9 @@ module Order_type : sig
       Example:
       {[
         match Order_type.of_string "LIMIT" with
-        | Ok (Types.Order_kind.Limit _) ->
+        | Ok (Types.Order_kind.Basic (Limit _)) ->
           (* Replace placeholder with actual price *)
-          Types.Order_kind.Limit (Float.of_string order.price)
+          Types.Order_kind.limit (Float.of_string order.price)
         | Ok other -> other
         | Error msg -> failwith msg
       ]}

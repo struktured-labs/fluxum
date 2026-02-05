@@ -136,17 +136,59 @@ module Side : sig
   end
 end
 
-module Order_kind : sig
-  (** Order type with associated price for limit orders *)
+module Time_in_force : sig
+  (** Order duration/execution policy *)
   type t =
-    | Market                        (** Execute immediately at market price *)
-    | Limit of Price.t              (** Limit order at specified price *)
-    | Post_only_limit of Price.t    (** Maker-only limit order (no taker) *)
+    | GTC           (** Good till canceled (default) *)
+    | IOC           (** Immediate or cancel - fill available, cancel rest *)
+    | FOK           (** Fill or kill - complete fill or cancel *)
+    | GTD of Time_float_unix.t  (** Good till date *)
   [@@deriving sexp, compare]
 
-  (** Note: Stop orders and other advanced types are exchange-specific.
-      Use native APIs for complex order types not represented here.
-  *)
+  val to_string : t -> string
+  val of_string_opt : string -> t option
+end
+
+module Order_kind : sig
+  (** Basic order types without trigger conditions *)
+  type basic =
+    | Market
+    | Limit of Price.t
+    | Post_only of Price.t  (** Maker-only limit order *)
+  [@@deriving sexp, compare]
+
+  (** Conditional/stop order types with trigger prices *)
+  type conditional =
+    | Stop_market of Price.t         (** Market order triggered at stop price *)
+    | Stop_limit of { stop : Price.t; limit : Price.t }
+    | Take_profit_market of Price.t
+    | Take_profit_limit of { trigger : Price.t; limit : Price.t }
+    | Trailing_stop of { callback_rate : float }  (** Trailing stop by % *)
+  [@@deriving sexp, compare]
+
+  type t =
+    | Basic of basic
+    | Conditional of conditional
+  [@@deriving sexp, compare]
+
+  (** Convenience constructors *)
+  val market : t
+  val limit : Price.t -> t
+  val post_only : Price.t -> t
+  val stop_market : Price.t -> t
+  val stop_limit : stop:Price.t -> limit:Price.t -> t
+  val take_profit_market : Price.t -> t
+  val take_profit_limit : trigger:Price.t -> limit:Price.t -> t
+  val trailing_stop : callback_rate:float -> t
+
+  (** Extract limit price if present *)
+  val limit_price : t -> Price.t option
+
+  (** Extract trigger/stop price if present *)
+  val trigger_price : t -> Price.t option
+
+  (** Check if this is a conditional/stop order *)
+  val is_conditional : t -> bool
 end
 
 module Order_status : sig
@@ -171,16 +213,17 @@ module Order : sig
   (** Exchange-specific order ID (typically int64 or UUID as string) *)
 
   type t =
-    { venue      : Venue.t
-    ; id         : id
-    ; symbol     : Symbol.t
-    ; side       : Side.t
-    ; kind       : Order_kind.t
-    ; qty        : Qty.t                          (** Original order quantity *)
-    ; filled     : Qty.t                          (** Quantity filled so far *)
-    ; status     : Order_status.t
-    ; created_at : Time_float_unix.t option       (** Order creation time *)
-    ; updated_at : Time_float_unix.t option       (** Last update time *)
+    { venue         : Venue.t
+    ; id            : id
+    ; symbol        : Symbol.t
+    ; side          : Side.t
+    ; kind          : Order_kind.t
+    ; time_in_force : Time_in_force.t             (** Order duration policy *)
+    ; qty           : Qty.t                       (** Original order quantity *)
+    ; filled        : Qty.t                       (** Quantity filled so far *)
+    ; status        : Order_status.t
+    ; created_at    : Time_float_unix.t option    (** Order creation time *)
+    ; updated_at    : Time_float_unix.t option    (** Last update time *)
     }
   [@@deriving sexp, fields]
 end

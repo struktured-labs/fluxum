@@ -125,9 +125,14 @@ let print_order (order : Fluxum.Types.Order.t) =
     order.symbol
     (Fluxum.Types.Side.to_string order.side)
     (match order.kind with
-     | Fluxum.Types.Order_kind.Market -> "MARKET"
-     | Fluxum.Types.Order_kind.Limit p -> sprintf "LIMIT %.2f" p
-     | Fluxum.Types.Order_kind.Post_only_limit p -> sprintf "POST_ONLY %.2f" p)
+     | Fluxum.Types.Order_kind.Basic Market -> "MARKET"
+     | Fluxum.Types.Order_kind.Basic (Limit p) -> sprintf "LIMIT %.2f" p
+     | Fluxum.Types.Order_kind.Basic (Post_only p) -> sprintf "POST_ONLY %.2f" p
+     | Fluxum.Types.Order_kind.Conditional (Stop_market p) -> sprintf "STOP %.2f" p
+     | Fluxum.Types.Order_kind.Conditional (Stop_limit { stop; limit }) -> sprintf "STOP_LIMIT %.2f/%.2f" stop limit
+     | Fluxum.Types.Order_kind.Conditional (Take_profit_market p) -> sprintf "TP %.2f" p
+     | Fluxum.Types.Order_kind.Conditional (Take_profit_limit { trigger; limit }) -> sprintf "TP_LIMIT %.2f/%.2f" trigger limit
+     | Fluxum.Types.Order_kind.Conditional (Trailing_stop { callback_rate }) -> sprintf "TRAIL %.1f%%" (callback_rate *. 100.))
     (Float.to_string order.qty)
     (Float.to_string order.filled)
     (Float.to_string order.qty)

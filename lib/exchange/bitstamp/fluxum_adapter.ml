@@ -263,7 +263,8 @@ module Adapter = struct
           ; id = o.id
           ; symbol = o.currency_pair
           ; side
-          ; kind = Types.Order_kind.Limit price
+          ; kind = Types.Order_kind.limit price
+          ; time_in_force = Types.Time_in_force.GTC
           ; qty
           ; filled = 0.0
           ; status = Types.Order_status.New

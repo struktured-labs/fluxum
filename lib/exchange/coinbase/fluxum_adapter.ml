@@ -167,7 +167,8 @@ module Adapter = struct
           ; id = order_id
           ; symbol = (match resp.success_response with Some sr -> Option.value sr.product_id ~default:"" | None -> "")
           ; side = Types.Side.Buy  (* Will be populated from request context *)
-          ; kind = Types.Order_kind.Market
+          ; kind = Types.Order_kind.market
+          ; time_in_force = Types.Time_in_force.GTC
           ; qty = 0.0
           ; filled = 0.0
           ; status = Types.Order_status.New
@@ -207,7 +208,8 @@ module Adapter = struct
         ; id = status.order_id
         ; symbol = status.product_id
         ; side
-        ; kind = Types.Order_kind.Market  (* Would need order_type parsing for limit *)
+        ; kind = Types.Order_kind.market  (* Would need order_type parsing for limit *)
+        ; time_in_force = Types.Time_in_force.GTC
         ; qty
         ; filled
         ; status = order_status_val

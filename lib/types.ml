@@ -102,12 +102,78 @@ module Side = struct
   end
 end
 
-module Order_kind = struct
+module Time_in_force = struct
   type t =
+    | GTC           (** Good till canceled (default) *)
+    | IOC           (** Immediate or cancel - fill what's available, cancel rest *)
+    | FOK           (** Fill or kill - fill entire order or cancel completely *)
+    | GTD of Time_float_unix.t  (** Good till date - cancel after specified time *)
+  [@@deriving sexp, compare]
+
+  let to_string = function
+    | GTC -> "GTC"
+    | IOC -> "IOC"
+    | FOK -> "FOK"
+    | GTD _ -> "GTD"
+
+  let of_string_opt = function
+    | "GTC" | "gtc" -> Some GTC
+    | "IOC" | "ioc" -> Some IOC
+    | "FOK" | "fok" -> Some FOK
+    | _ -> None
+end
+
+module Order_kind = struct
+  (** Basic order type without trigger conditions *)
+  type basic =
     | Market
     | Limit of Price.t
-    | Post_only_limit of Price.t
+    | Post_only of Price.t  (** Maker-only limit order *)
   [@@deriving sexp, compare]
+
+  (** Conditional/stop order types with trigger prices *)
+  type conditional =
+    | Stop_market of Price.t         (** Trigger market order at stop price *)
+    | Stop_limit of { stop : Price.t; limit : Price.t }  (** Trigger limit at stop *)
+    | Take_profit_market of Price.t  (** Take profit market order *)
+    | Take_profit_limit of { trigger : Price.t; limit : Price.t }
+    | Trailing_stop of { callback_rate : float }  (** Trailing stop by percentage *)
+  [@@deriving sexp, compare]
+
+  type t =
+    | Basic of basic
+    | Conditional of conditional
+  [@@deriving sexp, compare]
+
+  (** Convenience constructors *)
+  let market = Basic Market
+  let limit price = Basic (Limit price)
+  let post_only price = Basic (Post_only price)
+  let stop_market stop = Conditional (Stop_market stop)
+  let stop_limit ~stop ~limit = Conditional (Stop_limit { stop; limit })
+  let take_profit_market trigger = Conditional (Take_profit_market trigger)
+  let take_profit_limit ~trigger ~limit = Conditional (Take_profit_limit { trigger; limit })
+  let trailing_stop ~callback_rate = Conditional (Trailing_stop { callback_rate })
+
+  (** For backward compatibility - extract limit price if present *)
+  let limit_price = function
+    | Basic (Limit p) | Basic (Post_only p) -> Some p
+    | Conditional (Stop_limit { limit; _ }) -> Some limit
+    | Conditional (Take_profit_limit { limit; _ }) -> Some limit
+    | _ -> None
+
+  (** Extract trigger/stop price if present *)
+  let trigger_price = function
+    | Conditional (Stop_market p) -> Some p
+    | Conditional (Stop_limit { stop; _ }) -> Some stop
+    | Conditional (Take_profit_market p) -> Some p
+    | Conditional (Take_profit_limit { trigger; _ }) -> Some trigger
+    | _ -> None
+
+  (** Check if this is a conditional/stop order *)
+  let is_conditional = function
+    | Conditional _ -> true
+    | Basic _ -> false
 end
 
 module Order_status = struct
@@ -124,16 +190,17 @@ module Order = struct
   type id = string [@@deriving sexp, compare, equal]
 
   type t =
-    { venue      : Venue.t
-    ; id         : id
-    ; symbol     : Symbol.t
-    ; side       : Side.t
-    ; kind       : Order_kind.t
-    ; qty        : Qty.t
-    ; filled     : Qty.t
-    ; status     : Order_status.t
-    ; created_at : Time_float_unix.t option
-    ; updated_at : Time_float_unix.t option
+    { venue         : Venue.t
+    ; id            : id
+    ; symbol        : Symbol.t
+    ; side          : Side.t
+    ; kind          : Order_kind.t
+    ; time_in_force : Time_in_force.t  (** Order duration policy *)
+    ; qty           : Qty.t
+    ; filled        : Qty.t
+    ; status        : Order_status.t
+    ; created_at    : Time_float_unix.t option
+    ; updated_at    : Time_float_unix.t option
     }
   [@@deriving sexp, fields]
 end

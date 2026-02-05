@@ -141,12 +141,20 @@ module Order_type = struct
   *)
   let of_string (s : string) : (Types.Order_kind.t, string) Result.t =
     match s with
-    | "market" | "Market" | "MARKET" -> Ok Types.Order_kind.Market
-    | "limit" | "Limit" | "LIMIT" -> Ok (Types.Order_kind.Limit 0.0)  (* Price filled by caller *)
+    | "market" | "Market" | "MARKET" -> Ok Types.Order_kind.market
+    | "limit" | "Limit" | "LIMIT" -> Ok (Types.Order_kind.limit 0.0)  (* Price filled by caller *)
     | "post_only" | "Post_only" | "POST_ONLY"
     | "maker_only" | "Maker_only" | "MAKER_ONLY"
     | "limit_maker" | "Limit_maker" | "LIMIT_MAKER" ->
-      Ok (Types.Order_kind.Post_only_limit 0.0)
+      Ok (Types.Order_kind.post_only 0.0)
+    | "stop" | "Stop" | "STOP" | "stop_loss" | "STOP_LOSS" ->
+      Ok (Types.Order_kind.stop_market 0.0)  (* Trigger price filled by caller *)
+    | "stop_limit" | "Stop_limit" | "STOP_LIMIT" ->
+      Ok (Types.Order_kind.stop_limit ~stop:0.0 ~limit:0.0)
+    | "take_profit" | "Take_profit" | "TAKE_PROFIT" ->
+      Ok (Types.Order_kind.take_profit_market 0.0)
+    | "take_profit_limit" | "Take_profit_limit" | "TAKE_PROFIT_LIMIT" ->
+      Ok (Types.Order_kind.take_profit_limit ~trigger:0.0 ~limit:0.0)
     | _ -> Error (sprintf "Unrecognized order type: %s" s)
 
   (** Version with default fallback (for backwards compatibility).
@@ -154,7 +162,7 @@ module Order_type = struct
       Warning: Using defaults can mask data quality issues.
       Prefer of_string which returns Result.t.
   *)
-  let of_string_exn ?(default = Types.Order_kind.Market) (s : string) : Types.Order_kind.t =
+  let of_string_exn ?(default = Types.Order_kind.market) (s : string) : Types.Order_kind.t =
     match of_string s with
     | Ok kind -> kind
     | Error _ -> default

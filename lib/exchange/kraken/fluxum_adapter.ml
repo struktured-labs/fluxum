@@ -297,9 +297,9 @@ module Adapter = struct
 
     let order_type_of_common (o : Common.Order_type.t) : Types.Order_kind.t =
       match o with
-      | `Market -> Types.Order_kind.Market
-      | `Limit -> Types.Order_kind.Limit 0.0  (* price not available in status *)
-      | _ -> Types.Order_kind.Market
+      | `Market -> Types.Order_kind.market
+      | `Limit -> Types.Order_kind.limit 0.0  (* price not available in status *)
+      | _ -> Types.Order_kind.market
 
     let order_response (r : Native.Order.response) : (Types.Order.t, string) Result.t =
       try
@@ -308,7 +308,8 @@ module Adapter = struct
         ; id = txid
         ; symbol = ""  (* Not available in response *)
         ; side = Types.Side.Buy  (* Not available in response *)
-        ; kind = Types.Order_kind.Market
+        ; kind = Types.Order_kind.market
+        ; time_in_force = Types.Time_in_force.GTC
         ; qty = 0.
         ; filled = 0.
         ; status = Types.Order_status.New
@@ -338,6 +339,7 @@ module Adapter = struct
         ; symbol = o.descr.pair
         ; side
         ; kind
+        ; time_in_force = Types.Time_in_force.GTC  (* Kraken doesn't return TIF *)
         ; qty
         ; filled
         ; status
@@ -525,12 +527,14 @@ module Builder = struct
       | Types.Side.Sell -> `Sell
     in
     let ordertype, price = match kind with
-      | Types.Order_kind.Market -> (`Market : Common.Order_type.t), None
-      | Types.Order_kind.Limit p -> (`Limit : Common.Order_type.t), Some (Float.to_string p)
-      | Types.Order_kind.Post_only_limit p -> (`Limit : Common.Order_type.t), Some (Float.to_string p)
+      | Types.Order_kind.Basic Market -> (`Market : Common.Order_type.t), None
+      | Types.Order_kind.Basic (Limit p) -> (`Limit : Common.Order_type.t), Some (Float.to_string p)
+      | Types.Order_kind.Basic (Post_only p) -> (`Limit : Common.Order_type.t), Some (Float.to_string p)
+      | Types.Order_kind.Conditional (Stop_limit { limit = p; _ }) -> (`Limit : Common.Order_type.t), Some (Float.to_string p)
+      | Types.Order_kind.Conditional _ -> (`Market : Common.Order_type.t), None
     in
     let oflags = match kind with
-      | Types.Order_kind.Post_only_limit _ -> Some "post"
+      | Types.Order_kind.Basic (Post_only _) -> Some "post"
       | _ -> None
     in
     V1.Add_order.T.

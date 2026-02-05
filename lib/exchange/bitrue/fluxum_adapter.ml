@@ -188,9 +188,10 @@ module Adapter = struct
       let%bind status = Order_status.of_string resp.status in
       let%bind kind =
         match%bind Order_type.of_string resp.type_ with
-        | Types.Order_kind.Limit _ -> Ok (Types.Order_kind.Limit price)
-        | Types.Order_kind.Post_only_limit _ -> Ok (Types.Order_kind.Post_only_limit price)
-        | Types.Order_kind.Market -> Ok Types.Order_kind.Market
+        | Types.Order_kind.Basic (Limit _) -> Ok (Types.Order_kind.limit price)
+        | Types.Order_kind.Basic (Post_only _) -> Ok (Types.Order_kind.post_only price)
+        | Types.Order_kind.Basic Market -> Ok Types.Order_kind.market
+        | Types.Order_kind.Conditional _ -> Ok (Types.Order_kind.limit price)
       in
       let created_at = Some (Time_float_unix.of_span_since_epoch
         (Time_float_unix.Span.of_ms (Int64.to_float resp.transactTime))) in
@@ -199,6 +200,7 @@ module Adapter = struct
           ; symbol = resp.symbol
           ; side
           ; kind
+          ; time_in_force = Types.Time_in_force.GTC
           ; qty
           ; filled
           ; status
@@ -218,9 +220,10 @@ module Adapter = struct
       let%bind status = Order_status.of_string status_resp.status in
       let%bind kind =
         match%bind Order_type.of_string status_resp.type_ with
-        | Types.Order_kind.Limit _ -> Ok (Types.Order_kind.Limit price)
-        | Types.Order_kind.Post_only_limit _ -> Ok (Types.Order_kind.Post_only_limit price)
-        | Types.Order_kind.Market -> Ok Types.Order_kind.Market
+        | Types.Order_kind.Basic (Limit _) -> Ok (Types.Order_kind.limit price)
+        | Types.Order_kind.Basic (Post_only _) -> Ok (Types.Order_kind.post_only price)
+        | Types.Order_kind.Basic Market -> Ok Types.Order_kind.market
+        | Types.Order_kind.Conditional _ -> Ok (Types.Order_kind.limit price)
       in
       let created_at = Some (Time_float_unix.of_span_since_epoch
         (Time_float_unix.Span.of_ms (Int64.to_float status_resp.time))) in
@@ -231,6 +234,7 @@ module Adapter = struct
           ; symbol = status_resp.symbol
           ; side
           ; kind
+          ; time_in_force = Types.Time_in_force.GTC
           ; qty
           ; filled
           ; status
