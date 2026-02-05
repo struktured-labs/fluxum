@@ -90,6 +90,10 @@ module Adapter = struct
       type t = V5.Recent_trades.trade
     end
 
+    module Candle = struct
+      type t = unit  (* OKX candles - TODO: implement with V5.Candles *)
+    end
+
     module Symbol_info = struct
       type t = V5.Instruments.instrument
     end
@@ -194,6 +198,10 @@ module Adapter = struct
     match result with
     | `Ok resp -> return (Ok resp.data)
     | #Rest.Error.t as e -> return (Error e)
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    (* TODO: Implement using OKX candles endpoint *)
+    Deferred.return (Error (`Bad_request "OKX candles not yet implemented"))
 
   let get_symbols t =
     let req : V5.Instruments.request =
@@ -397,6 +405,9 @@ module Adapter = struct
         ~min_order_size:min_size
         ~tick_size
         ())
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "OKX candle normalization not yet implemented"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

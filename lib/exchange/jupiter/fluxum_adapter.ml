@@ -103,6 +103,10 @@ module Adapter = struct
       type t = unit  (* Trades are on-chain *)
     end
 
+    module Candle = struct
+      type t = unit  (* Jupiter doesn't provide candles *)
+    end
+
     module Symbol_info = struct
       type t = Rest.Types.token_info
     end
@@ -136,6 +140,9 @@ module Adapter = struct
 
   let cancel_all_orders (_ : t) ?symbol:_ () =
     Deferred.return (Error (`Api_error "Jupiter trades are atomic swaps"))
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    Deferred.return (Error (`Api_error "Jupiter doesn't provide historical candle data"))
 
   (* Public market data *)
   let get_symbols (_ : t) () =
@@ -280,6 +287,9 @@ module Adapter = struct
       ; trade_id = None
       ; ts = None
       }
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "Jupiter doesn't provide candle data"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

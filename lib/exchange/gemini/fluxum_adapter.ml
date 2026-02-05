@@ -88,6 +88,10 @@ module Adapter = struct
       type t = Yojson.Safe.t  (* Raw JSON from /v1/trades/{symbol} *)
     end
 
+    module Candle = struct
+      type t = unit  (* Gemini does not have public REST candle/klines endpoint *)
+    end
+
     module Symbol_info = struct
       type t = V1.Symbol_details.T.response
     end
@@ -203,6 +207,10 @@ module Adapter = struct
         match json with
         | `List trades -> Ok trades
         | _ -> Error (`Json_parse "Expected array of trades")
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    (* Gemini does not have a public REST candle/OHLCV endpoint *)
+    Deferred.return (Error (`Bad_request "Gemini does not support REST candle/klines endpoint"))
 
   let cancel_all_orders (t : t) ?symbol:_ () =
     let (module Cfg) = t.cfg in
@@ -562,6 +570,9 @@ module Adapter = struct
         Error (sprintf "Public trade conversion failed: %s" msg)
       | exn ->
         Error (sprintf "Public trade unexpected error: %s" (Exn.to_string exn))
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "Gemini does not support candle/klines data"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

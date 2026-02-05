@@ -98,6 +98,22 @@ module Adapter = struct
       type t = V1.Recent_trades.trade
     end
 
+    module Candle = struct
+      (** Kraken OHLC candle with context for normalization *)
+      type t =
+        { symbol : string
+        ; timeframe : Types.Timeframe.t
+        ; time : float
+        ; open_ : string
+        ; high : string
+        ; low : string
+        ; close : string
+        ; vwap : string
+        ; volume : string
+        ; count : int
+        }
+    end
+
     module Symbol_info = struct
       type t = string * V1.Asset_pairs.Pair_info.t  (* pair name, info *)
     end
@@ -201,6 +217,61 @@ module Adapter = struct
     >>| function
     | `Ok { count } -> Ok count
     | (#Rest.Error.post as e) -> Error e
+
+  let get_candles (_ : t) ~symbol ~(timeframe : Types.Timeframe.t) ?since ?until:_ ?limit:_ () =
+    (* Kraken OHLC endpoint: GET /0/public/OHLC *)
+    let interval = match timeframe with
+      | Types.Timeframe.M1  -> 1
+      | Types.Timeframe.M5  -> 5
+      | Types.Timeframe.M15 -> 15
+      | Types.Timeframe.M30 -> 30
+      | Types.Timeframe.H1  -> 60
+      | Types.Timeframe.H4  -> 240
+      | Types.Timeframe.D1  -> 1440
+      | Types.Timeframe.W1  -> 10080
+      | _ -> 60  (* Default to 1h for unsupported intervals *)
+    in
+    let params = [("pair", [symbol]); ("interval", [Int.to_string interval])] in
+    let params = match since with
+      | Some t ->
+        let secs = Time_float_unix.to_span_since_epoch t |> Time_float_unix.Span.to_sec |> Int.of_float in
+        ("since", [Int.to_string secs]) :: params
+      | None -> params
+    in
+    let uri = Uri.of_string "https://api.kraken.com/0/public/OHLC" in
+    let uri = Uri.with_query uri params in
+    Monitor.try_with (fun () ->
+      Cohttp_async.Client.get uri >>= fun (_, body) ->
+      Cohttp_async.Body.to_string body
+    ) >>| function
+    | Error _ -> Error (`Bad_request "Network error fetching OHLC")
+    | Ok body ->
+      match Yojson.Safe.from_string body with
+      | exception _ -> Error (`Bad_request "Failed to parse OHLC response")
+      | json ->
+        let open Yojson.Safe.Util in
+        let error = json |> member "error" |> to_list in
+        match error with
+        | [] ->
+          let result = json |> member "result" in
+          let pairs = result |> to_assoc |> List.filter ~f:(fun (k, _) -> not (String.equal k "last")) in
+          (match List.hd pairs with
+           | Some (_, ohlc_data) ->
+             let parse_ohlc ohlc =
+               match ohlc with
+               | `List [`Int time; `String open_; `String high; `String low; `String close;
+                        `String vwap; `String volume; `Int count] ->
+                 Some { Native.Candle.symbol; timeframe; time = Float.of_int time;
+                        open_; high; low; close; vwap; volume; count }
+               | `List [`Float time; `String open_; `String high; `String low; `String close;
+                        `String vwap; `String volume; `Int count] ->
+                 Some { Native.Candle.symbol; timeframe; time;
+                        open_; high; low; close; vwap; volume; count }
+               | _ -> None
+             in
+             Ok (ohlc_data |> to_list |> List.filter_map ~f:parse_ohlc)
+           | None -> Ok [])
+        | _ -> Error (`Bad_request "Kraken API error")
 
   module Streams = struct
     (** Private trade stream requires authenticated WebSocket connection.
@@ -501,6 +572,28 @@ module Adapter = struct
       ; trade_id = Some (Int.to_string tr.trade_id)
       ; ts = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec tr.time))
       } : Types.Public_trade.t)
+
+    let candle (c : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind open_ = Fluxum.Normalize_common.Float_conv.price_of_string c.open_ in
+      let%bind high = Fluxum.Normalize_common.Float_conv.price_of_string c.high in
+      let%bind low = Fluxum.Normalize_common.Float_conv.price_of_string c.low in
+      let%bind close = Fluxum.Normalize_common.Float_conv.price_of_string c.close in
+      let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string c.volume in
+      let open_time = Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec c.time) in
+      Ok ({ venue = Venue.t
+      ; symbol = c.symbol
+      ; timeframe = c.timeframe
+      ; open_time
+      ; open_
+      ; high
+      ; low
+      ; close
+      ; volume
+      ; quote_volume = None  (* Kraken provides VWAP instead *)
+      ; trades = Some c.count
+      ; closed = true
+      } : Types.Candle.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

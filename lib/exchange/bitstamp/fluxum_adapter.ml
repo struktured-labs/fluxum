@@ -49,6 +49,10 @@ module Adapter = struct
       type t = Native_types.trade
     end
 
+    module Candle = struct
+      type t = unit  (* Bitstamp OHLC - TODO: implement *)
+    end
+
     module Symbol_info = struct
       type t = Native_types.trading_pair_info
     end
@@ -127,6 +131,10 @@ module Adapter = struct
     Rest.cancel_all_orders ~cfg:t.cfg >>| function
     | Ok _ -> Ok 0
     | Error e -> Error e
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    (* TODO: Implement using Bitstamp OHLC endpoint *)
+    Deferred.return (Error (`Api_error "Bitstamp candles not yet implemented"))
 
   module Streams = struct
     let trades (_ : t) =
@@ -271,6 +279,9 @@ module Adapter = struct
           ; created_at = None
           ; updated_at = None
           } : Types.Order.t)
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "Bitstamp candle normalization not yet implemented"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

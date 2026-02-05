@@ -61,6 +61,10 @@ module Adapter = struct
       type t = Rest.Types.trade
     end
 
+    module Candle = struct
+      type t = unit  (* dYdX candles - TODO: implement *)
+    end
+
     module Symbol_info = struct
       type t = string * Rest.Types.perpetual_market  (* ticker, market info *)
     end
@@ -94,6 +98,9 @@ module Adapter = struct
 
   let cancel_all_orders (_ : t) ?symbol:_ () =
     Deferred.return (Error (`Api_error "Trading requires wallet signing - use dYdX TypeScript/Python SDK"))
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    Deferred.return (Error (`Api_error "dYdX candles not yet implemented"))
 
   (* Public market data operations - fully supported *)
   let get_symbols (t : t) () =
@@ -314,6 +321,9 @@ module Adapter = struct
       ; trade_id = Some tr.id
       ; ts
       } : Types.Public_trade.t)
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "dYdX candle normalization not yet implemented"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

@@ -101,6 +101,10 @@ module Adapter = struct
       type t = V5.Recent_trade.trade
     end
 
+    module Candle = struct
+      type t = unit  (* Bybit klines - TODO: implement with V5.Kline *)
+    end
+
     module Symbol_info = struct
       type t = V5.Instruments_info.instrument
     end
@@ -245,6 +249,10 @@ module Adapter = struct
       Deferred.all cancel_requests >>| fun results ->
       let successful = List.count results ~f:Result.is_ok in
       Ok successful
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    (* TODO: Implement using V5.Kline endpoint *)
+    Deferred.return (Error (`Api_error Rest.Error.{ retCode = -1; retMsg = "Bybit candles not yet implemented" }))
 
   module Streams = struct
     let trades (_ : t) =
@@ -442,6 +450,9 @@ module Adapter = struct
       ; ts = Some (Time_float_unix.of_span_since_epoch
           (Time_float_unix.Span.of_sec (Int64.to_float (Int64.of_string trade.time) /. 1000.)))
       } : Types.Public_trade.t)
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "Bybit candle normalization not yet implemented"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

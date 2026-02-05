@@ -131,6 +131,10 @@ module Adapter = struct
       type t = Rest.Types.trade
     end
 
+    module Candle = struct
+      type t = unit  (* Hyperliquid candles - TODO: implement *)
+    end
+
     module Symbol_info = struct
       type t = Rest.Types.universe_item
     end
@@ -202,6 +206,9 @@ module Adapter = struct
   let cancel_all_orders (_ : t) ?symbol:_ () =
     Deferred.return (Error (`Api_error
       "Hyperliquid cancel_all not implemented - requires blockchain transaction"))
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    Deferred.return (Error (`Api_error "Hyperliquid candles not yet implemented"))
 
   (* ============================================================ *)
   (* Account/Position Queries *)
@@ -561,6 +568,9 @@ module Adapter = struct
       ; trade_id = Some (Int64.to_string t.tid)
       ; ts = Some (time_of_ms t.time)
       } : Types.Public_trade.t)
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "Hyperliquid candle normalization not yet implemented"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

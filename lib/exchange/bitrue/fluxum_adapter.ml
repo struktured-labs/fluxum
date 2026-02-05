@@ -93,6 +93,10 @@ module Adapter = struct
       type t = Rest.Types.trade
     end
 
+    module Candle = struct
+      type t = unit  (* Bitrue klines - TODO: implement *)
+    end
+
     module Symbol_info = struct
       type t = Rest.Types.symbol_info
     end
@@ -165,6 +169,9 @@ module Adapter = struct
   let cancel_all_orders _t ?symbol:_ () =
     (* Bitrue API doesn't have a cancel-all endpoint *)
     Deferred.return (Error (`Api_error "Bitrue: cancel all orders not supported by API"))
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    Deferred.return (Error (`Api_error "Bitrue candles not yet implemented"))
 
   module Streams = struct
     let trades (_ : t) =
@@ -381,6 +388,9 @@ module Adapter = struct
           ; trade_id = Some (Int64.to_string t.id)
           ; ts
           } : Types.Public_trade.t)
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "Bitrue candle normalization not yet implemented"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

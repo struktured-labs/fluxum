@@ -42,6 +42,10 @@ module type S = sig
       type t  (** Public market trade *)
     end
 
+    module Candle : sig
+      type t  (** OHLCV candle data *)
+    end
+
     module Error : sig
       type t
     end
@@ -119,6 +123,17 @@ module type S = sig
     -> unit
     -> (Native.Public_trade.t list, Native.Error.t) Deferred.Result.t
 
+  (** Get historical OHLCV candles for a symbol *)
+  val get_candles
+    :  t
+    -> symbol:Symbol.t
+    -> timeframe:Timeframe.t
+    -> ?since:Time_float_unix.t   (** Start time (oldest candle) *)
+    -> ?until:Time_float_unix.t   (** End time (newest candle) *)
+    -> ?limit:int                 (** Max candles to return *)
+    -> unit
+    -> (Native.Candle.t list, Native.Error.t) Deferred.Result.t
+
   (** Cancel all open orders, optionally filtered by symbol. Returns count of canceled orders. *)
   val cancel_all_orders
     :  t
@@ -142,6 +157,7 @@ module type S = sig
     val ticker           : Native.Ticker.t       -> (Ticker.t, string) Result.t
     val order_book       : Native.Book.snapshot  -> (Order_book.t, string) Result.t
     val public_trade     : Native.Public_trade.t -> (Public_trade.t, string) Result.t
+    val candle           : Native.Candle.t       -> (Candle.t, string) Result.t
     val error            : Native.Error.t        -> Error.t
   end
 end

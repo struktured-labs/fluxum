@@ -65,6 +65,10 @@ module Adapter = struct
       type t = Rest.Types.trade
     end
 
+    module Candle = struct
+      type t = unit  (* Coinbase candles - TODO: implement *)
+    end
+
     module Symbol_info = struct
       type t = Rest.Types.product
     end
@@ -132,6 +136,9 @@ module Adapter = struct
   let get_recent_trades _t ~symbol:_ ?limit:_ () =
     (* Coinbase doesn't have a direct recent trades endpoint in Advanced Trade API *)
     Deferred.return (Error (`Api_error "Recent trades not available"))
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    Deferred.return (Error (`Api_error "Coinbase candles not yet implemented"))
 
   let cancel_all_orders t ?symbol () =
     match%bind get_open_orders t ?symbol () with
@@ -348,6 +355,9 @@ module Adapter = struct
          ; trade_id = Some t.trade_id
          ; ts = None
          } : Types.Public_trade.t)
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "Coinbase candle normalization not yet implemented"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

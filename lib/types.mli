@@ -436,6 +436,103 @@ module Public_trade : sig
     unit -> t
 end
 
+(** {1 Historical Market Data} *)
+
+module Timeframe : sig
+  (** Candle timeframe (interval) for OHLCV data *)
+  type t =
+    | M1    (** 1 minute *)
+    | M3    (** 3 minutes *)
+    | M5    (** 5 minutes *)
+    | M15   (** 15 minutes *)
+    | M30   (** 30 minutes *)
+    | H1    (** 1 hour *)
+    | H2    (** 2 hours *)
+    | H4    (** 4 hours *)
+    | H6    (** 6 hours *)
+    | H8    (** 8 hours *)
+    | H12   (** 12 hours *)
+    | D1    (** 1 day *)
+    | D3    (** 3 days *)
+    | W1    (** 1 week *)
+    | MO1   (** 1 month *)
+  [@@deriving sexp, compare, equal]
+
+  val to_string : t -> string
+  (** Convert to common string format: "1m", "5m", "1h", "1d", etc. *)
+
+  val of_string : string -> t
+  (** Parse timeframe string. Raises on invalid input. *)
+
+  val of_string_opt : string -> t option
+  (** Parse timeframe string safely *)
+
+  val to_seconds : t -> int
+  (** Convert timeframe to duration in seconds *)
+end
+
+module Candle : sig
+  (** OHLCV (Open-High-Low-Close-Volume) candle data
+
+      Historical price data aggregated over a timeframe.
+      Used for backtesting, technical analysis, and charting.
+  *)
+  type t =
+    { venue        : Venue.t
+    ; symbol       : Symbol.t
+    ; timeframe    : Timeframe.t
+    ; open_time    : Time_float_unix.t  (** Candle open timestamp *)
+    ; open_        : Price.t
+    ; high         : Price.t
+    ; low          : Price.t
+    ; close        : Price.t
+    ; volume       : Qty.t              (** Base asset volume *)
+    ; quote_volume : Qty.t option       (** Quote asset volume (if available) *)
+    ; trades       : int option         (** Number of trades in candle *)
+    ; closed       : bool               (** Whether candle is finalized *)
+    }
+  [@@deriving sexp, fields]
+
+  val create :
+    venue:Venue.t ->
+    symbol:Symbol.t ->
+    timeframe:Timeframe.t ->
+    open_time:Time_float_unix.t ->
+    open_:Price.t ->
+    high:Price.t ->
+    low:Price.t ->
+    close:Price.t ->
+    volume:Qty.t ->
+    ?quote_volume:Qty.t ->
+    ?trades:int ->
+    ?closed:bool ->
+    unit -> t
+
+  val mid : t -> float
+  (** Mid price: (high + low) / 2 *)
+
+  val typical : t -> float
+  (** Typical price: (high + low + close) / 3 *)
+
+  val body : t -> float
+  (** Candle body size: |close - open| *)
+
+  val range : t -> float
+  (** Candle range: high - low *)
+
+  val is_bullish : t -> bool
+  (** Green candle: close > open *)
+
+  val is_bearish : t -> bool
+  (** Red candle: close < open *)
+
+  val close_time : t -> Time_float_unix.t
+  (** Calculate close time based on open_time + timeframe *)
+
+  val compare_by_time : t -> t -> int
+  (** Compare candles by open_time *)
+end
+
 (** {1 Error Handling} *)
 
 module Error : sig

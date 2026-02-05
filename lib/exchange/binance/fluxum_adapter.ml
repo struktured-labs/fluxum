@@ -105,6 +105,23 @@ module Adapter = struct
       type t = V3.Recent_trades.T.trade
     end
 
+    module Candle = struct
+      (** Binance kline data with context for normalization *)
+      type t =
+        { symbol : string
+        ; timeframe : Types.Timeframe.t
+        ; open_time : int64
+        ; open_ : string
+        ; high : string
+        ; low : string
+        ; close : string
+        ; volume : string
+        ; close_time : int64
+        ; quote_volume : string
+        ; trades : int
+        }
+    end
+
     module Symbol_info = struct
       type t = V3.Exchange_info.T.symbol_info
     end
@@ -251,6 +268,70 @@ module Adapter = struct
     >>| function
     | `Ok trades -> Ok trades
     | #Rest.Error.t as e -> Error e
+
+  let get_candles (_ : t) ~symbol ~(timeframe : Types.Timeframe.t) ?since ?until ?limit () =
+    (* Binance klines endpoint: GET /api/v3/klines *)
+    let interval = match timeframe with
+      | Types.Timeframe.M1  -> "1m"
+      | Types.Timeframe.M3  -> "3m"
+      | Types.Timeframe.M5  -> "5m"
+      | Types.Timeframe.M15 -> "15m"
+      | Types.Timeframe.M30 -> "30m"
+      | Types.Timeframe.H1  -> "1h"
+      | Types.Timeframe.H2  -> "2h"
+      | Types.Timeframe.H4  -> "4h"
+      | Types.Timeframe.H6  -> "6h"
+      | Types.Timeframe.H8  -> "8h"
+      | Types.Timeframe.H12 -> "12h"
+      | Types.Timeframe.D1  -> "1d"
+      | Types.Timeframe.D3  -> "3d"
+      | Types.Timeframe.W1  -> "1w"
+      | Types.Timeframe.MO1 -> "1M"
+    in
+    let params = [("symbol", [symbol]); ("interval", [interval])] in
+    let params = match since with
+      | Some t ->
+        let ms = Time_float_unix.to_span_since_epoch t |> Time_float_unix.Span.to_ms |> Int64.of_float in
+        ("startTime", [Int64.to_string ms]) :: params
+      | None -> params
+    in
+    let params = match until with
+      | Some t ->
+        let ms = Time_float_unix.to_span_since_epoch t |> Time_float_unix.Span.to_ms |> Int64.of_float in
+        ("endTime", [Int64.to_string ms]) :: params
+      | None -> params
+    in
+    let params = match limit with
+      | Some n -> ("limit", [Int.to_string n]) :: params
+      | None -> params
+    in
+    let uri = Uri.of_string "https://api.binance.com/api/v3/klines" in
+    let uri = Uri.with_query uri params in
+    Monitor.try_with (fun () ->
+      Cohttp_async.Client.get uri >>= fun (_, body) ->
+      Cohttp_async.Body.to_string body
+    ) >>| function
+    | Error _ -> Error (`Bad_request "Network error fetching klines")
+    | Ok body ->
+      match Yojson.Safe.from_string body with
+      | exception _ -> Error (`Json_parse_error Rest.Error.{ message = "Failed to parse klines response"; body })
+      | json ->
+        match json with
+        | `List klines ->
+          let parse_kline kline =
+            match kline with
+            | `List [`Int open_time_i; `String open_; `String high; `String low; `String close;
+                     `String volume; `Int close_time_i; `String quote_volume; `Int trades; _; _; _] ->
+              Some { Native.Candle.symbol; timeframe; open_time = Int64.of_int open_time_i; open_; high; low; close;
+                     volume; close_time = Int64.of_int close_time_i; quote_volume; trades }
+            | `List [`Intlit open_time_s; `String open_; `String high; `String low; `String close;
+                     `String volume; `Intlit close_time_s; `String quote_volume; `Int trades; _; _; _] ->
+              Some { Native.Candle.symbol; timeframe; open_time = Int64.of_string open_time_s; open_; high; low; close;
+                     volume; close_time = Int64.of_string close_time_s; quote_volume; trades }
+            | _ -> None
+          in
+          Ok (List.filter_map klines ~f:parse_kline)
+        | _ -> Error (`Json_parse_error Rest.Error.{ message = "Expected array of klines"; body })
 
   let cancel_all_orders t ?symbol () =
     match symbol with
@@ -509,6 +590,30 @@ module Adapter = struct
       ; ts = Some (Time_float_unix.of_span_since_epoch
                     (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
       } : Types.Public_trade.t)
+
+    let candle (c : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind open_ = Fluxum.Normalize_common.Float_conv.price_of_string c.open_ in
+      let%bind high = Fluxum.Normalize_common.Float_conv.price_of_string c.high in
+      let%bind low = Fluxum.Normalize_common.Float_conv.price_of_string c.low in
+      let%bind close = Fluxum.Normalize_common.Float_conv.price_of_string c.close in
+      let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string c.volume in
+      let%bind quote_volume = Fluxum.Normalize_common.Float_conv.qty_of_string c.quote_volume in
+      let open_time = Time_float_unix.of_span_since_epoch
+        (Time_float_unix.Span.of_ms (Int64.to_float c.open_time)) in
+      Ok ({ venue = Venue.t
+      ; symbol = c.symbol
+      ; timeframe = c.timeframe
+      ; open_time
+      ; open_
+      ; high
+      ; low
+      ; close
+      ; volume
+      ; quote_volume = Some quote_volume
+      ; trades = Some c.trades
+      ; closed = true  (* Binance only returns closed candles in REST *)
+      } : Types.Candle.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

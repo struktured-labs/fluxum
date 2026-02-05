@@ -393,6 +393,135 @@ module Public_trade = struct
     { venue; symbol; price; qty; side; trade_id; ts }
 end
 
+(** Candle timeframe (interval) for OHLCV data *)
+module Timeframe = struct
+  type t =
+    | M1    (** 1 minute *)
+    | M3    (** 3 minutes *)
+    | M5    (** 5 minutes *)
+    | M15   (** 15 minutes *)
+    | M30   (** 30 minutes *)
+    | H1    (** 1 hour *)
+    | H2    (** 2 hours *)
+    | H4    (** 4 hours *)
+    | H6    (** 6 hours *)
+    | H8    (** 8 hours *)
+    | H12   (** 12 hours *)
+    | D1    (** 1 day *)
+    | D3    (** 3 days *)
+    | W1    (** 1 week *)
+    | MO1   (** 1 month *)
+  [@@deriving sexp, compare, equal]
+
+  let to_string = function
+    | M1  -> "1m"
+    | M3  -> "3m"
+    | M5  -> "5m"
+    | M15 -> "15m"
+    | M30 -> "30m"
+    | H1  -> "1h"
+    | H2  -> "2h"
+    | H4  -> "4h"
+    | H6  -> "6h"
+    | H8  -> "8h"
+    | H12 -> "12h"
+    | D1  -> "1d"
+    | D3  -> "3d"
+    | W1  -> "1w"
+    | MO1 -> "1M"
+
+  let of_string_opt = function
+    | "1m" | "1min" -> Some M1
+    | "3m" | "3min" -> Some M3
+    | "5m" | "5min" -> Some M5
+    | "15m" | "15min" -> Some M15
+    | "30m" | "30min" -> Some M30
+    | "1h" | "60m" | "1H" -> Some H1
+    | "2h" | "2H" -> Some H2
+    | "4h" | "4H" -> Some H4
+    | "6h" | "6H" -> Some H6
+    | "8h" | "8H" -> Some H8
+    | "12h" | "12H" -> Some H12
+    | "1d" | "1D" | "D" -> Some D1
+    | "3d" | "3D" -> Some D3
+    | "1w" | "1W" | "W" -> Some W1
+    | "1M" | "M" -> Some MO1
+    | _ -> None
+
+  let of_string s =
+    match of_string_opt s with
+    | Some t -> t
+    | None -> failwith (sprintf "Unknown timeframe: %s" s)
+
+  (** Convert timeframe to seconds for calculations *)
+  let to_seconds = function
+    | M1  -> 60
+    | M3  -> 180
+    | M5  -> 300
+    | M15 -> 900
+    | M30 -> 1800
+    | H1  -> 3600
+    | H2  -> 7200
+    | H4  -> 14400
+    | H6  -> 21600
+    | H8  -> 28800
+    | H12 -> 43200
+    | D1  -> 86400
+    | D3  -> 259200
+    | W1  -> 604800
+    | MO1 -> 2592000  (* ~30 days *)
+end
+
+(** OHLCV candle data *)
+module Candle = struct
+  type t =
+    { venue     : Venue.t
+    ; symbol    : Symbol.t
+    ; timeframe : Timeframe.t
+    ; open_time : Time_float_unix.t  (** Candle open timestamp *)
+    ; open_     : Price.t
+    ; high      : Price.t
+    ; low       : Price.t
+    ; close     : Price.t
+    ; volume    : Qty.t              (** Base asset volume *)
+    ; quote_volume : Qty.t option    (** Quote asset volume (if available) *)
+    ; trades    : int option         (** Number of trades in candle *)
+    ; closed    : bool               (** Whether candle is finalized *)
+    }
+  [@@deriving sexp, fields]
+
+  let create ~venue ~symbol ~timeframe ~open_time ~open_ ~high ~low ~close
+      ~volume ?quote_volume ?trades ?(closed = true) () =
+    { venue; symbol; timeframe; open_time; open_; high; low; close;
+      volume; quote_volume; trades; closed }
+
+  (** Get mid price: (high + low) / 2 *)
+  let mid t = (t.high +. t.low) /. 2.
+
+  (** Get typical price: (high + low + close) / 3 *)
+  let typical t = (t.high +. t.low +. t.close) /. 3.
+
+  (** Get candle body size: |close - open| *)
+  let body t = Float.abs (t.close -. t.open_)
+
+  (** Get candle range: high - low *)
+  let range t = t.high -. t.low
+
+  (** Is bullish (green) candle: close > open *)
+  let is_bullish t = Float.(t.close > t.open_)
+
+  (** Is bearish (red) candle: close < open *)
+  let is_bearish t = Float.(t.close < t.open_)
+
+  (** Calculate close time based on timeframe *)
+  let close_time t =
+    let span = Time.Span.of_int_sec (Timeframe.to_seconds t.timeframe) in
+    Time.add t.open_time span
+
+  (** Compare candles by open time *)
+  let compare_by_time a b = Time.compare a.open_time b.open_time
+end
+
 module Error = struct
   type t =
     | Transport of exn [@sexp.opaque]

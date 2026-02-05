@@ -194,6 +194,17 @@ module type S = sig
       *)
     end
 
+    module Candle : sig
+      type t
+      (** OHLCV candle (historical price data)
+
+          Returned by [get_candles].
+          Use [Normalize.candle] to convert to [Types.Candle.t].
+
+          Contains: open_time, open, high, low, close, volume, quote_volume
+      *)
+    end
+
     module Error : sig
       type t
       (** Exchange-specific error representation
@@ -417,6 +428,33 @@ module type S = sig
       - Trade flow visualization
   *)
 
+  val get_candles :
+    t ->
+    symbol:Types.Symbol.t ->
+    timeframe:Types.Timeframe.t ->
+    ?since:Time_float_unix.t ->
+    ?until:Time_float_unix.t ->
+    ?limit:int ->
+    unit ->
+    (Native.Candle.t list, Native.Error.t) Deferred.Result.t
+  (** Get historical OHLCV candles for a symbol
+
+      @param symbol Trading pair
+      @param timeframe Candle interval (1m, 5m, 1h, 1d, etc.)
+      @param since Start time (oldest candle to fetch)
+      @param until End time (newest candle to fetch)
+      @param limit Maximum candles to return (default: exchange-specific, typically 500-1000)
+      @return List of candles sorted by time ascending (oldest first)
+
+      Use for:
+      - Backtesting strategies
+      - Technical analysis
+      - Chart rendering
+
+      {b Note:} Available timeframes vary by exchange. Check exchange docs.
+      Most support: 1m, 5m, 15m, 1h, 4h, 1d.
+  *)
+
   (** {2 Batch Operations} *)
 
   val cancel_all_orders :
@@ -610,6 +648,16 @@ module type S = sig
         - Invalid price/qty
         - Missing timestamp
         - Invalid side
+    *)
+
+    val candle : Native.Candle.t -> (Types.Candle.t, string) Result.t
+    (** Normalize OHLCV candle
+
+        {b Errors:}
+        - Invalid price values (open, high, low, close)
+        - Invalid volume
+        - Missing timestamp
+        - high < low (data integrity check)
     *)
 
     val error : Native.Error.t -> Types.Error.t

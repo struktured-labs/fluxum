@@ -101,6 +101,10 @@ module Adapter = struct
       type t = V1.Recent_trades.trade
     end
 
+    module Candle = struct
+      type t = unit  (* MEXC klines - TODO: implement *)
+    end
+
     module Symbol_info = struct
       type t = V1.Exchange_info.symbol_info
     end
@@ -215,6 +219,9 @@ module Adapter = struct
     >>| function
     | `Ok trades -> Ok trades
     | #Rest.Error.t as e -> Error e
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    Deferred.return (Error (`Bad_request "MEXC candles not yet implemented"))
 
   let cancel_all_orders t ?symbol () =
     match symbol with
@@ -458,6 +465,9 @@ module Adapter = struct
         ; ts = Some (Time_float_unix.of_span_since_epoch
                       (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
         } : Types.Public_trade.t)
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "MEXC candle normalization not yet implemented"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

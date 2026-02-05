@@ -83,6 +83,10 @@ module Adapter = struct
       type t = Uni_types.swap
     end
 
+    module Candle = struct
+      type t = unit  (* Uniswap V3 doesn't provide candles *)
+    end
+
     module Symbol_info = struct
       type t = Uni_types.pool
     end
@@ -229,6 +233,9 @@ module Adapter = struct
 
   let cancel_all_orders _t ?symbol:_ () =
     Deferred.return (Ok 0)
+
+  let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
+    Deferred.return (Error (`GraphQL "Uniswap V3 doesn't provide historical candle data"))
 
   module Streams = struct
     let trades _t =
@@ -404,6 +411,9 @@ module Adapter = struct
          ; trade_id = Some swap.id
          ; ts
          }
+
+    let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
+      Error "Uniswap V3 doesn't provide candle data"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with
