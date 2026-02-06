@@ -60,10 +60,15 @@ module Adapter = struct
   type t =
     { cfg : (module Cfg.S)
     ; symbols : string list
+    ; rate_limiter : Exchange_common.Rate_limiter.t
     }
 
   let create ~cfg ?(symbols = []) () =
-    { cfg; symbols }
+    { cfg
+    ; symbols
+    ; rate_limiter = Exchange_common.Rate_limiter.create
+        ~config:Exchange_common.Rate_limiter.Configs.kraken ()
+    }
 
   module Venue = struct
     let t = Types.Venue.Kraken
@@ -121,157 +126,252 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.post
     end
+
+    (** Account operations - deposits/withdrawals *)
+    module Deposit_address = struct
+      (** Native deposit address with method info *)
+      type t =
+        { address : V1.Deposit_addresses.Deposit_address.t
+        ; asset : string
+        ; method_ : string
+        }
+    end
+
+    module Deposit = struct
+      type t = V1.Deposit_status.Deposit_entry.t
+    end
+
+    module Withdrawal = struct
+      (** Withdrawal can be either a status entry (for history) or a new withdrawal response *)
+      type t =
+        | Status of V1.Withdraw_status.Withdrawal_entry.t
+        | Response of { refid : string; asset : string; amount : string }
+    end
   end
 
   let place_order (t : t) (req : Native.Order.request) =
     let (module Cfg) = t.cfg in
-    V1.Add_order.post (module Cfg) req
-    >>| function
-    | `Ok r -> Ok r
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Add_order.post (module Cfg) req
+      >>| function
+      | `Ok r -> Ok r
+      | (#Rest.Error.post as e) -> Error e)
 
   let cancel_order (t : t) (txid : Native.Order.id) =
     let (module Cfg) = t.cfg in
-    V1.Cancel_order.post (module Cfg) { txid }
-    >>| function
-    | `Ok _ -> Ok ()
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Cancel_order.post (module Cfg) { txid }
+      >>| function
+      | `Ok _ -> Ok ()
+      | (#Rest.Error.post as e) -> Error e)
 
   let balances (t : t) =
     let (module Cfg) = t.cfg in
-    V1.Balances.post (module Cfg) ()
-    >>| function
-    | `Ok bal_list -> Ok bal_list
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Balances.post (module Cfg) ()
+      >>| function
+      | `Ok bal_list -> Ok bal_list
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_order_status (t : t) (txid : Native.Order.id) =
     let (module Cfg) = t.cfg in
-    V1.Query_orders.post (module Cfg) { txids = [txid]; trades = false }
-    >>| function
-    | `Ok orders ->
-      (match List.hd orders with
-       | Some (_, order) -> Ok order
-       | None -> Error (`Bad_request "Order not found"))
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Query_orders.post (module Cfg) { txids = [txid]; trades = false }
+      >>| function
+      | `Ok orders ->
+        (match List.hd orders with
+         | Some (_, order) -> Ok order
+         | None -> Error (`Bad_request "Order not found"))
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_open_orders (t : t) ?symbol:_ () =
     let (module Cfg) = t.cfg in
-    V1.Open_orders.post (module Cfg) { trades = false }
-    >>| function
-    | `Ok { open_; _ } -> Ok (List.map open_ ~f:snd)
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Open_orders.post (module Cfg) { trades = false }
+      >>| function
+      | `Ok { open_; _ } -> Ok (List.map open_ ~f:snd)
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_order_history (t : t) ?symbol:_ ?limit:_ () =
     let (module Cfg) = t.cfg in
-    V1.Closed_orders.post (module Cfg)
-      { trades = false; userref = None; start = None; end_ = None; ofs = None; closetime = None }
-    >>| function
-    | `Ok { closed; _ } -> Ok (List.map closed ~f:snd)
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Closed_orders.post (module Cfg)
+        { trades = false; userref = None; start = None; end_ = None; ofs = None; closetime = None }
+      >>| function
+      | `Ok { closed; _ } -> Ok (List.map closed ~f:snd)
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_my_trades (t : t) ~symbol:_ ?limit:_ () =
     let (module Cfg) = t.cfg in
-    V1.Trades_history.post (module Cfg)
-      { type_ = None; trades = false; start = None; end_ = None; ofs = None }
-    >>| function
-    | `Ok { trades; _ } -> Ok (List.map trades ~f:snd)
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Trades_history.post (module Cfg)
+        { type_ = None; trades = false; start = None; end_ = None; ofs = None }
+      >>| function
+      | `Ok { trades; _ } -> Ok (List.map trades ~f:snd)
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_symbols (t : t) () =
     let (module Cfg) = t.cfg in
-    V1.Asset_pairs.post (module Cfg) { pair = None; info = None }
-    >>| function
-    | `Ok pairs -> Ok pairs
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Asset_pairs.post (module Cfg) { pair = None; info = None }
+      >>| function
+      | `Ok pairs -> Ok pairs
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_ticker (t : t) ~symbol () =
     let (module Cfg) = t.cfg in
-    V1.Ticker.get (module Cfg) { pair = symbol }
-    >>| function
-    | `Ok tickers ->
-      (match List.hd tickers with
-       | Some ticker -> Ok ticker
-       | None -> Error (`Bad_request "Ticker not found"))
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Ticker.get (module Cfg) { pair = symbol }
+      >>| function
+      | `Ok tickers ->
+        (match List.hd tickers with
+         | Some ticker -> Ok ticker
+         | None -> Error (`Bad_request "Ticker not found"))
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_order_book (t : t) ~symbol ?limit () =
     let (module Cfg) = t.cfg in
-    V1.Depth.get (module Cfg) { pair = symbol; count = limit }
-    >>| function
-    | `Ok depth -> Ok depth
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Depth.get (module Cfg) { pair = symbol; count = limit }
+      >>| function
+      | `Ok depth -> Ok depth
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_recent_trades (t : t) ~symbol ?limit () =
     let (module Cfg) = t.cfg in
-    V1.Recent_trades.get (module Cfg) { pair = symbol; since = None; count = limit }
-    >>| function
-    | `Ok (trades, _last) ->
-      (* Flatten the pair -> trades list to just trades *)
-      let all_trades = List.concat_map trades ~f:snd in
-      Ok all_trades
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Recent_trades.get (module Cfg) { pair = symbol; since = None; count = limit }
+      >>| function
+      | `Ok (trades, _last) ->
+        (* Flatten the pair -> trades list to just trades *)
+        let all_trades = List.concat_map trades ~f:snd in
+        Ok all_trades
+      | (#Rest.Error.post as e) -> Error e)
 
   let cancel_all_orders (t : t) ?symbol:_ () =
     let (module Cfg) = t.cfg in
-    V1.Cancel_all.post (module Cfg) ()
-    >>| function
-    | `Ok { count } -> Ok count
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Cancel_all.post (module Cfg) ()
+      >>| function
+      | `Ok { count } -> Ok count
+      | (#Rest.Error.post as e) -> Error e)
 
-  let get_candles (_ : t) ~symbol ~(timeframe : Types.Timeframe.t) ?since ?until:_ ?limit:_ () =
-    (* Kraken OHLC endpoint: GET /0/public/OHLC *)
-    let interval = match timeframe with
-      | Types.Timeframe.M1  -> 1
-      | Types.Timeframe.M5  -> 5
-      | Types.Timeframe.M15 -> 15
-      | Types.Timeframe.M30 -> 30
-      | Types.Timeframe.H1  -> 60
-      | Types.Timeframe.H4  -> 240
-      | Types.Timeframe.D1  -> 1440
-      | Types.Timeframe.W1  -> 10080
-      | _ -> 60  (* Default to 1h for unsupported intervals *)
-    in
-    let params = [("pair", [symbol]); ("interval", [Int.to_string interval])] in
-    let params = match since with
-      | Some t ->
-        let secs = Time_float_unix.to_span_since_epoch t |> Time_float_unix.Span.to_sec |> Int.of_float in
-        ("since", [Int.to_string secs]) :: params
-      | None -> params
-    in
-    let uri = Uri.of_string "https://api.kraken.com/0/public/OHLC" in
-    let uri = Uri.with_query uri params in
-    Monitor.try_with (fun () ->
-      Cohttp_async.Client.get uri >>= fun (_, body) ->
-      Cohttp_async.Body.to_string body
-    ) >>| function
-    | Error _ -> Error (`Bad_request "Network error fetching OHLC")
-    | Ok body ->
-      match Yojson.Safe.from_string body with
-      | exception _ -> Error (`Bad_request "Failed to parse OHLC response")
-      | json ->
-        let open Yojson.Safe.Util in
-        let error = json |> member "error" |> to_list in
-        match error with
-        | [] ->
-          let result = json |> member "result" in
-          let pairs = result |> to_assoc |> List.filter ~f:(fun (k, _) -> not (String.equal k "last")) in
-          (match List.hd pairs with
-           | Some (_, ohlc_data) ->
-             let parse_ohlc ohlc =
-               match ohlc with
-               | `List [`Int time; `String open_; `String high; `String low; `String close;
-                        `String vwap; `String volume; `Int count] ->
-                 Some { Native.Candle.symbol; timeframe; time = Float.of_int time;
-                        open_; high; low; close; vwap; volume; count }
-               | `List [`Float time; `String open_; `String high; `String low; `String close;
-                        `String vwap; `String volume; `Int count] ->
-                 Some { Native.Candle.symbol; timeframe; time;
-                        open_; high; low; close; vwap; volume; count }
-               | _ -> None
-             in
-             Ok (ohlc_data |> to_list |> List.filter_map ~f:parse_ohlc)
-           | None -> Ok [])
-        | _ -> Error (`Bad_request "Kraken API error")
+  let get_candles (t : t) ~symbol ~(timeframe : Types.Timeframe.t) ?since ?until:_ ?limit:_ () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      (* Kraken OHLC endpoint: GET /0/public/OHLC *)
+      let interval = match timeframe with
+        | Types.Timeframe.M1  -> 1
+        | Types.Timeframe.M5  -> 5
+        | Types.Timeframe.M15 -> 15
+        | Types.Timeframe.M30 -> 30
+        | Types.Timeframe.H1  -> 60
+        | Types.Timeframe.H4  -> 240
+        | Types.Timeframe.D1  -> 1440
+        | Types.Timeframe.W1  -> 10080
+        | _ -> 60  (* Default to 1h for unsupported intervals *)
+      in
+      let params = [("pair", [symbol]); ("interval", [Int.to_string interval])] in
+      let params = match since with
+        | Some t ->
+          let secs = Time_float_unix.to_span_since_epoch t |> Time_float_unix.Span.to_sec |> Int.of_float in
+          ("since", [Int.to_string secs]) :: params
+        | None -> params
+      in
+      let uri = Uri.of_string "https://api.kraken.com/0/public/OHLC" in
+      let uri = Uri.with_query uri params in
+      Monitor.try_with (fun () ->
+        Cohttp_async.Client.get uri >>= fun (_, body) ->
+        Cohttp_async.Body.to_string body
+      ) >>| function
+      | Error _ -> Error (`Bad_request "Network error fetching OHLC")
+      | Ok body ->
+        match Yojson.Safe.from_string body with
+        | exception _ -> Error (`Bad_request "Failed to parse OHLC response")
+        | json ->
+          let open Yojson.Safe.Util in
+          let error = json |> member "error" |> to_list in
+          match error with
+          | [] ->
+            let result = json |> member "result" in
+            let pairs = result |> to_assoc |> List.filter ~f:(fun (k, _) -> not (String.equal k "last")) in
+            (match List.hd pairs with
+             | Some (_, ohlc_data) ->
+               let parse_ohlc ohlc =
+                 match ohlc with
+                 | `List [`Int time; `String open_; `String high; `String low; `String close;
+                          `String vwap; `String volume; `Int count] ->
+                   Some { Native.Candle.symbol; timeframe; time = Float.of_int time;
+                          open_; high; low; close; vwap; volume; count }
+                 | `List [`Float time; `String open_; `String high; `String low; `String close;
+                          `String vwap; `String volume; `Int count] ->
+                   Some { Native.Candle.symbol; timeframe; time;
+                          open_; high; low; close; vwap; volume; count }
+                 | _ -> None
+               in
+               Ok (ohlc_data |> to_list |> List.filter_map ~f:parse_ohlc)
+             | None -> Ok [])
+          | _ -> Error (`Bad_request "Kraken API error"))
+
+  (** {2 Account Operations - Deposits/Withdrawals} *)
+
+  let get_deposit_address (t : t) ~currency ?network () =
+    let (module Cfg) = t.cfg in
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      (* First get deposit methods to find the available networks *)
+      V1.Deposit_methods.post (module Cfg) { asset = currency }
+      >>= function
+      | `Ok methods ->
+        (* Find the matching method (network) *)
+        let method_name = match network with
+          | Some n -> n
+          | None ->
+            (* Use first available method if no network specified *)
+            match List.hd methods with
+            | Some m -> m.V1.Deposit_methods.Deposit_method.method_
+            | None -> ""
+        in
+        (match String.is_empty method_name with
+         | true ->
+           return (Error (`Bad_request "No deposit methods available for this asset"))
+         | false ->
+           (* Get the deposit address for the selected method *)
+           V1.Deposit_addresses.post (module Cfg) { asset = currency; method_ = method_name; new_ = false }
+           >>| function
+           | `Ok addresses ->
+             (match List.hd addresses with
+              | Some addr ->
+                Ok { Native.Deposit_address.address = addr; asset = currency; method_ = method_name }
+              | None -> Error (`Bad_request "No deposit address returned"))
+           | (#Rest.Error.post as e) -> Error e)
+      | (#Rest.Error.post as e) -> return (Error e))
+
+  let withdraw (t : t) ~currency ~amount ~address ?tag:_ ?network:_ () =
+    let (module Cfg) = t.cfg in
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      (* Kraken requires a pre-configured withdrawal key name, not a raw address.
+         The 'address' parameter here is actually the key name in Kraken's system.
+         For raw address withdrawals, users must first add the address in their account. *)
+      V1.Withdraw.post (module Cfg) { asset = currency; key = address; amount = Float.to_string amount }
+      >>| function
+      | `Ok { refid } ->
+        Ok (Native.Withdrawal.Response { refid; asset = currency; amount = Float.to_string amount })
+      | (#Rest.Error.post as e) -> Error e)
+
+  let get_deposits (t : t) ?currency ?limit:_ () =
+    let (module Cfg) = t.cfg in
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Deposit_status.post (module Cfg) { asset = currency; method_ = None }
+      >>| function
+      | `Ok deposits -> Ok deposits
+      | (#Rest.Error.post as e) -> Error e)
+
+  let get_withdrawals (t : t) ?currency ?limit:_ () =
+    let (module Cfg) = t.cfg in
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Withdraw_status.post (module Cfg) { asset = currency; method_ = None }
+      >>| function
+      | `Ok withdrawals -> Ok (List.map withdrawals ~f:(fun w -> Native.Withdrawal.Status w))
+      | (#Rest.Error.post as e) -> Error e)
 
   module Streams = struct
     (** Private trade stream requires authenticated WebSocket connection.
@@ -594,6 +694,90 @@ module Adapter = struct
       ; trades = Some c.count
       ; closed = true
       } : Types.Candle.t)
+
+    (** Normalize deposit address *)
+    let deposit_address (addr : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      Ok ({ venue = Venue.t
+      ; currency = addr.asset
+      ; address = addr.address.V1.Deposit_addresses.Deposit_address.address
+      ; tag = addr.address.tag
+      ; network = Some addr.method_
+      } : Types.Deposit_address.t)
+
+    (** Convert Kraken deposit status to normalized Transfer_status *)
+    let transfer_status_of_kraken_status (status : string) : Types.Transfer_status.t =
+      match String.lowercase status with
+      | "pending" -> Types.Transfer_status.Pending
+      | "settled" | "success" | "complete" -> Types.Transfer_status.Completed
+      | "cancelled" | "canceled" -> Types.Transfer_status.Cancelled
+      | "failed" | "failure" -> Types.Transfer_status.Failed
+      | "initial" | "on hold" | "sending" -> Types.Transfer_status.Processing
+      | _ -> Types.Transfer_status.Pending
+
+    (** Normalize deposit entry *)
+    let deposit (d : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string d.amount in
+      let status = transfer_status_of_kraken_status d.status in
+      let created_at = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec d.time)) in
+      let tx_id = match String.is_empty d.txid with
+        | true -> None
+        | false -> Some d.txid
+      in
+      let address = match String.is_empty d.info with
+        | true -> None
+        | false -> Some d.info
+      in
+      Ok ({ venue = Venue.t
+      ; id = d.refid
+      ; currency = d.asset
+      ; amount
+      ; status
+      ; address
+      ; tx_id
+      ; created_at
+      ; updated_at = None
+      } : Types.Deposit.t)
+
+    (** Normalize withdrawal *)
+    let withdrawal (w : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      let open Result.Let_syntax in
+      match w with
+      | Native.Withdrawal.Status ws ->
+        let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string ws.amount in
+        let%bind fee = Fluxum.Normalize_common.Float_conv.amount_of_string ws.fee in
+        let status = transfer_status_of_kraken_status ws.status in
+        let created_at = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec ws.time)) in
+        let tx_id = match String.is_empty ws.txid with
+          | true -> None
+          | false -> Some ws.txid
+        in
+        Ok ({ venue = Venue.t
+        ; id = ws.refid
+        ; currency = ws.asset
+        ; amount
+        ; fee = Some fee
+        ; status
+        ; address = ws.info  (* info field contains the address *)
+        ; tag = None
+        ; tx_id
+        ; created_at
+        ; updated_at = None
+        } : Types.Withdrawal.t)
+      | Native.Withdrawal.Response { refid; asset; amount = amount_str } ->
+        let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string amount_str in
+        Ok ({ venue = Venue.t
+        ; id = refid
+        ; currency = asset
+        ; amount
+        ; fee = None
+        ; status = Types.Transfer_status.Pending
+        ; address = ""
+        ; tag = None
+        ; tx_id = None
+        ; created_at = Some (Time_float_unix.now ())
+        ; updated_at = None
+        } : Types.Withdrawal.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

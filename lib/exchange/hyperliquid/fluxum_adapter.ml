@@ -8,6 +8,7 @@
     - ✅ WebSocket market data (L2 book, trades, all mids)
     - ✅ Order book tracking with safe float conversions
     - ✅ Trading operations with native EIP-712 signing (no external dependencies)
+    - ✅ Account operations: withdraw USDC via withdraw3, transfer history via userFundings
 
     {b Architecture:}
     - Layer 1 blockchain (not just smart contract)
@@ -41,10 +42,19 @@
     - No separate quote currency in symbol (always USD-denominated)
     - Index-based pricing (mark price from oracle)
 
+    {b Account Operations:}
+    - get_deposit_address: Returns your wallet address (deposits via Arbitrum bridge)
+    - withdraw: Initiates USDC withdrawal via withdraw3 EIP-712 signed action
+    - get_deposits: Returns deposit history from userFundings endpoint
+    - get_withdrawals: Returns withdrawal history from userFundings endpoint
+    - $1 USDC withdrawal fee deducted from balance
+    - Withdrawals processed to Arbitrum L2 (~5 minutes)
+
     {b Known Limitations:}
     - ❌ No spot trading (perpetuals only)
     - ❌ No margin modes (cross margin only)
     - ❌ cancel_order requires open order lookup (asset ID not in order ID)
+    - ❌ Deposits must be done externally via Arbitrum bridge
     - Limited to perpetual futures
     - Requires understanding of perp mechanics (funding, liquidation)
 
@@ -82,10 +92,17 @@ module Adapter = struct
     ; user : string option  (* Hyperliquid wallet address for account queries *)
     ; private_key : string option  (* Private key for signing trades *)
     ; symbols : string list
+    ; rate_limiter : Exchange_common.Rate_limiter.t
     }
 
   let create ~cfg ?user ?private_key ?(symbols = []) () =
-    { cfg; user; private_key; symbols }
+    { cfg
+    ; user
+    ; private_key
+    ; symbols
+    ; rate_limiter = Exchange_common.Rate_limiter.create
+        ~config:Exchange_common.Rate_limiter.Configs.hyperliquid ()
+    }
 
   module Venue = struct
     let t = Types.Venue.Hyperliquid
@@ -142,6 +159,31 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.t
     end
+
+    (** Account operations - deposits/withdrawals
+        Note: Hyperliquid is a DEX - deposits come from Arbitrum L2 bridge,
+        withdrawals use the withdraw3 signed action *)
+    module Deposit_address = struct
+      (** Hyperliquid doesn't have deposit addresses - deposits come from Arbitrum L2 bridge.
+          The "address" is your wallet address on Arbitrum. *)
+      type t = {
+        venue : Types.Venue.t;
+        address : string;  (** User's wallet address *)
+        network : string;  (** "Arbitrum" *)
+      }
+    end
+
+    module Deposit = struct
+      (** Deposit record from user funding history *)
+      type t = Rest.TransferTypes.user_funding
+    end
+
+    module Withdrawal = struct
+      (** Withdrawal can be either a response to withdraw request or history record *)
+      type t =
+        | Withdraw_response of Rest.ExchangeResponse.t
+        | Funding_record of Rest.TransferTypes.user_funding
+    end
   end
 
   (* ============================================================ *)
@@ -154,11 +196,12 @@ module Adapter = struct
       Deferred.return (Error (`Api_error
         "Private key required for Hyperliquid trading - provide private_key when creating adapter"))
     | Some private_key ->
-      (* Place order with default grouping "na" (no grouping) *)
-      Rest.place_order ~cfg:t.cfg ~private_key ~orders:[req] ~grouping:"na" ()
-      >>| function
-      | Ok resp -> Ok resp
-      | Error e -> Error e
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        (* Place order with default grouping "na" (no grouping) *)
+        Rest.place_order ~cfg:t.cfg ~private_key ~orders:[req] ~grouping:"na" ()
+        >>| function
+        | Ok resp -> Ok resp
+        | Error e -> Error e)
 
   let cancel_order (t : t) (oid : Native.Order.id) =
     match t.private_key with
@@ -173,35 +216,36 @@ module Adapter = struct
         Deferred.return (Error (`Api_error
           "User address required to determine asset ID for cancellation"))
       | Some user ->
-        (* Fetch open orders to find the asset ID *)
-        Rest.open_orders t.cfg ~user
-        >>= function
-        | Error e -> Deferred.return (Error e)
-        | Ok orders ->
-          match List.find orders ~f:(fun o -> Int64.equal o.Rest.Types.oid oid) with
-          | None ->
-            Deferred.return (Error (`Api_error
-              (sprintf "Order %Ld not found - cannot determine asset ID" oid)))
-          | Some order ->
-            (* Get asset ID from symbol name *)
-            Rest.meta t.cfg
-            >>= function
-            | Error e -> Deferred.return (Error e)
-            | Ok meta ->
-              match List.findi meta.Rest.Types.universe ~f:(fun _ item ->
-                String.equal item.Rest.Types.name order.Rest.Types.coin) with
-              | None ->
-                Deferred.return (Error (`Api_error
-                  (sprintf "Asset %s not found in universe" order.Rest.Types.coin)))
-              | Some (asset_idx, _) ->
-                let cancel_req : Signing.cancel_request = {
-                  Signing.asset = asset_idx;
-                  oid;
-                } in
-                Rest.cancel_order ~cfg:t.cfg ~private_key ~cancels:[cancel_req] ()
-                >>| function
-                | Ok resp -> Ok resp
-                | Error e -> Error e
+        Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+          (* Fetch open orders to find the asset ID *)
+          Rest.open_orders t.cfg ~user
+          >>= function
+          | Error e -> Deferred.return (Error e)
+          | Ok orders ->
+            match List.find orders ~f:(fun o -> Int64.equal o.Rest.Types.oid oid) with
+            | None ->
+              Deferred.return (Error (`Api_error
+                (sprintf "Order %Ld not found - cannot determine asset ID" oid)))
+            | Some order ->
+              (* Get asset ID from symbol name *)
+              Rest.meta t.cfg
+              >>= function
+              | Error e -> Deferred.return (Error e)
+              | Ok meta ->
+                match List.findi meta.Rest.Types.universe ~f:(fun _ item ->
+                  String.equal item.Rest.Types.name order.Rest.Types.coin) with
+                | None ->
+                  Deferred.return (Error (`Api_error
+                    (sprintf "Asset %s not found in universe" order.Rest.Types.coin)))
+                | Some (asset_idx, _) ->
+                  let cancel_req : Signing.cancel_request = {
+                    Signing.asset = asset_idx;
+                    oid;
+                  } in
+                  Rest.cancel_order ~cfg:t.cfg ~private_key ~cancels:[cancel_req] ()
+                  >>| function
+                  | Ok resp -> Ok resp
+                  | Error e -> Error e)
 
   let cancel_all_orders (_ : t) ?symbol:_ () =
     Deferred.return (Error (`Api_error
@@ -209,6 +253,100 @@ module Adapter = struct
 
   let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
     Deferred.return (Error (`Api_error "Hyperliquid candles not yet implemented"))
+
+  (** {2 Account Operations - Deposits/Withdrawals}
+
+      Hyperliquid is a DEX on Arbitrum L2:
+      - Deposits: Bridge USDC from Arbitrum to Hyperliquid (handled externally)
+      - Withdrawals: Use withdraw3 signed action to withdraw USDC to Arbitrum
+      - Transfer history: Available via userFundings endpoint
+  *)
+
+  let get_deposit_address (t : t) ~currency:_ ?network:_ () =
+    (* Hyperliquid deposits come from Arbitrum bridge to your wallet address *)
+    match t.user with
+    | None ->
+      Deferred.return (Error (`Api_error "User wallet address required"))
+    | Some user ->
+      let deposit_addr : Native.Deposit_address.t = {
+        venue = Venue.t;
+        address = user;
+        network = "Arbitrum";
+      } in
+      Deferred.return (Ok deposit_addr)
+
+  let withdraw (t : t) ~currency:_ ~amount ~address ?tag:_ ?network:_ () =
+    (* Hyperliquid only supports USDC withdrawals via withdraw3 action *)
+    match t.private_key with
+    | None ->
+      Deferred.return (Error (`Api_error
+        "Private key required for Hyperliquid withdrawals"))
+    | Some private_key ->
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        (* Check if mainnet or testnet based on cfg *)
+        let is_mainnet = String.is_substring t.cfg.rest_url ~substring:"api.hyperliquid.xyz" in
+        let amount_str = Float.to_string amount in
+        Rest.withdraw ~cfg:t.cfg ~private_key ~destination:address ~amount:amount_str ~is_mainnet ()
+        >>| function
+        | Ok resp -> Ok (Native.Withdrawal.Withdraw_response resp)
+        | Error e -> Error e)
+
+  let get_deposits (t : t) ?currency:_ ?limit () =
+    (* Get funding history and filter for deposits (positive amounts) *)
+    match t.user with
+    | None ->
+      Deferred.return (Error (`Api_error "User wallet address required"))
+    | Some user ->
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        (* Look back 90 days by default *)
+        let now_ms = Int64.of_float (Time_float_unix.now () |> Time_float_unix.to_span_since_epoch |> Time_float_unix.Span.to_ms) in
+        let ninety_days_ms = Int64.(now_ms - 7776000000L) in  (* 90 * 24 * 60 * 60 * 1000 *)
+        Rest.user_fundings t.cfg ~user ~start_time:ninety_days_ms ()
+        >>| function
+        | Error e -> Error e
+        | Ok fundings ->
+          (* Filter for deposits (positive USDC amounts) *)
+          let deposits = List.filter fundings ~f:(fun f ->
+            (* Check if usdc is positive - deposits have positive amounts *)
+            match Float.of_string_opt f.Rest.TransferTypes.usdc with
+            | Some amt -> Float.(amt > 0.)
+            | None -> false)
+          in
+          let limited = match limit with
+            | Some n -> List.take deposits n
+            | None -> deposits
+          in
+          Ok limited)
+
+  let get_withdrawals (t : t) ?currency:_ ?limit () =
+    (* Get funding history and filter for withdrawals (negative amounts) *)
+    match t.user with
+    | None ->
+      Deferred.return (Error (`Api_error "User wallet address required"))
+    | Some user ->
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        (* Look back 90 days by default *)
+        let now_ms = Int64.of_float (Time_float_unix.now () |> Time_float_unix.to_span_since_epoch |> Time_float_unix.Span.to_ms) in
+        let ninety_days_ms = Int64.(now_ms - 7776000000L) in  (* 90 * 24 * 60 * 60 * 1000 *)
+        Rest.user_fundings t.cfg ~user ~start_time:ninety_days_ms ()
+        >>| function
+        | Error e -> Error e
+        | Ok fundings ->
+          (* Filter for withdrawals (negative USDC amounts) *)
+          let withdrawals = List.filter_map fundings ~f:(fun f ->
+            (* Check if usdc is negative - withdrawals have negative amounts *)
+            match Float.of_string_opt f.Rest.TransferTypes.usdc with
+            | Some amt ->
+              (match Float.(amt < 0.) with
+               | true -> Some (Native.Withdrawal.Funding_record f)
+               | false -> None)
+            | None -> None)
+          in
+          let limited = match limit with
+            | Some n -> List.take withdrawals n
+            | None -> withdrawals
+          in
+          Ok limited)
 
   (* ============================================================ *)
   (* Account/Position Queries *)
@@ -218,31 +356,34 @@ module Adapter = struct
     match t.user with
     | None -> Deferred.return (Error (`Api_error "User address required for balance queries"))
     | Some user ->
-      Rest.clearinghouse_state t.cfg ~user
-      >>| function
-      | Ok state -> Ok [state]  (* Wrap in list for consistency *)
-      | Error e -> Error e
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        Rest.clearinghouse_state t.cfg ~user
+        >>| function
+        | Ok state -> Ok [state]  (* Wrap in list for consistency *)
+        | Error e -> Error e)
 
   let get_order_status (t : t) (oid : Native.Order.id) =
     match t.user with
     | None -> Deferred.return (Error (`Api_error "User address required"))
     | Some user ->
-      Rest.open_orders t.cfg ~user
-      >>| function
-      | Ok orders ->
-        (match List.find orders ~f:(fun o -> Int64.equal o.Rest.Types.oid oid) with
-         | Some order -> Ok order
-         | None -> Error (`Api_error (sprintf "Order %Ld not found" oid)))
-      | Error e -> Error e
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        Rest.open_orders t.cfg ~user
+        >>| function
+        | Ok orders ->
+          (match List.find orders ~f:(fun o -> Int64.equal o.Rest.Types.oid oid) with
+           | Some order -> Ok order
+           | None -> Error (`Api_error (sprintf "Order %Ld not found" oid)))
+        | Error e -> Error e)
 
   let get_open_orders (t : t) ?symbol:_ () =
     match t.user with
     | None -> Deferred.return (Error (`Api_error "User address required"))
     | Some user ->
-      Rest.open_orders t.cfg ~user
-      >>| function
-      | Ok orders -> Ok orders
-      | Error e -> Error e
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        Rest.open_orders t.cfg ~user
+        >>| function
+        | Ok orders -> Ok orders
+        | Error e -> Error e)
 
   let get_order_history (_ : t) ?symbol:_ ?limit:_ () =
     (* Hyperliquid doesn't have separate order history - only fills *)
@@ -253,57 +394,62 @@ module Adapter = struct
     match t.user with
     | None -> Deferred.return (Error (`Api_error "User address required"))
     | Some user ->
-      Rest.user_fills t.cfg ~user
-      >>| function
-      | Ok fills ->
-        let limited = match limit with
-          | Some n -> List.take fills n
-          | None -> fills
-        in
-        Ok limited
-      | Error e -> Error e
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        Rest.user_fills t.cfg ~user
+        >>| function
+        | Ok fills ->
+          let limited = match limit with
+            | Some n -> List.take fills n
+            | None -> fills
+          in
+          Ok limited
+        | Error e -> Error e)
 
   (* ============================================================ *)
   (* Public Market Data *)
   (* ============================================================ *)
 
   let get_symbols (t : t) () =
-    Rest.meta t.cfg
-    >>| function
-    | Ok meta -> Ok meta.universe
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.meta t.cfg
+      >>| function
+      | Ok meta -> Ok meta.universe
+      | Error e -> Error e)
 
   let get_ticker (t : t) ~symbol () =
-    Rest.meta_and_asset_ctxs t.cfg
-    >>| function
-    | Ok (meta, ctxs) ->
-      (* Find the index of the symbol in universe *)
-      (match List.findi meta.universe ~f:(fun _ item ->
-         String.equal item.Rest.Types.name symbol) with
-       | Some (idx, _) ->
-         (match List.nth ctxs idx with
-          | Some ctx -> Ok (symbol, ctx)
-          | None -> Error (`Api_error (sprintf "Context for %s not found" symbol)))
-       | None -> Error (`Api_error (sprintf "Symbol %s not found" symbol)))
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.meta_and_asset_ctxs t.cfg
+      >>| function
+      | Ok (meta, ctxs) ->
+        (* Find the index of the symbol in universe *)
+        (match List.findi meta.universe ~f:(fun _ item ->
+           String.equal item.Rest.Types.name symbol) with
+         | Some (idx, _) ->
+           (match List.nth ctxs idx with
+            | Some ctx -> Ok (symbol, ctx)
+            | None -> Error (`Api_error (sprintf "Context for %s not found" symbol)))
+         | None -> Error (`Api_error (sprintf "Symbol %s not found" symbol)))
+      | Error e -> Error e)
 
   let get_order_book (t : t) ~symbol ?limit () =
-    let _ = limit in  (* Hyperliquid doesn't support limit, ignore *)
-    Rest.l2_book t.cfg ~coin:symbol
-    >>| function
-    | Ok book -> Ok book
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let _ = limit in  (* Hyperliquid doesn't support limit, ignore *)
+      Rest.l2_book t.cfg ~coin:symbol
+      >>| function
+      | Ok book -> Ok book
+      | Error e -> Error e)
 
   let get_recent_trades (t : t) ~symbol ?limit () =
-    Rest.recent_trades t.cfg ~coin:symbol
-    >>| function
-    | Ok trades ->
-      let limited = match limit with
-        | Some n -> List.take trades n
-        | None -> trades
-      in
-      Ok limited
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.recent_trades t.cfg ~coin:symbol
+      >>| function
+      | Ok trades ->
+        let limited = match limit with
+          | Some n -> List.take trades n
+          | None -> trades
+        in
+        Ok limited
+      | Error e -> Error e)
 
   (* ============================================================ *)
   (* WebSocket Streams *)
@@ -571,6 +717,73 @@ module Adapter = struct
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "Hyperliquid candle normalization not yet implemented"
+
+    (** Account operations normalization *)
+
+    let deposit_address (addr : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      Ok ({ venue = addr.venue
+          ; currency = "USDC"  (* Hyperliquid only supports USDC *)
+          ; address = addr.address
+          ; tag = None  (* No memo needed *)
+          ; network = Some addr.network
+          } : Types.Deposit_address.t)
+
+    let deposit (f : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string f.usdc in
+      Ok ({ venue = Venue.t
+          ; id = f.hash
+          ; currency = "USDC"
+          ; amount
+          ; status = Types.Transfer_status.Completed  (* Funding records are completed *)
+          ; address = None  (* Source address not in funding record *)
+          ; tx_id = Some f.hash
+          ; created_at = Some (time_of_ms f.time)
+          ; updated_at = Some (time_of_ms f.time)
+          } : Types.Deposit.t)
+
+    let withdrawal (w : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      match w with
+      | Native.Withdrawal.Withdraw_response resp ->
+        (* Just submitted - status from response *)
+        let status = match resp.Rest.ExchangeResponse.status with
+          | Rest.ExchangeResponse.Ok_status -> Types.Transfer_status.Processing
+          | Rest.ExchangeResponse.Error_status _ -> Types.Transfer_status.Failed
+        in
+        let id = match resp.response with
+          | Some (`String s) -> s
+          | Some json -> Yojson.Safe.to_string json
+          | None -> "unknown"
+        in
+        Ok ({ venue = Venue.t
+            ; id
+            ; currency = "USDC"
+            ; amount = 0.  (* Amount not in response, would need to track from request *)
+            ; fee = Some 1.0  (* Hyperliquid withdrawal fee is $1 *)
+            ; status
+            ; address = ""  (* Not in response *)
+            ; tag = None
+            ; tx_id = None  (* Not immediately available *)
+            ; created_at = Some (Time_float_unix.now ())
+            ; updated_at = Some (Time_float_unix.now ())
+            } : Types.Withdrawal.t)
+      | Native.Withdrawal.Funding_record f ->
+        let open Result.Let_syntax in
+        (* Funding records have negative amounts for withdrawals, take absolute value *)
+        let%bind amount_raw = Fluxum.Normalize_common.Float_conv.amount_of_string f.usdc in
+        let amount = Float.abs amount_raw in
+        Ok ({ venue = Venue.t
+            ; id = f.hash
+            ; currency = "USDC"
+            ; amount
+            ; fee = Some 1.0  (* Hyperliquid withdrawal fee is $1 *)
+            ; status = Types.Transfer_status.Completed  (* Funding records are completed *)
+            ; address = ""  (* Destination not in funding record *)
+            ; tag = None
+            ; tx_id = Some f.hash
+            ; created_at = Some (time_of_ms f.time)
+            ; updated_at = Some (time_of_ms f.time)
+            } : Types.Withdrawal.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

@@ -443,3 +443,281 @@ let list_orders cfg ?product_id ?status ?limit () : (Order.orders_response, [> E
     match Order.orders_response_of_yojson json with
     | Error e -> Error (`Json_parse e)
     | Ok resp -> Ok resp
+
+(* ============================================================ *)
+(* Account Operations - Deposits/Withdrawals (v2 API) *)
+(* ============================================================ *)
+
+(** The Coinbase v2 API is used for account operations like deposits and withdrawals.
+    This requires the account UUID from the v3 brokerage API accounts endpoint. *)
+
+module Deposit_address = struct
+  (** Deposit address response from Coinbase v2 API *)
+  type t = {
+    id : string;
+    address : string;
+    address_info : address_info option; [@default None]
+    name : string option; [@default None]
+    created_at : string option; [@default None]
+    updated_at : string option; [@default None]
+    network : string option; [@default None]
+    uri_scheme : string option; [@default None]
+    resource : string option; [@default None]
+    resource_path : string option; [@default None]
+    deposit_uri : string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  and address_info = {
+    address : string;
+    destination_tag : string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type response = {
+    data : t;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type list_response = {
+    data : t list;
+  } [@@deriving yojson { strict = false }, sexp]
+end
+
+module Amount = struct
+  type t = {
+    amount : string;
+    currency : string;
+  } [@@deriving yojson { strict = false }, sexp]
+end
+
+module Transaction = struct
+  (** Transaction types from Coinbase v2 API (send, receive, etc.) *)
+  type network_info = {
+    status : string option; [@default None]
+    hash : string option; [@default None]
+    transaction_url : string option; [@default None]
+    name : string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type to_from = {
+    id : string option; [@default None]
+    resource : string option; [@default None]
+    address : string option; [@default None]
+    currency : string option; [@default None]
+    address_info : Deposit_address.address_info option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type t = {
+    id : string;
+    type_ : string; [@key "type"]
+    status : string;
+    amount : Amount.t;
+    native_amount : Amount.t option; [@default None]
+    description : string option; [@default None]
+    created_at : string option; [@default None]
+    updated_at : string option; [@default None]
+    resource : string option; [@default None]
+    resource_path : string option; [@default None]
+    network : network_info option; [@default None]
+    to_ : to_from option; [@default None] [@key "to"]
+    from_ : to_from option; [@default None] [@key "from"]
+    (* Note: details field omitted - it's opaque JSON we don't use *)
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type list_response = {
+    data : t list;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type response = {
+    data : t;
+  } [@@deriving yojson { strict = false }, sexp]
+end
+
+module Send = struct
+  (** Send (withdrawal) request body *)
+  type request = {
+    type_ : string; [@key "type"]  (* "send" *)
+    to_ : string; [@key "to"]  (* destination address *)
+    amount : string;
+    currency : string;
+    description : string option; [@default None]
+    idem : string option; [@default None]  (* idempotency key *)
+  }
+
+  let request_to_yojson req =
+    let fields =
+      [ ("type", `String req.type_)
+      ; ("to", `String req.to_)
+      ; ("amount", `String req.amount)
+      ; ("currency", `String req.currency)
+      ]
+    in
+    let fields = match req.description with
+      | Some d -> ("description", `String d) :: fields
+      | None -> fields
+    in
+    let fields = match req.idem with
+      | Some i -> ("idem", `String i) :: fields
+      | None -> fields
+    in
+    `Assoc fields
+end
+
+(** Get account UUID by currency - needed for v2 API operations *)
+let get_account_by_currency cfg ~currency : (Account.account option, [> Error.t ]) result Deferred.t =
+  accounts cfg >>| function
+  | Error _ as err -> err
+  | Ok resp ->
+    let currency_upper = String.uppercase currency in
+    Ok (List.find resp.accounts ~f:(fun a ->
+      String.equal (String.uppercase a.currency) currency_upper))
+
+(** Create a new deposit address for an account (v2 API)
+    POST /v2/accounts/:account_id/addresses *)
+let create_deposit_address cfg ~account_id ?name () : (Deposit_address.t, [> Error.t ]) result Deferred.t =
+  let path = sprintf "/v2/accounts/%s/addresses" account_id in
+  let body = match name with
+    | Some n -> `Assoc [("name", `String n)]
+    | None -> `Assoc []
+  in
+  post_authenticated ~cfg ~path ~body >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Deposit_address.response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok resp -> Ok resp.data
+
+(** List deposit addresses for an account (v2 API)
+    GET /v2/accounts/:account_id/addresses *)
+let list_deposit_addresses cfg ~account_id : (Deposit_address.t list, [> Error.t ]) result Deferred.t =
+  let path = sprintf "/v2/accounts/%s/addresses" account_id in
+  get_authenticated ~cfg ~path >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Deposit_address.list_response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok resp -> Ok resp.data
+
+(** Get deposit address for a currency - creates one if none exists *)
+let get_deposit_address cfg ~currency ?network:_ () : (Deposit_address.t, [> Error.t ]) result Deferred.t =
+  (* First get the account UUID for this currency *)
+  get_account_by_currency cfg ~currency
+  >>= function
+  | Error _ as err -> Deferred.return err
+  | Ok None -> Deferred.return (Error (`Api_error (sprintf "No account found for currency %s" currency)))
+  | Ok (Some account) ->
+    (* Try to get existing addresses first *)
+    list_deposit_addresses cfg ~account_id:account.uuid
+    >>= function
+    | Error _ as err -> Deferred.return err
+    | Ok [] ->
+      (* No addresses exist, create one *)
+      create_deposit_address cfg ~account_id:account.uuid ()
+    | Ok (addr :: _) ->
+      (* Return the first existing address *)
+      Deferred.return (Ok addr)
+
+(** Send money (withdraw) from an account (v2 API)
+    POST /v2/accounts/:account_id/transactions *)
+let send_money cfg ~account_id ~to_address ~amount ~currency ?description () : (Transaction.t, [> Error.t ]) result Deferred.t =
+  let path = sprintf "/v2/accounts/%s/transactions" account_id in
+  let req : Send.request = {
+    type_ = "send";
+    to_ = to_address;
+    amount;
+    currency;
+    description;
+    idem = None;
+  } in
+  let body = Send.request_to_yojson req in
+  post_authenticated ~cfg ~path ~body >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Transaction.response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok resp -> Ok resp.data
+
+(** Initiate a withdrawal to an external address *)
+let withdraw cfg ~currency ~amount ~address ?tag:_ ?network:_ () : (Transaction.t, [> Error.t ]) result Deferred.t =
+  (* First get the account UUID for this currency *)
+  get_account_by_currency cfg ~currency
+  >>= function
+  | Error _ as err -> Deferred.return err
+  | Ok None -> Deferred.return (Error (`Api_error (sprintf "No account found for currency %s" currency)))
+  | Ok (Some account) ->
+    send_money cfg
+      ~account_id:account.uuid
+      ~to_address:address
+      ~amount:(Float.to_string amount)
+      ~currency
+      ()
+
+(** List transactions (includes sends and receives) for an account (v2 API)
+    GET /v2/accounts/:account_id/transactions *)
+let list_transactions cfg ~account_id ?limit () : (Transaction.t list, [> Error.t ]) result Deferred.t =
+  let params = List.filter_opt
+    [ Option.map limit ~f:(fun l -> sprintf "limit=%d" l)
+    ]
+  in
+  let path = match params with
+    | [] -> sprintf "/v2/accounts/%s/transactions" account_id
+    | _ -> sprintf "/v2/accounts/%s/transactions?%s" account_id (String.concat ~sep:"&" params)
+  in
+  get_authenticated ~cfg ~path >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Transaction.list_response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok resp -> Ok resp.data
+
+(** Get deposits (receive transactions) for a currency *)
+let get_deposits cfg ?currency ?limit () : (Transaction.t list, [> Error.t ]) result Deferred.t =
+  (* Get all accounts and filter by currency if specified *)
+  accounts cfg
+  >>= function
+  | Error _ as err -> Deferred.return err
+  | Ok resp ->
+    let target_accounts = match currency with
+      | None -> resp.accounts
+      | Some c ->
+        let c_upper = String.uppercase c in
+        List.filter resp.accounts ~f:(fun a ->
+          String.equal (String.uppercase a.currency) c_upper)
+    in
+    (* Get transactions from all target accounts and filter for receives *)
+    Deferred.List.concat_map ~how:`Sequential target_accounts ~f:(fun account ->
+      list_transactions cfg ~account_id:account.uuid ?limit ()
+      >>| function
+      | Error _ -> []
+      | Ok txs ->
+        (* Filter for receive transactions (deposits) *)
+        List.filter txs ~f:(fun tx ->
+          String.equal tx.type_ "receive" ||
+          String.equal tx.type_ "fiat_deposit" ||
+          String.equal tx.type_ "pro_deposit"))
+    >>| fun all_deposits -> Ok all_deposits
+
+(** Get withdrawals (send transactions) for a currency *)
+let get_withdrawals cfg ?currency ?limit () : (Transaction.t list, [> Error.t ]) result Deferred.t =
+  (* Get all accounts and filter by currency if specified *)
+  accounts cfg
+  >>= function
+  | Error _ as err -> Deferred.return err
+  | Ok resp ->
+    let target_accounts = match currency with
+      | None -> resp.accounts
+      | Some c ->
+        let c_upper = String.uppercase c in
+        List.filter resp.accounts ~f:(fun a ->
+          String.equal (String.uppercase a.currency) c_upper)
+    in
+    (* Get transactions from all target accounts and filter for sends *)
+    Deferred.List.concat_map ~how:`Sequential target_accounts ~f:(fun account ->
+      list_transactions cfg ~account_id:account.uuid ?limit ()
+      >>| function
+      | Error _ -> []
+      | Ok txs ->
+        (* Filter for send transactions (withdrawals) *)
+        List.filter txs ~f:(fun tx ->
+          String.equal tx.type_ "send" ||
+          String.equal tx.type_ "fiat_withdrawal" ||
+          String.equal tx.type_ "pro_withdrawal"))
+    >>| fun all_withdrawals -> Ok all_withdrawals

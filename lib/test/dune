@@ -27,3 +27,10 @@
  (libraries core fluxum)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core))
+
+(test
+ (name test_account_types)
+ (modules test_account_types)
+ (libraries core async fluxum)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))

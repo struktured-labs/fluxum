@@ -6,6 +6,46 @@
 
 ---
 
+## Implementation Progress
+
+| Phase | Feature | Status | Version |
+|-------|---------|--------|---------|
+| 1 | Rate Limiting Infrastructure | ✅ Complete | v0.20.0 |
+| 2 | Time-in-Force + Stop Orders | ✅ Complete | v0.20.0 |
+| 3 | Historical OHLCV/Candles | ✅ Complete | v0.21.0 |
+| 4 | Account Operations (Deposits/Withdrawals) | ⏳ Pending | - |
+| 5 | Perpetuals/Futures Types | ⏳ Deprioritized | - |
+
+**Note:** Phase 4 and 5 swapped priorities. US retail traders (especially PA) cannot legally trade perpetuals/futures on offshore exchanges (Bybit, OKX, Hyperliquid). Account operations are more immediately useful.
+
+---
+
+## Performance Comparison: Fluxum vs CCXT
+
+| Metric | CCXT (Python) | Fluxum (OCaml) | Notes |
+|--------|---------------|----------------|-------|
+| **ECDSA Signing** | ~45ms (pure Python) | <1ms (native) | CCXT can use Coincurve for 0.05ms |
+| **Request Overhead** | ~5-10ms (async) | <1ms (Async) | Jane Street Async is very efficient |
+| **Memory per Connection** | ~10-50MB (Python runtime) | ~1-5MB | OCaml has lower baseline |
+| **WebSocket Reconnect** | Manual/varies | Auto with heartbeat | Fluxum has RFC 6455 ping/pong |
+| **Rate Limit Handling** | Built-in token bucket | Built-in token bucket | Parity (v0.20.0) |
+| **Concurrent Streams** | GIL-limited | True parallel | OCaml multicore/Async |
+
+**CCXT Rate Limits:** The `rateLimit` property is ms between requests. E.g., rateLimit=100 → 10 req/sec.
+
+**Latency Observations (CCXT issues):**
+- Proxy overhead: ~0.006s vs ~0.054s direct
+- Order placement: 5ms ping but ~700ms order latency (exchange-dependent)
+- Signing: Coincurve reduces from 45ms to 0.05ms
+
+**Fluxum Advantages:**
+- No GIL - true parallelism for multi-exchange arbitrage
+- Lower memory footprint for long-running processes
+- Type safety catches errors at compile time
+- Better WebSocket architecture with auto-reconnect
+
+---
+
 ## Current Fluxum State
 
 ### Exchange Coverage (35 total)
@@ -21,18 +61,6 @@
 - ✅ Multi-exchange order book consolidation + arbitrage detection
 - ✅ On-chain DEX execution (Uniswap V3)
 - ✅ Auto-reconnecting sessions with heartbeat
-
----
-
-## Implementation Progress
-
-| Phase | Feature | Status | Version |
-|-------|---------|--------|---------|
-| 1 | Rate Limiting Infrastructure | ✅ Complete | v0.20.0 |
-| 2 | Time-in-Force + Stop Orders | ✅ Complete | v0.20.0 |
-| 3 | Historical OHLCV/Candles | ✅ Complete | v0.21.0 |
-| 4 | Perpetuals/Futures Types | ⏳ Pending | - |
-| 5 | Account Operations | ⏳ Pending | - |
 
 ---
 
@@ -73,46 +101,43 @@
 
 ---
 
-### ⏳ Phase 4: Perpetuals/Futures (PENDING)
+### ⏳ Phase 4: Account Operations (PENDING)
 
-#### Futures/Perpetuals Position Types
-**CCXT:** Position with entry_price, liquidation_price, leverage, margin_mode, unrealized_pnl
-**Fluxum:** No Position type; Hyperliquid has funding rates but not exposed uniformly
-
-**Impact:** Can't properly track perpetual positions
-**Effort:** Medium (~200 lines)
-**Files:** `lib/types.ml` (add `Position.t`), update Hyperliquid/Bybit/OKX adapters
-
-#### Funding Rates (Unified)
-**CCXT:** `fetch_funding_rate(symbol)`, `fetch_funding_rate_history()`
-**Fluxum:** Only Hyperliquid has funding rates; Bybit/OKX have perpetuals but no rate exposure
-
-**Impact:** Can't analyze funding costs across exchanges
-**Effort:** Low (~100 lines)
-**Files:** `lib/types.ml` (add `Funding_rate.t`), update perpetual adapters
-
----
-
-### ⏳ Phase 5: Account Operations (PENDING)
-
-#### Deposit/Withdrawal Operations
 **CCXT:** `fetch_deposit_address()`, `withdraw()`, `fetch_deposits()`, `fetch_withdrawals()`
 **Fluxum:** None
 
-**Impact:** Manual fund transfers required
-**Effort:** Medium-High (~200 lines per exchange)
+**Impact:** Manual fund transfers required; can't automate rebalancing across exchanges
+**Target Exchanges:** Gemini, Kraken, Coinbase (US-friendly, regulated)
 
-#### Sub-Account Management
-**CCXT:** `fetch_accounts()`, `transfer()` between accounts
-**Fluxum:** Single account only
+#### New Types Required
+- `Transfer_status.t`: Pending, Processing, Completed, Failed, Cancelled
+- `Deposit_address.t`: venue, currency, address, tag, network
+- `Deposit.t`: venue, id, currency, amount, status, address, tx_id, timestamps
+- `Withdrawal.t`: venue, id, currency, amount, fee, status, address, tag, tx_id, timestamps
 
-#### Lending/Borrowing
-**CCXT:** `fetch_borrow_rate()`, `borrow()`, `repay()`
-**Fluxum:** None (despite Aave/Compound in venues)
+#### Exchange API Endpoints
 
-#### Margin Trading Types
-**CCXT:** Isolated vs cross margin, leverage settings
-**Fluxum:** Spot-only types
+| Exchange | Deposit Address | Withdraw | Deposit History | Withdrawal History |
+|----------|-----------------|----------|-----------------|-------------------|
+| Gemini | `POST /v1/deposit/{currency}/newAddress` | `POST /v1/withdraw/{currency}` | `POST /v1/transfers` | `POST /v1/transfers` |
+| Kraken | `POST /0/private/DepositAddresses` | `POST /0/private/Withdraw` | `POST /0/private/DepositStatus` | `POST /0/private/WithdrawStatus` |
+| Coinbase | `POST /v2/accounts/:id/addresses` | `POST /v2/accounts/:id/transactions` | `GET /v2/accounts/:id/deposits` | `GET /v2/accounts/:id/withdrawals` |
+
+**Effort:** ~200-300 lines per exchange (3 exchanges = ~800 lines total)
+
+---
+
+### ⏳ Phase 5: Perpetuals/Futures (DEPRIORITIZED)
+
+**Reason:** US retail traders cannot legally trade perpetuals on offshore exchanges. PA specifically has strict regulations. Hyperliquid, Bybit, OKX all geo-block US users.
+
+**CCXT:** Position with entry_price, liquidation_price, leverage, margin_mode, unrealized_pnl
+**Fluxum:** No Position type; Hyperliquid has funding rates but not exposed uniformly
+
+**If needed later:**
+- Add `Position.t` to `lib/types.ml`
+- Add `Funding_rate.t` and `get_funding_rate` to interface
+- Implement for: Hyperliquid, Bybit, OKX, dYdX
 
 ---
 
@@ -131,12 +156,12 @@
 | **User Trades** | ✅ | ✅ | Parity |
 | **OHLCV REST** | ✅ | ✅ Binance/Kraken | ✅ v0.21.0 |
 | **OHLCV WS** | ⚠️ Some | ✅ | Fluxum better |
-| **Futures Position** | ✅ | ❌ | Phase 4 |
-| **Funding Rates** | ✅ | ⚠️ Hyperliquid only | Phase 4 |
-| **Open Interest** | ✅ | ⚠️ Hyperliquid only | Phase 4 |
-| **Deposits/Withdrawals** | ✅ | ❌ | Phase 5 |
-| **Sub-Accounts** | ✅ | ❌ | Phase 5 |
-| **Margin/Leverage** | ✅ | ❌ | Phase 5 |
+| **Futures Position** | ✅ | ❌ | Phase 5 (deprioritized) |
+| **Funding Rates** | ✅ | ⚠️ Hyperliquid only | Phase 5 (deprioritized) |
+| **Open Interest** | ✅ | ⚠️ Hyperliquid only | Phase 5 (deprioritized) |
+| **Deposits/Withdrawals** | ✅ | ❌ | Phase 4 |
+| **Sub-Accounts** | ✅ | ❌ | Future |
+| **Margin/Leverage** | ✅ | ❌ | Future |
 | **WebSocket Streams** | ⚠️ Some | ✅ | Fluxum better |
 | **Multi-Exchange Arb** | ❌ | ✅ | Fluxum better |
 | **P&L Tracking** | ❌ | ✅ | Fluxum better |
@@ -154,17 +179,20 @@ Features where Fluxum exceeds CCXT:
 4. **On-chain DEX Execution** - Native Uniswap V3 swap execution
 5. **OCaml Type Safety** - Compile-time guarantees, exhaustive pattern matching
 6. **Normalized Types** - Consistent interface across 35+ exchanges
+7. **No GIL** - True parallelism for multi-exchange operations
+8. **Lower Memory** - ~5x less memory than Python for long-running processes
 
 ---
 
 ## Remaining Gaps to Close
 
 ### High Priority (Phase 4)
-1. **Perpetuals Position type** - Needed for derivatives trading
-2. **Unified funding rates** - Needed for funding cost analysis
+1. **Deposits/Withdrawals** - For automated fund management and rebalancing
+   - Target: Gemini, Kraken, Coinbase (US-friendly)
 
-### Lower Priority (Phase 5)
-3. **Deposits/Withdrawals** - For automated fund management
+### Lower Priority (Phase 5+)
+2. **Perpetuals Position type** - If US regulations change or for non-US users
+3. **Unified funding rates** - For funding cost analysis
 4. **Sub-account transfers** - For multi-strategy setups
 5. **Margin settings** - For margin trading
 
@@ -177,3 +205,12 @@ Features where Fluxum exceeds CCXT:
 | v0.19.1 | WebSocket RFC 6455 ping/pong |
 | v0.20.0 | Rate limiter, Time-in-force, Stop orders |
 | v0.21.0 | Historical OHLCV candles |
+
+---
+
+## References
+
+- [CCXT GitHub](https://github.com/ccxt/ccxt)
+- [CCXT Documentation](https://docs.ccxt.com/)
+- [CCXT Rate Limiting Discussion](https://github.com/ccxt/ccxt/issues/13949)
+- [CCXT Latency Meter](https://github.com/DenisKolodin/ccxt-latency)

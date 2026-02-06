@@ -67,10 +67,15 @@ module Adapter = struct
   type t =
     { cfg : (module Cfg.S)
     ; symbols : string list
+    ; rate_limiter : Exchange_common.Rate_limiter.t
     }
 
   let create ~cfg ?(symbols = []) () =
-    { cfg; symbols }
+    { cfg
+    ; symbols
+    ; rate_limiter = Exchange_common.Rate_limiter.create
+        ~config:Exchange_common.Rate_limiter.Configs.binance ()
+    }
 
   module Venue = struct
     let t = Types.Venue.Binance
@@ -129,75 +134,93 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.t
     end
+
+    (** Account operations - deposits/withdrawals *)
+    module Deposit_address = struct
+      type t = Sapi.Deposit_address.T.response
+    end
+
+    module Deposit = struct
+      type t = Sapi.Deposit_history.T.deposit
+    end
+
+    module Withdrawal = struct
+      type t = Sapi.Withdrawal_history.T.withdrawal
+    end
   end
 
   let place_order t (req : Native.Order.request) =
-    V3.New_order.request t.cfg req >>| function
-    | `Ok resp -> Ok resp
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V3.New_order.request t.cfg req >>| function
+      | `Ok resp -> Ok resp
+      | #Rest.Error.t as e -> Error e)
 
   let cancel_order t (order_id : Native.Order.id) =
     match t.symbols with
     | symbol :: _ ->
-      V3.Cancel_order.request t.cfg
-        { symbol
-        ; orderId = Some order_id
-        ; origClientOrderId = None
-        ; newClientOrderId = None
-        ; recvWindow = None
-        }
-      >>| (function
-      | `Ok _ -> Ok ()
-      | #Rest.Error.t as e -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V3.Cancel_order.request t.cfg
+          { symbol
+          ; orderId = Some order_id
+          ; origClientOrderId = None
+          ; newClientOrderId = None
+          ; recvWindow = None
+          }
+        >>| (function
+        | `Ok _ -> Ok ()
+        | #Rest.Error.t as e -> Error e))
     | [] ->
       Deferred.return
         (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
 
   let balances t =
-    V3.Account.request t.cfg () >>| function
-    | `Ok resp -> Ok resp.balances
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V3.Account.request t.cfg () >>| function
+      | `Ok resp -> Ok resp.balances
+      | #Rest.Error.t as e -> Error e)
 
   let get_order_status t (order_id : Native.Order.id) =
     match t.symbols with
     | symbol :: _ ->
-      V3.Query_order.request t.cfg
-        { symbol; orderId = Some order_id; origClientOrderId = None; recvWindow = None }
-      >>| (function
-        | `Ok resp ->
-          let order : V3.Open_orders.T.order =
-            { symbol = resp.symbol
-            ; orderId = resp.orderId
-            ; orderListId = resp.orderListId
-            ; clientOrderId = resp.clientOrderId
-            ; price = resp.price
-            ; origQty = resp.origQty
-            ; executedQty = resp.executedQty
-            ; cummulativeQuoteQty = resp.cummulativeQuoteQty
-            ; status = resp.status
-            ; timeInForce = resp.timeInForce
-            ; type_ = resp.type_
-            ; side = resp.side
-            ; stopPrice = resp.stopPrice
-            ; icebergQty = resp.icebergQty
-            ; time = resp.time
-            ; updateTime = resp.updateTime
-            ; isWorking = resp.isWorking
-            ; origQuoteOrderQty = resp.origQuoteOrderQty
-            }
-          in
-          Ok order
-        | #Rest.Error.t as e -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V3.Query_order.request t.cfg
+          { symbol; orderId = Some order_id; origClientOrderId = None; recvWindow = None }
+        >>| (function
+          | `Ok resp ->
+            let order : V3.Open_orders.T.order =
+              { symbol = resp.symbol
+              ; orderId = resp.orderId
+              ; orderListId = resp.orderListId
+              ; clientOrderId = resp.clientOrderId
+              ; price = resp.price
+              ; origQty = resp.origQty
+              ; executedQty = resp.executedQty
+              ; cummulativeQuoteQty = resp.cummulativeQuoteQty
+              ; status = resp.status
+              ; timeInForce = resp.timeInForce
+              ; type_ = resp.type_
+              ; side = resp.side
+              ; stopPrice = resp.stopPrice
+              ; icebergQty = resp.icebergQty
+              ; time = resp.time
+              ; updateTime = resp.updateTime
+              ; isWorking = resp.isWorking
+              ; origQuoteOrderQty = resp.origQuoteOrderQty
+              }
+            in
+            Ok order
+          | #Rest.Error.t as e -> Error e))
     | [] ->
       Deferred.return
         (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
 
   let get_open_orders t ?symbol () =
     let symbol = match symbol with Some s -> Some s | None -> List.hd t.symbols in
-    V3.Open_orders.request t.cfg { symbol; recvWindow = None }
-    >>| function
-    | `Ok orders -> Ok orders
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V3.Open_orders.request t.cfg { symbol; recvWindow = None }
+      >>| function
+      | `Ok orders -> Ok orders
+      | #Rest.Error.t as e -> Error e)
 
   let get_order_history t ?symbol ?limit () =
     let symbol = match symbol with
@@ -209,147 +232,241 @@ module Adapter = struct
     match symbol with
     | Error e -> return (Error e)
     | Ok sym ->
-    V3.All_orders.request t.cfg
-      { symbol = sym; orderId = None; startTime = None; endTime = None; limit; recvWindow = None }
-    >>| function
-    | `Ok orders ->
-      (* Convert All_orders.order to Open_orders.order *)
-      let convert (o : V3.All_orders.T.order) : V3.Open_orders.T.order =
-        { symbol = o.symbol
-        ; orderId = o.orderId
-        ; orderListId = o.orderListId
-        ; clientOrderId = o.clientOrderId
-        ; price = o.price
-        ; origQty = o.origQty
-        ; executedQty = o.executedQty
-        ; cummulativeQuoteQty = o.cummulativeQuoteQty
-        ; status = o.status
-        ; timeInForce = o.timeInForce
-        ; type_ = o.type_
-        ; side = o.side
-        ; stopPrice = o.stopPrice
-        ; icebergQty = o.icebergQty
-        ; time = o.time
-        ; updateTime = o.updateTime
-        ; isWorking = o.isWorking
-        ; origQuoteOrderQty = o.origQuoteOrderQty
-        }
-      in
-      Ok (List.map orders ~f:convert)
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V3.All_orders.request t.cfg
+        { symbol = sym; orderId = None; startTime = None; endTime = None; limit; recvWindow = None }
+      >>| function
+      | `Ok orders ->
+        (* Convert All_orders.order to Open_orders.order *)
+        let convert (o : V3.All_orders.T.order) : V3.Open_orders.T.order =
+          { symbol = o.symbol
+          ; orderId = o.orderId
+          ; orderListId = o.orderListId
+          ; clientOrderId = o.clientOrderId
+          ; price = o.price
+          ; origQty = o.origQty
+          ; executedQty = o.executedQty
+          ; cummulativeQuoteQty = o.cummulativeQuoteQty
+          ; status = o.status
+          ; timeInForce = o.timeInForce
+          ; type_ = o.type_
+          ; side = o.side
+          ; stopPrice = o.stopPrice
+          ; icebergQty = o.icebergQty
+          ; time = o.time
+          ; updateTime = o.updateTime
+          ; isWorking = o.isWorking
+          ; origQuoteOrderQty = o.origQuoteOrderQty
+          }
+        in
+        Ok (List.map orders ~f:convert)
+      | #Rest.Error.t as e -> Error e)
 
   let get_my_trades t ~symbol ?limit () =
-    V3.My_trades.request t.cfg
-      { symbol; orderId = None; startTime = None; endTime = None; fromId = None; limit; recvWindow = None }
-    >>| function
-    | `Ok trades -> Ok trades
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V3.My_trades.request t.cfg
+        { symbol; orderId = None; startTime = None; endTime = None; fromId = None; limit; recvWindow = None }
+      >>| function
+      | `Ok trades -> Ok trades
+      | #Rest.Error.t as e -> Error e)
 
   let get_symbols t () =
-    V3.Exchange_info.request t.cfg { symbol = None }
-    >>| function
-    | `Ok info -> Ok info.symbols
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V3.Exchange_info.request t.cfg { symbol = None }
+      >>| function
+      | `Ok info -> Ok info.symbols
+      | #Rest.Error.t as e -> Error e)
 
   let get_ticker t ~symbol () =
-    V3.Ticker_24hr.request t.cfg { symbol }
-    >>| function
-    | `Ok ticker -> Ok ticker
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V3.Ticker_24hr.request t.cfg { symbol }
+      >>| function
+      | `Ok ticker -> Ok ticker
+      | #Rest.Error.t as e -> Error e)
 
   let get_order_book t ~symbol ?limit () =
-    V3.Depth.request t.cfg { symbol; limit }
-    >>| function
-    | `Ok depth -> Ok depth
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V3.Depth.request t.cfg { symbol; limit }
+      >>| function
+      | `Ok depth -> Ok depth
+      | #Rest.Error.t as e -> Error e)
 
   let get_recent_trades t ~symbol ?limit () =
-    V3.Recent_trades.request t.cfg { symbol; limit }
-    >>| function
-    | `Ok trades -> Ok trades
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V3.Recent_trades.request t.cfg { symbol; limit }
+      >>| function
+      | `Ok trades -> Ok trades
+      | #Rest.Error.t as e -> Error e)
 
-  let get_candles (_ : t) ~symbol ~(timeframe : Types.Timeframe.t) ?since ?until ?limit () =
-    (* Binance klines endpoint: GET /api/v3/klines *)
-    let interval = match timeframe with
-      | Types.Timeframe.M1  -> "1m"
-      | Types.Timeframe.M3  -> "3m"
-      | Types.Timeframe.M5  -> "5m"
-      | Types.Timeframe.M15 -> "15m"
-      | Types.Timeframe.M30 -> "30m"
-      | Types.Timeframe.H1  -> "1h"
-      | Types.Timeframe.H2  -> "2h"
-      | Types.Timeframe.H4  -> "4h"
-      | Types.Timeframe.H6  -> "6h"
-      | Types.Timeframe.H8  -> "8h"
-      | Types.Timeframe.H12 -> "12h"
-      | Types.Timeframe.D1  -> "1d"
-      | Types.Timeframe.D3  -> "3d"
-      | Types.Timeframe.W1  -> "1w"
-      | Types.Timeframe.MO1 -> "1M"
-    in
-    let params = [("symbol", [symbol]); ("interval", [interval])] in
-    let params = match since with
-      | Some t ->
-        let ms = Time_float_unix.to_span_since_epoch t |> Time_float_unix.Span.to_ms |> Int64.of_float in
-        ("startTime", [Int64.to_string ms]) :: params
-      | None -> params
-    in
-    let params = match until with
-      | Some t ->
-        let ms = Time_float_unix.to_span_since_epoch t |> Time_float_unix.Span.to_ms |> Int64.of_float in
-        ("endTime", [Int64.to_string ms]) :: params
-      | None -> params
-    in
-    let params = match limit with
-      | Some n -> ("limit", [Int.to_string n]) :: params
-      | None -> params
-    in
-    let uri = Uri.of_string "https://api.binance.com/api/v3/klines" in
-    let uri = Uri.with_query uri params in
-    Monitor.try_with (fun () ->
-      Cohttp_async.Client.get uri >>= fun (_, body) ->
-      Cohttp_async.Body.to_string body
-    ) >>| function
-    | Error _ -> Error (`Bad_request "Network error fetching klines")
-    | Ok body ->
-      match Yojson.Safe.from_string body with
-      | exception _ -> Error (`Json_parse_error Rest.Error.{ message = "Failed to parse klines response"; body })
-      | json ->
-        match json with
-        | `List klines ->
-          let parse_kline kline =
-            match kline with
-            | `List [`Int open_time_i; `String open_; `String high; `String low; `String close;
-                     `String volume; `Int close_time_i; `String quote_volume; `Int trades; _; _; _] ->
-              Some { Native.Candle.symbol; timeframe; open_time = Int64.of_int open_time_i; open_; high; low; close;
-                     volume; close_time = Int64.of_int close_time_i; quote_volume; trades }
-            | `List [`Intlit open_time_s; `String open_; `String high; `String low; `String close;
-                     `String volume; `Intlit close_time_s; `String quote_volume; `Int trades; _; _; _] ->
-              Some { Native.Candle.symbol; timeframe; open_time = Int64.of_string open_time_s; open_; high; low; close;
-                     volume; close_time = Int64.of_string close_time_s; quote_volume; trades }
-            | _ -> None
-          in
-          Ok (List.filter_map klines ~f:parse_kline)
-        | _ -> Error (`Json_parse_error Rest.Error.{ message = "Expected array of klines"; body })
+  let get_candles (t : t) ~symbol ~(timeframe : Types.Timeframe.t) ?since ?until ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      (* Binance klines endpoint: GET /api/v3/klines *)
+      let interval = match timeframe with
+        | Types.Timeframe.M1  -> "1m"
+        | Types.Timeframe.M3  -> "3m"
+        | Types.Timeframe.M5  -> "5m"
+        | Types.Timeframe.M15 -> "15m"
+        | Types.Timeframe.M30 -> "30m"
+        | Types.Timeframe.H1  -> "1h"
+        | Types.Timeframe.H2  -> "2h"
+        | Types.Timeframe.H4  -> "4h"
+        | Types.Timeframe.H6  -> "6h"
+        | Types.Timeframe.H8  -> "8h"
+        | Types.Timeframe.H12 -> "12h"
+        | Types.Timeframe.D1  -> "1d"
+        | Types.Timeframe.D3  -> "3d"
+        | Types.Timeframe.W1  -> "1w"
+        | Types.Timeframe.MO1 -> "1M"
+      in
+      let params = [("symbol", [symbol]); ("interval", [interval])] in
+      let params = match since with
+        | Some t ->
+          let ms = Time_float_unix.to_span_since_epoch t |> Time_float_unix.Span.to_ms |> Int64.of_float in
+          ("startTime", [Int64.to_string ms]) :: params
+        | None -> params
+      in
+      let params = match until with
+        | Some t ->
+          let ms = Time_float_unix.to_span_since_epoch t |> Time_float_unix.Span.to_ms |> Int64.of_float in
+          ("endTime", [Int64.to_string ms]) :: params
+        | None -> params
+      in
+      let params = match limit with
+        | Some n -> ("limit", [Int.to_string n]) :: params
+        | None -> params
+      in
+      let uri = Uri.of_string "https://api.binance.com/api/v3/klines" in
+      let uri = Uri.with_query uri params in
+      Monitor.try_with (fun () ->
+        Cohttp_async.Client.get uri >>= fun (_, body) ->
+        Cohttp_async.Body.to_string body
+      ) >>| function
+      | Error _ -> Error (`Bad_request "Network error fetching klines")
+      | Ok body ->
+        match Yojson.Safe.from_string body with
+        | exception _ -> Error (`Json_parse_error Rest.Error.{ message = "Failed to parse klines response"; body })
+        | json ->
+          match json with
+          | `List klines ->
+            let parse_kline kline =
+              match kline with
+              | `List [`Int open_time_i; `String open_; `String high; `String low; `String close;
+                       `String volume; `Int close_time_i; `String quote_volume; `Int trades; _; _; _] ->
+                Some { Native.Candle.symbol; timeframe; open_time = Int64.of_int open_time_i; open_; high; low; close;
+                       volume; close_time = Int64.of_int close_time_i; quote_volume; trades }
+              | `List [`Intlit open_time_s; `String open_; `String high; `String low; `String close;
+                       `String volume; `Intlit close_time_s; `String quote_volume; `Int trades; _; _; _] ->
+                Some { Native.Candle.symbol; timeframe; open_time = Int64.of_string open_time_s; open_; high; low; close;
+                       volume; close_time = Int64.of_string close_time_s; quote_volume; trades }
+              | _ -> None
+            in
+            Ok (List.filter_map klines ~f:parse_kline)
+          | _ -> Error (`Json_parse_error Rest.Error.{ message = "Expected array of klines"; body }))
 
   let cancel_all_orders t ?symbol () =
     match symbol with
     | Some sym ->
-      V3.Cancel_all_orders.request t.cfg { symbol = sym; recvWindow = None }
-      >>| (function
-        | `Ok orders -> Ok (List.length orders)
-        | #Rest.Error.t as e -> Error e)
-    | None ->
-      match t.symbols with
-      | sym :: _ ->
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
         V3.Cancel_all_orders.request t.cfg { symbol = sym; recvWindow = None }
         >>| (function
           | `Ok orders -> Ok (List.length orders)
-          | #Rest.Error.t as e -> Error e)
+          | #Rest.Error.t as e -> Error e))
+    | None ->
+      match t.symbols with
+      | sym :: _ ->
+        Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+          V3.Cancel_all_orders.request t.cfg { symbol = sym; recvWindow = None }
+          >>| (function
+            | `Ok orders -> Ok (List.length orders)
+            | #Rest.Error.t as e -> Error e))
       | [] ->
         Deferred.return
           (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
+
+  (** {2 Account Operations - Deposits/Withdrawals} *)
+
+  let get_deposit_address t ~currency ?network () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Sapi.Deposit_address.request t.cfg
+        { coin = currency
+        ; network
+        ; recvWindow = None
+        }
+      >>| function
+      | `Ok addr -> Ok addr
+      | #Rest.Error.t as e -> Error e)
+
+  let withdraw t ~currency ~amount ~address ?tag ?network () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Sapi.Withdraw.request t.cfg
+        { coin = currency
+        ; withdrawOrderId = None
+        ; network
+        ; address
+        ; addressTag = tag
+        ; amount = Float.to_string amount
+        ; transactionFeeFlag = None
+        ; name = None
+        ; walletType = None
+        ; recvWindow = None
+        }
+      >>| function
+      | `Ok resp ->
+        (* Binance only returns the ID for a new withdrawal.
+           We construct a minimal withdrawal record with Pending status. *)
+        let withdrawal : Sapi.Withdrawal_history.T.withdrawal =
+          { id = resp.id
+          ; amount = Float.to_string amount
+          ; transactionFee = "0"
+          ; coin = currency
+          ; status = 4  (* Processing *)
+          ; address
+          ; txId = ""
+          ; applyTime = ""
+          ; network = Option.value network ~default:""
+          ; transferType = 0
+          ; withdrawOrderId = None
+          ; info = ""
+          ; confirmNo = 0
+          ; walletType = 0
+          ; txKey = ""
+          ; completeTime = None
+          }
+        in
+        Ok withdrawal
+      | #Rest.Error.t as e -> Error e)
+
+  let get_deposits t ?currency ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Sapi.Deposit_history.request t.cfg
+        { coin = currency
+        ; status = None
+        ; startTime = None
+        ; endTime = None
+        ; offset = None
+        ; limit
+        ; recvWindow = None
+        ; txId = None
+        }
+      >>| function
+      | `Ok deposits -> Ok deposits
+      | #Rest.Error.t as e -> Error e)
+
+  let get_withdrawals t ?currency ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Sapi.Withdrawal_history.request t.cfg
+        { coin = currency
+        ; withdrawOrderId = None
+        ; status = None
+        ; startTime = None
+        ; endTime = None
+        ; offset = None
+        ; limit
+        ; recvWindow = None
+        }
+      >>| function
+      | `Ok withdrawals -> Ok withdrawals
+      | #Rest.Error.t as e -> Error e)
 
   module Streams = struct
     (** Private trade stream requires authenticated WebSocket.
@@ -628,6 +745,123 @@ module Adapter = struct
       | `Not_found -> Types.Error.Transport (Failure "Not found")
       | `Service_unavailable msg -> Types.Error.Transport (Failure msg)
       | `Forbidden msg -> Types.Error.Transport (Failure msg)
+
+    (** Normalize deposit address from Binance SAPI response *)
+    let deposit_address (addr : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      Ok ({ venue = Venue.t
+      ; currency = addr.coin
+      ; address = addr.address
+      ; tag = (match String.is_empty addr.tag with
+              | true -> None
+              | false -> Some addr.tag)
+      ; network = None  (* Binance doesn't return network in deposit address response *)
+      } : Types.Deposit_address.t)
+
+    (** Map Binance deposit status code to Transfer_status.t
+        Binance deposit status:
+        - 0 = pending
+        - 1 = success (credited to exchange account)
+        - 6 = credited but awaiting confirmations *)
+    let deposit_status_of_int = function
+      | 0 -> Types.Transfer_status.Pending
+      | 1 -> Types.Transfer_status.Completed
+      | 6 -> Types.Transfer_status.Completed  (* Credited but not fully confirmed *)
+      | _ -> Types.Transfer_status.Pending
+
+    (** Normalize deposit from Binance SAPI response *)
+    let deposit (d : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string d.amount in
+      let status = deposit_status_of_int d.status in
+      let created_at =
+        match Int64.(d.insertTime > 0L) with
+        | true ->
+          Some (Time_float_unix.of_span_since_epoch
+                  (Time_float_unix.Span.of_ms (Int64.to_float d.insertTime)))
+        | false -> None
+      in
+      Ok ({ venue = Venue.t
+      ; id = (match String.is_empty d.id with
+             | true -> d.txId  (* Use txId as fallback if id is empty *)
+             | false -> d.id)
+      ; currency = d.coin
+      ; amount
+      ; status
+      ; address = Some d.address
+      ; tx_id = (match String.is_empty d.txId with
+                | true -> None
+                | false -> Some d.txId)
+      ; created_at
+      ; updated_at = None
+      } : Types.Deposit.t)
+
+    (** Map Binance withdrawal status code to Transfer_status.t
+        Binance withdrawal status:
+        - 0 = email sent (awaiting email confirmation)
+        - 1 = cancelled
+        - 2 = awaiting approval
+        - 3 = rejected
+        - 4 = processing
+        - 5 = failure
+        - 6 = completed *)
+    let withdrawal_status_of_int = function
+      | 0 -> Types.Transfer_status.Pending     (* Email sent *)
+      | 1 -> Types.Transfer_status.Cancelled
+      | 2 -> Types.Transfer_status.Pending     (* Awaiting approval *)
+      | 3 -> Types.Transfer_status.Failed      (* Rejected *)
+      | 4 -> Types.Transfer_status.Processing
+      | 5 -> Types.Transfer_status.Failed      (* Failure *)
+      | 6 -> Types.Transfer_status.Completed
+      | _ -> Types.Transfer_status.Pending
+
+    (** Normalize withdrawal from Binance SAPI response *)
+    let withdrawal (w : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string w.amount in
+      let%bind fee =
+        match String.is_empty w.transactionFee with
+        | true -> Ok None
+        | false ->
+          let%bind f = Fluxum.Normalize_common.Float_conv.amount_of_string w.transactionFee in
+          Ok (Some f)
+      in
+      let status = withdrawal_status_of_int w.status in
+      (* Parse applyTime - Binance uses ISO datetime string like "2024-01-15 10:30:00" *)
+      let created_at =
+        match String.is_empty w.applyTime with
+        | true -> None
+        | false ->
+          (* Try to parse the datetime string *)
+          (try
+            (* Binance format: "2024-01-15 10:30:00" - convert to ISO format *)
+            let iso_time = String.tr w.applyTime ~target:' ' ~replacement:'T' ^ "Z" in
+            Some (Time_float_unix.of_string iso_time)
+          with _ -> None)
+      in
+      let updated_at =
+        match w.completeTime with
+        | None -> None
+        | Some ct when String.is_empty ct -> None
+        | Some ct ->
+          (try
+            let iso_time = String.tr ct ~target:' ' ~replacement:'T' ^ "Z" in
+            Some (Time_float_unix.of_string iso_time)
+          with _ -> None)
+      in
+      Ok ({ venue = Venue.t
+      ; id = w.id
+      ; currency = w.coin
+      ; amount
+      ; fee
+      ; status
+      ; address = w.address
+      ; tag = None  (* Binance doesn't include tag in withdrawal history *)
+      ; tx_id = (match String.is_empty w.txId with
+                | true -> None
+                | false -> Some w.txId)
+      ; created_at
+      ; updated_at
+      } : Types.Withdrawal.t)
   end
 end
 

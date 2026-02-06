@@ -23,6 +23,14 @@ let command : Command.t =
     ; V1.Cancel_order.command
     ; V1.Query_orders.command
     ; V1.Closed_orders.command
+    (* Account operations - deposits/withdrawals *)
+    ; V1.Deposit_methods.command
+    ; V1.Deposit_addresses.command
+    ; V1.Deposit_status.command
+    ; V1.Withdraw.command
+    ; V1.Withdraw_info.command
+    ; V1.Withdraw_status.command
+    ; V1.Withdraw_addresses.command
     ; Order.command
     ; Ws_cmd.command
     ; Ledger.command

@@ -136,6 +136,32 @@ type user_transaction = {
   order_id : int;             (** Related order ID *)
 } [@@deriving yojson { strict = false }, sexp]
 
+(** {1 Account Operations Types} *)
+
+(** Deposit address response *)
+type deposit_address = {
+  address : string;           (** Deposit address *)
+  destination_tag : string option; [@default None]  (** Memo/tag for XRP, XLM, etc. *)
+} [@@deriving yojson { strict = false }, sexp]
+
+(** Withdrawal request response *)
+type withdrawal_response = {
+  id : int;                   (** Withdrawal ID *)
+} [@@deriving yojson { strict = false }, sexp]
+
+(** Withdrawal status/request record *)
+type withdrawal_request = {
+  id : int;                   (** Withdrawal ID *)
+  datetime : string;          (** ISO 8601 datetime *)
+  type_ : int;                (** Withdrawal type: 0=SEPA, 1=Bitcoin, 2=Wire, etc. *)
+  [@key "type"]
+  amount : string;            (** Withdrawal amount *)
+  status : int;               (** 0=open, 1=in_process, 2=finished, 3=cancelled, 4=failed *)
+  currency : string option; [@default None]  (** Currency symbol *)
+  address : string option; [@default None]  (** Destination address for crypto *)
+  transaction_id : string option; [@default None]  (** Blockchain tx ID *)
+} [@@deriving yojson { strict = false }, sexp]
+
 (** {1 WebSocket Types} *)
 
 (** WebSocket subscription request *)

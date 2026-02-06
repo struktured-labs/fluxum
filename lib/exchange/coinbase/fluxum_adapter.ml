@@ -10,6 +10,9 @@
     - Order book snapshots
     - Ticker data
     - Product/symbol info
+    - Deposit addresses (v2 API)
+    - Withdrawals (v2 API)
+    - Deposit/withdrawal history (v2 API)
 *)
 
 open Core
@@ -27,10 +30,15 @@ module Adapter = struct
   type t =
     { cfg : (module Cfg.S)
     ; symbols : string list
+    ; rate_limiter : Exchange_common.Rate_limiter.t
     }
 
   let create ~cfg ?(symbols = []) () =
-    { cfg; symbols }
+    { cfg
+    ; symbols
+    ; rate_limiter = Exchange_common.Rate_limiter.create
+        ~config:Exchange_common.Rate_limiter.Configs.coinbase ()
+    }
 
   module Venue = struct
     let t = Types.Venue.Coinbase
@@ -76,62 +84,86 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.t
     end
+
+    (** Account operations - deposits/withdrawals *)
+    module Deposit_address = struct
+      type t = Rest.Deposit_address.t
+    end
+
+    module Deposit = struct
+      (** Deposit is represented as a receive transaction in Coinbase *)
+      type t = Rest.Transaction.t
+    end
+
+    module Withdrawal = struct
+      (** Withdrawal is represented as a send transaction in Coinbase *)
+      type t = Rest.Transaction.t
+    end
   end
 
   let place_order t (req : Native.Order.request) =
-    Rest.create_order t.cfg req >>| function
-    | Ok resp -> Ok resp
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.create_order t.cfg req >>| function
+      | Ok resp -> Ok resp
+      | Error e -> Error e)
 
   let cancel_order t order_id =
-    Rest.cancel_orders t.cfg ~order_ids:[order_id] >>| function
-    | Ok resp ->
-      (match List.find resp.results ~f:(fun r -> r.success) with
-       | Some r -> Ok (Option.value r.order_id ~default:order_id)
-       | None ->
-         let msg = List.filter_map resp.results ~f:(fun r -> r.failure_reason)
-           |> String.concat ~sep:", " in
-         Error (`Api_error (sprintf "Cancel failed: %s" msg)))
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.cancel_orders t.cfg ~order_ids:[order_id] >>| function
+      | Ok resp ->
+        (match List.find resp.results ~f:(fun r -> r.success) with
+         | Some r -> Ok (Option.value r.order_id ~default:order_id)
+         | None ->
+           let msg = List.filter_map resp.results ~f:(fun r -> r.failure_reason)
+             |> String.concat ~sep:", " in
+           Error (`Api_error (sprintf "Cancel failed: %s" msg)))
+      | Error e -> Error e)
 
   let balances t =
-    Rest.accounts t.cfg >>| function
-    | Ok resp -> Ok resp.accounts
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.accounts t.cfg >>| function
+      | Ok resp -> Ok resp.accounts
+      | Error e -> Error e)
 
   let get_order_status t order_id =
-    Rest.get_order t.cfg ~order_id >>| function
-    | Ok status -> Ok status
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.get_order t.cfg ~order_id >>| function
+      | Ok status -> Ok status
+      | Error e -> Error e)
 
   let get_open_orders t ?symbol () =
-    Rest.list_orders t.cfg ?product_id:symbol ~status:"OPEN" ~limit:100 () >>| function
-    | Ok resp -> Ok resp.orders
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.list_orders t.cfg ?product_id:symbol ~status:"OPEN" ~limit:100 () >>| function
+      | Ok resp -> Ok resp.orders
+      | Error e -> Error e)
 
   let get_order_history t ?symbol ?limit () =
-    Rest.list_orders t.cfg ?product_id:symbol ?limit () >>| function
-    | Ok resp -> Ok resp.orders
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.list_orders t.cfg ?product_id:symbol ?limit () >>| function
+      | Ok resp -> Ok resp.orders
+      | Error e -> Error e)
 
   let get_my_trades _t ~symbol:_ ?limit:_ () =
     (* Coinbase Advanced Trade API uses fills endpoint, not directly available yet *)
     Deferred.return (Error (`Api_error "Fills endpoint not yet implemented"))
 
   let get_symbols t () =
-    Rest.products t.cfg >>| function
-    | Ok resp -> Ok resp.products
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.products t.cfg >>| function
+      | Ok resp -> Ok resp.products
+      | Error e -> Error e)
 
   let get_ticker t ~symbol () =
-    Rest.best_bid_ask t.cfg ~product_id:symbol >>| function
-    | Ok ticker -> Ok ticker
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.best_bid_ask t.cfg ~product_id:symbol >>| function
+      | Ok ticker -> Ok ticker
+      | Error e -> Error e)
 
   let get_order_book t ~symbol ?limit:_ () =
-    Rest.product_book t.cfg ~product_id:symbol >>| function
-    | Ok book -> Ok book
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.product_book t.cfg ~product_id:symbol >>| function
+      | Ok book -> Ok book
+      | Error e -> Error e)
 
   let get_recent_trades _t ~symbol:_ ?limit:_ () =
     (* Coinbase doesn't have a direct recent trades endpoint in Advanced Trade API *)
@@ -151,6 +183,26 @@ module Adapter = struct
          Rest.cancel_orders t.cfg ~order_ids:ids >>| function
          | Ok resp -> Ok (List.count resp.results ~f:(fun r -> r.success))
          | Error e -> Error e)
+
+  (* ============================================================ *)
+  (* Account Operations - Deposits/Withdrawals *)
+  (* ============================================================ *)
+
+  let get_deposit_address t ~currency ?network () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.get_deposit_address t.cfg ~currency ?network ())
+
+  let withdraw t ~currency ~amount ~address ?tag ?network () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.withdraw t.cfg ~currency ~amount ~address ?tag ?network ())
+
+  let get_deposits t ?currency ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.get_deposits t.cfg ?currency ?limit ())
+
+  let get_withdrawals t ?currency ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.get_withdrawals t.cfg ?currency ?limit ())
 
   module Streams = struct
     let trades (_ : t) =
@@ -369,6 +421,76 @@ module Adapter = struct
       | `Api_error msg ->
         Types.Error.Exchange_specific
           { venue = Venue.t; code = "API"; message = msg }
+
+    (* ============================================================ *)
+    (* Normalize - Account Operations *)
+    (* ============================================================ *)
+
+    (** Parse ISO8601 timestamp to Time_float_unix.t *)
+    let parse_timestamp (ts : string) : Time_float_unix.t option =
+      try Some (Time_float_unix.of_string ts)
+      with _ -> None
+
+    let deposit_address (addr : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      (* Extract destination_tag from address_info if present (for XRP, XLM, etc.) *)
+      let tag = Option.bind addr.address_info ~f:(fun ai -> ai.destination_tag) in
+      Ok ({ venue = Venue.t
+         ; currency = ""  (* Not included in address response, caller should know *)
+         ; address = addr.address
+         ; tag
+         ; network = addr.network
+         } : Types.Deposit_address.t)
+
+    let deposit (tx : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string tx.amount.amount in
+      let status = match String.lowercase tx.status with
+        | "pending" -> Types.Transfer_status.Pending
+        | "completed" | "complete" -> Types.Transfer_status.Completed
+        | "failed" -> Types.Transfer_status.Failed
+        | "canceled" | "cancelled" -> Types.Transfer_status.Cancelled
+        | _ -> Types.Transfer_status.Processing
+      in
+      let tx_id = Option.bind tx.network ~f:(fun n -> n.hash) in
+      let address = Option.bind tx.from_ ~f:(fun f -> f.address) in
+      Ok ({ venue = Venue.t
+         ; id = tx.id
+         ; currency = tx.amount.currency
+         ; amount
+         ; status
+         ; address
+         ; tx_id
+         ; created_at = Option.bind tx.created_at ~f:parse_timestamp
+         ; updated_at = Option.bind tx.updated_at ~f:parse_timestamp
+         } : Types.Deposit.t)
+
+    let withdrawal (tx : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string tx.amount.amount in
+      let status = match String.lowercase tx.status with
+        | "pending" -> Types.Transfer_status.Pending
+        | "completed" | "complete" -> Types.Transfer_status.Completed
+        | "failed" -> Types.Transfer_status.Failed
+        | "canceled" | "cancelled" -> Types.Transfer_status.Cancelled
+        | _ -> Types.Transfer_status.Processing
+      in
+      let tx_id = Option.bind tx.network ~f:(fun n -> n.hash) in
+      let address = Option.bind tx.to_ ~f:(fun t -> t.address) |> Option.value ~default:"" in
+      let tag = Option.bind tx.to_ ~f:(fun t ->
+        Option.bind t.address_info ~f:(fun ai -> ai.destination_tag))
+      in
+      Ok ({ venue = Venue.t
+         ; id = tx.id
+         ; currency = tx.amount.currency
+         ; amount
+         ; fee = None  (* Fee not directly available in Coinbase transaction response *)
+         ; status
+         ; address
+         ; tag
+         ; tx_id
+         ; created_at = Option.bind tx.created_at ~f:parse_timestamp
+         ; updated_at = Option.bind tx.updated_at ~f:parse_timestamp
+         } : Types.Withdrawal.t)
   end
 
   (** Order builder module *)

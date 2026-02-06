@@ -10,10 +10,15 @@ module Adapter = struct
   type t =
     { cfg : Cfg.t
     ; symbols : string list
+    ; rate_limiter : Exchange_common.Rate_limiter.t
     }
 
   let create ~cfg ?(symbols = []) () =
-    { cfg; symbols }
+    { cfg
+    ; symbols
+    ; rate_limiter = Exchange_common.Rate_limiter.create
+        ~config:Exchange_common.Rate_limiter.Configs.bitstamp ()
+    }
 
   module Venue = struct
     let t = Types.Venue.Bitstamp
@@ -60,81 +65,123 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.t
     end
+
+    module Deposit_address = struct
+      type t = Native_types.deposit_address
+    end
+
+    module Withdrawal = struct
+      type t = Native_types.withdrawal_request
+    end
   end
 
   let place_order t (req : Native.Order.request) =
-    let (side_type, pair, amount, price) = req in
-    match side_type, price with
-    | `Buy_limit, Some price ->
-      Rest.buy_limit_order ~cfg:t.cfg ~pair ~amount ~price ()
-    | `Sell_limit, Some price ->
-      Rest.sell_limit_order ~cfg:t.cfg ~pair ~amount ~price ()
-    | `Buy_market, _ ->
-      Rest.buy_market_order ~cfg:t.cfg ~pair ~amount
-    | `Sell_market, _ ->
-      Rest.sell_market_order ~cfg:t.cfg ~pair ~amount
-    | `Buy_limit, None ->
-      Deferred.return (Error (`Api_error "Limit buy requires price"))
-    | `Sell_limit, None ->
-      Deferred.return (Error (`Api_error "Limit sell requires price"))
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let (side_type, pair, amount, price) = req in
+      match side_type, price with
+      | `Buy_limit, Some price ->
+        Rest.buy_limit_order ~cfg:t.cfg ~pair ~amount ~price ()
+      | `Sell_limit, Some price ->
+        Rest.sell_limit_order ~cfg:t.cfg ~pair ~amount ~price ()
+      | `Buy_market, _ ->
+        Rest.buy_market_order ~cfg:t.cfg ~pair ~amount
+      | `Sell_market, _ ->
+        Rest.sell_market_order ~cfg:t.cfg ~pair ~amount
+      | `Buy_limit, None ->
+        Deferred.return (Error (`Api_error "Limit buy requires price"))
+      | `Sell_limit, None ->
+        Deferred.return (Error (`Api_error "Limit sell requires price")))
 
   let cancel_order t ~symbol:_ ~order_id =
-    Rest.cancel_order ~cfg:t.cfg ~order_id >>| function
-    | Ok _id -> Ok ()
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.cancel_order ~cfg:t.cfg ~order_id >>| function
+      | Ok _id -> Ok ()
+      | Error e -> Error e)
 
   let balances t =
-    Rest.balance ~cfg:t.cfg >>| function
-    | Ok bal -> Ok [bal]
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.balance ~cfg:t.cfg >>| function
+      | Ok bal -> Ok [bal]
+      | Error e -> Error e)
 
   let get_order_status _t ~symbol:_ ~order_id:_ =
     Deferred.return (Error (`Api_error "Bitstamp: individual order status not supported"))
 
   let get_open_orders t ?symbol () =
-    match symbol with
-    | Some pair ->
-      Rest.open_orders ~cfg:t.cfg ~pair >>| (function
-      | Ok orders -> Ok orders
-      | Error e -> Error e)
-    | None ->
-      Rest.open_orders_all ~cfg:t.cfg >>| (function
-      | Ok orders -> Ok orders
-      | Error e -> Error e)
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      match symbol with
+      | Some pair ->
+        Rest.open_orders ~cfg:t.cfg ~pair >>| (function
+        | Ok orders -> Ok orders
+        | Error e -> Error e)
+      | None ->
+        Rest.open_orders_all ~cfg:t.cfg >>| (function
+        | Ok orders -> Ok orders
+        | Error e -> Error e))
 
   let get_order_history _t ?symbol:_ ?limit:_ () =
     Deferred.return (Error (`Api_error "Bitstamp: use user_transactions for order history"))
 
   let get_my_trades t ~symbol ?limit () =
-    let limit = Option.value limit ~default:100 in
-    Rest.user_transactions ~cfg:t.cfg ~pair:symbol ~limit () >>| function
-    | Ok txs ->
-      (* Filter to only trade transactions (type_ = 2) *)
-      Ok (List.filter txs ~f:(fun tx -> tx.Native_types.type_ = 2))
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let limit = Option.value limit ~default:100 in
+      Rest.user_transactions ~cfg:t.cfg ~pair:symbol ~limit () >>| function
+      | Ok txs ->
+        (* Filter to only trade transactions (type_ = 2) *)
+        Ok (List.filter txs ~f:(fun tx -> tx.Native_types.type_ = 2))
+      | Error e -> Error e)
 
   let get_symbols t () =
-    Rest.trading_pairs_info ~cfg:t.cfg
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.trading_pairs_info ~cfg:t.cfg)
 
   let get_ticker t ~symbol () =
-    Rest.ticker ~cfg:t.cfg ~pair:symbol
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.ticker ~cfg:t.cfg ~pair:symbol)
 
   let get_order_book t ~symbol ?limit () =
-    let group = match limit with Some _ -> 1 | None -> 1 in
-    Rest.order_book ~cfg:t.cfg ~pair:symbol ~group ()
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let group = match limit with Some _ -> 1 | None -> 1 in
+      Rest.order_book ~cfg:t.cfg ~pair:symbol ~group ())
 
   let get_recent_trades t ~symbol ?limit () =
-    ignore limit;
-    Rest.transactions ~cfg:t.cfg ~pair:symbol ()
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      ignore limit;
+      Rest.transactions ~cfg:t.cfg ~pair:symbol ())
 
   let cancel_all_orders t ?symbol:_ () =
-    Rest.cancel_all_orders ~cfg:t.cfg >>| function
-    | Ok _ -> Ok 0
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.cancel_all_orders ~cfg:t.cfg >>| function
+      | Ok _ -> Ok 0
+      | Error e -> Error e)
 
   let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
     (* TODO: Implement using Bitstamp OHLC endpoint *)
     Deferred.return (Error (`Api_error "Bitstamp candles not yet implemented"))
+
+  (* ============================================================ *)
+  (* Account Operations - Deposits and Withdrawals                *)
+  (* ============================================================ *)
+
+  let get_deposit_address t ~currency () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.deposit_address ~cfg:t.cfg ~currency)
+
+  let get_deposit_history _t ?currency:_ ?status:_ ?start_time:_ ?end_time:_ ?limit:_ () =
+    (* Bitstamp doesn't have a direct deposit history endpoint *)
+    (* Users should check user_transactions with type filtering *)
+    Deferred.return (Error (`Api_error "Bitstamp: use user_transactions for deposit history"))
+
+  let withdraw t ~currency ~address ~amount ?memo ?instant () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.withdraw ~cfg:t.cfg ~currency ~amount ~address ?destination_tag:memo ?instant ()
+      >>| function
+      | Ok resp -> Ok (Int.to_string resp.id)
+      | Error e -> Error e)
+
+  let get_withdrawal_history t ?timedelta () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.withdrawal_requests ~cfg:t.cfg ?timedelta ())
 
   module Streams = struct
     let trades (_ : t) =
@@ -282,6 +329,46 @@ module Adapter = struct
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "Bitstamp candle normalization not yet implemented"
+
+    let deposit_address (d : Native.Deposit_address.t) ~currency : (Types.Deposit_address.t, string) Result.t =
+      Ok ({ venue = Venue.t
+          ; currency
+          ; address = d.address
+          ; tag = d.destination_tag
+          ; network = None  (* Bitstamp doesn't specify network in response *)
+          } : Types.Deposit_address.t)
+
+    let withdrawal (w : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Float_conv.of_string w.amount in
+      let status =
+        match w.status with
+        | 0 -> Types.Transfer_status.Pending     (* open *)
+        | 1 -> Types.Transfer_status.Processing  (* in_process *)
+        | 2 -> Types.Transfer_status.Completed   (* finished *)
+        | 3 -> Types.Transfer_status.Cancelled   (* cancelled *)
+        | 4 -> Types.Transfer_status.Failed      (* failed *)
+        | _ -> Types.Transfer_status.Pending
+      in
+      let currency = Option.value w.currency ~default:"" in
+      let address = Option.value w.address ~default:"" in
+      (* Parse ISO 8601 datetime *)
+      let created_at =
+        try Some (Time_float_unix.of_string w.datetime)
+        with _ -> None
+      in
+      Ok ({ venue = Venue.t
+          ; id = Int.to_string w.id
+          ; currency
+          ; amount
+          ; fee = None  (* Bitstamp doesn't include fee in withdrawal requests *)
+          ; status
+          ; address
+          ; tag = None
+          ; tx_id = w.transaction_id
+          ; created_at
+          ; updated_at = None
+          } : Types.Withdrawal.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

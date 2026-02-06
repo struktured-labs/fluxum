@@ -157,6 +157,15 @@ type cancel_request = {
   oid : int64;
 }
 
+(** Withdraw request for withdraw3 action *)
+type withdraw_request = {
+  hyperliquid_chain : string;  (** "Mainnet" or "Testnet" *)
+  signature_chain_id : string; (** Hex format, e.g., "0xa4b1" for Arbitrum *)
+  destination : string;        (** 42-char hex address *)
+  amount : string;             (** USD amount as string *)
+  time : int64;                (** Timestamp in milliseconds *)
+}
+
 (** msgpack serialization for L1 actions
 
     Field order is CRITICAL for correct hash computation.
@@ -216,6 +225,25 @@ module Msgpack = struct
       (String "cancels", List cancel_items);
     ] in
 
+    Msgpck.String.to_string action
+
+  (** Serialize withdraw3 action to msgpack
+
+      Field order for withdraw3:
+      - hyperliquidChain
+      - signatureChainId
+      - destination
+      - amount
+      - time
+  *)
+  let serialize_withdraw_action ~(req : withdraw_request) : bytes =
+    let action = Map [
+      (String "hyperliquidChain", String req.hyperliquid_chain);
+      (String "signatureChainId", String req.signature_chain_id);
+      (String "destination", String req.destination);
+      (String "amount", String req.amount);
+      (String "time", Int64 req.time);
+    ] in
     Msgpck.String.to_string action
 end
 
@@ -373,3 +401,31 @@ let sign_cancel_order
 
   with e ->
     Error (sprintf "sign_cancel_order failed: %s" (Exn.to_string e))
+
+(** Sign withdraw3 action
+
+    The withdraw3 action requires EIP-712 signing with a specific type structure.
+    Unlike order/cancel which use msgpack, withdraw3 uses direct EIP-712 typed data.
+*)
+let sign_withdraw
+    ~private_key
+    ~(req : withdraw_request)
+  : (string, string) Result.t =
+  try
+    (* 1. Serialize action to msgpack *)
+    let action_msgpack = Msgpack.serialize_withdraw_action ~req in
+
+    (* 2. Hash the action *)
+    let action_hash = Keccak.hash_bytes action_msgpack in
+
+    (* 3. Get domain separator *)
+    let domain_sep = Domain.domain_separator Domain.hyperliquid_l1 in
+
+    (* 4. Create EIP-712 digest *)
+    let digest = Signature.create_digest ~domain_separator:domain_sep ~struct_hash:action_hash in
+
+    (* 5. Sign the digest *)
+    Signature.sign ~private_key_hex:private_key ~digest_hex:digest
+
+  with e ->
+    Error (sprintf "sign_withdraw failed: %s" (Exn.to_string e))

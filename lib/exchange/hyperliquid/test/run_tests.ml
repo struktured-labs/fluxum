@@ -998,6 +998,82 @@ let test_signing_with_multiple_orders () =
      printf "  X FAIL: Multiple orders signing failed: %s\n" msg;
      incr tests_run; incr tests_failed)
 
+let test_withdraw_signing () =
+  printf "\n[Signing] Withdraw3 action signing\n";
+
+  let private_key = "0000000000000000000000000000000000000000000000000000000000000001" in
+  let withdraw_req : Hyperliquid.Signing.withdraw_request = {
+    hyperliquid_chain = "Mainnet";
+    signature_chain_id = "0xa4b1";  (* Arbitrum *)
+    destination = "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0";
+    amount = "100.0";
+    time = 1716531066415L;
+  } in
+
+  (match Hyperliquid.Signing.sign_withdraw ~private_key ~req:withdraw_req with
+   | Ok signature ->
+     test_assert "Withdraw signing produces valid signature"
+       (String.length signature = 130);
+
+     (* Should be deterministic *)
+     (match Hyperliquid.Signing.sign_withdraw ~private_key ~req:withdraw_req with
+      | Ok signature2 ->
+        test_assert "Withdraw signing is deterministic"
+          (String.equal signature signature2)
+      | Error msg ->
+        printf "  X FAIL: Second withdraw signing failed: %s\n" msg;
+        incr tests_run; incr tests_failed)
+   | Error msg ->
+     printf "  X FAIL: Withdraw signing failed: %s\n" msg;
+     incr tests_run; incr tests_failed);
+
+  (* Test with testnet config *)
+  let withdraw_testnet : Hyperliquid.Signing.withdraw_request = {
+    hyperliquid_chain = "Testnet";
+    signature_chain_id = "0xa4b1";
+    destination = "0x0000000000000000000000000000000000000000";
+    amount = "1.0";
+    time = 1716531066415L;
+  } in
+
+  (match Hyperliquid.Signing.sign_withdraw ~private_key ~req:withdraw_testnet with
+   | Ok signature ->
+     test_assert "Testnet withdraw signing succeeds"
+       (String.length signature = 130)
+   | Error msg ->
+     printf "  X FAIL: Testnet withdraw signing failed: %s\n" msg;
+     incr tests_run; incr tests_failed)
+
+let test_msgpack_withdraw_serialization () =
+  printf "\n[Signing] MessagePack withdraw serialization\n";
+
+  let withdraw_req : Hyperliquid.Signing.withdraw_request = {
+    hyperliquid_chain = "Mainnet";
+    signature_chain_id = "0xa4b1";
+    destination = "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0";
+    amount = "100.0";
+    time = 1716531066415L;
+  } in
+
+  let msgpack_bytes = Hyperliquid.Signing.Msgpack.serialize_withdraw_action ~req:withdraw_req in
+
+  test_assert "Withdraw msgpack produces bytes"
+    (Bytes.length msgpack_bytes > 0);
+
+  (* Different amounts should produce different msgpack *)
+  let withdraw_req2 : Hyperliquid.Signing.withdraw_request = {
+    hyperliquid_chain = "Mainnet";
+    signature_chain_id = "0xa4b1";
+    destination = "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0";
+    amount = "200.0";
+    time = 1716531066415L;
+  } in
+
+  let msgpack_bytes2 = Hyperliquid.Signing.Msgpack.serialize_withdraw_action ~req:withdraw_req2 in
+
+  test_assert "Different amounts produce different msgpack"
+    (not (Bytes.equal msgpack_bytes msgpack_bytes2))
+
 (* ============================================================ *)
 (* Main *)
 (* ============================================================ *)
@@ -1029,6 +1105,7 @@ let () =
   test_address_derivation_from_public_key ();
   test_msgpack_order_serialization ();
   test_msgpack_cancel_serialization ();
+  test_msgpack_withdraw_serialization ();
   test_phantom_agent_construction ();
   test_eip712_digest_creation ();
   test_signature_generation ();
@@ -1036,6 +1113,7 @@ let () =
   test_full_order_signing_flow ();
   test_full_cancel_signing_flow ();
   test_signing_with_multiple_orders ();
+  test_withdraw_signing ();
 
   printf "\n===========================================\n";
   printf "Test Summary\n";

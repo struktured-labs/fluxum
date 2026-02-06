@@ -94,6 +94,20 @@ module Adapter = struct
     module Error = struct
       type t = Rest.error
     end
+
+    (** Account operations - deposits/withdrawals (stubs)
+        Note: Uniswap V3 is an EVM DEX - deposits/withdrawals happen on-chain *)
+    module Deposit_address = struct
+      type t = unit
+    end
+
+    module Deposit = struct
+      type t = unit
+    end
+
+    module Withdrawal = struct
+      type t = unit
+    end
   end
 
   let place_order t (req : Native.Order.request) =
@@ -236,6 +250,21 @@ module Adapter = struct
 
   let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
     Deferred.return (Error (`GraphQL "Uniswap V3 doesn't provide historical candle data"))
+
+  (** {2 Account Operations - Deposits/Withdrawals (Stubs)}
+      Note: Uniswap V3 is an EVM DEX - deposits/withdrawals happen on-chain *)
+
+  let get_deposit_address (_ : t) ~currency:_ ?network:_ () =
+    Deferred.return (Error (`GraphQL "Uniswap V3 is an EVM DEX - use wallet address for deposits"))
+
+  let withdraw (_ : t) ~currency:_ ~amount:_ ~address:_ ?tag:_ ?network:_ () =
+    Deferred.return (Error (`GraphQL "Uniswap V3 is an EVM DEX - use wallet for transfers"))
+
+  let get_deposits (_ : t) ?currency:_ ?limit:_ () =
+    Deferred.return (Error (`GraphQL "Uniswap V3 is an EVM DEX - use blockchain explorer"))
+
+  let get_withdrawals (_ : t) ?currency:_ ?limit:_ () =
+    Deferred.return (Error (`GraphQL "Uniswap V3 is an EVM DEX - use blockchain explorer"))
 
   module Streams = struct
     let trades _t =
@@ -414,6 +443,16 @@ module Adapter = struct
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "Uniswap V3 doesn't provide candle data"
+
+    (** Account operations normalization (stubs) *)
+    let deposit_address (_ : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      Error "Uniswap V3 is an EVM DEX - use wallet address"
+
+    let deposit (_ : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      Error "Uniswap V3 is an EVM DEX - use blockchain explorer"
+
+    let withdrawal (_ : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      Error "Uniswap V3 is an EVM DEX - use blockchain explorer"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

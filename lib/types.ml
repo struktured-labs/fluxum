@@ -522,6 +522,92 @@ module Candle = struct
   let compare_by_time a b = Time.compare a.open_time b.open_time
 end
 
+(** Transfer/withdrawal status for deposits and withdrawals *)
+module Transfer_status = struct
+  type t =
+    | Pending
+    | Processing
+    | Completed
+    | Failed
+    | Cancelled
+  [@@deriving sexp, compare, equal]
+
+  let to_string = function
+    | Pending -> "pending"
+    | Processing -> "processing"
+    | Completed -> "completed"
+    | Failed -> "failed"
+    | Cancelled -> "cancelled"
+
+  let of_string_opt = function
+    | "pending" | "Pending" | "PENDING" -> Some Pending
+    | "processing" | "Processing" | "PROCESSING" -> Some Processing
+    | "completed" | "Completed" | "COMPLETED" | "complete" | "Complete" | "COMPLETE" -> Some Completed
+    | "failed" | "Failed" | "FAILED" -> Some Failed
+    | "cancelled" | "Cancelled" | "CANCELLED" | "canceled" | "Canceled" | "CANCELED" -> Some Cancelled
+    | _ -> None
+
+  let of_string s =
+    match of_string_opt s with
+    | Some t -> t
+    | None -> failwith (sprintf "Unknown transfer status: %s" s)
+end
+
+(** Deposit address for receiving funds *)
+module Deposit_address = struct
+  type t =
+    { venue : Venue.t
+    ; currency : string
+    ; address : string
+    ; tag : string option        (** Memo/tag for XRP, XLM, etc. *)
+    ; network : string option    (** ETH, TRC20, etc. *)
+    }
+  [@@deriving sexp, compare, equal, fields]
+
+  let create ~venue ~currency ~address ?tag ?network () =
+    { venue; currency; address; tag; network }
+end
+
+(** Deposit record *)
+module Deposit = struct
+  type t =
+    { venue : Venue.t
+    ; id : string
+    ; currency : string
+    ; amount : float
+    ; status : Transfer_status.t
+    ; address : string option
+    ; tx_id : string option
+    ; created_at : Time_float_unix.t option
+    ; updated_at : Time_float_unix.t option
+    }
+  [@@deriving sexp, compare, equal, fields]
+
+  let create ~venue ~id ~currency ~amount ~status ?address ?tx_id ?created_at ?updated_at () =
+    { venue; id; currency; amount; status; address; tx_id; created_at; updated_at }
+end
+
+(** Withdrawal record *)
+module Withdrawal = struct
+  type t =
+    { venue : Venue.t
+    ; id : string
+    ; currency : string
+    ; amount : float
+    ; fee : float option
+    ; status : Transfer_status.t
+    ; address : string
+    ; tag : string option
+    ; tx_id : string option
+    ; created_at : Time_float_unix.t option
+    ; updated_at : Time_float_unix.t option
+    }
+  [@@deriving sexp, compare, equal, fields]
+
+  let create ~venue ~id ~currency ~amount ?fee ~status ~address ?tag ?tx_id ?created_at ?updated_at () =
+    { venue; id; currency; amount; fee; status; address; tag; tx_id; created_at; updated_at }
+end
+
 module Error = struct
   type t =
     | Transport of exn [@sexp.opaque]

@@ -218,28 +218,41 @@ let status t =
   sprintf "tokens=%.1f/%d backoff=%.1fs in_backoff=%b"
     t.tokens t.config.burst_size t.current_backoff t.in_backoff
 
+(** Check if an error represents a rate limit condition.
+    Matches both `Too_many_requests of string (exchange API) and `Rate_limited (normalized). *)
+let is_rate_limit_error (type a) (e : a) : bool =
+  (* Use Obj magic to check if the variant tag matches rate limit patterns.
+     This is a bit of a hack but allows the function to work with any error type
+     without requiring specific type constraints that would propagate through the codebase. *)
+  let is_too_many_requests =
+    try
+      let _ = (Obj.magic e : [> `Too_many_requests of string ]) in
+      match (Obj.magic e : [> `Too_many_requests of string ]) with
+      | `Too_many_requests _ -> true
+      | _ -> false
+    with _ -> false
+  in
+  is_too_many_requests
+
 (** Wrap a deferred computation with rate limiting.
-    Automatically handles rate limit errors (indicated by returning Error `Rate_limited). *)
+    Automatically handles rate limit errors (indicated by returning Error (`Too_many_requests _)). *)
 let with_rate_limit t ~f =
   wait t >>= fun () ->
   f () >>| fun result ->
   (match result with
-   | Error `Rate_limited -> on_rate_limit_error t
-   | Error `Too_many_requests -> on_rate_limit_error t
+   | Error e when is_rate_limit_error e -> on_rate_limit_error t
    | Ok _ -> reset_backoff t
    | Error _ -> ());
   result
 
-(** Wrap with rate limit, retrying on rate limit errors up to max_retries times *)
+(** Wrap with rate limit, retrying on rate limit errors up to max_retries times.
+    The function preserves the exact error type from the wrapped function. *)
 let with_rate_limit_retry ?(max_retries = 3) t ~f =
   let rec loop retries =
     wait t >>= fun () ->
     f () >>= fun result ->
     match result with
-    | Error `Rate_limited when retries > 0 ->
-      on_rate_limit_error t;
-      loop (retries - 1)
-    | Error `Too_many_requests when retries > 0 ->
+    | Error e when is_rate_limit_error e && retries > 0 ->
       on_rate_limit_error t;
       loop (retries - 1)
     | Ok _ ->

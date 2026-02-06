@@ -451,6 +451,194 @@ module T = struct
     include Rest.Make_no_arg (T)
   end
 
+  (** Deposit address generation - POST /v1/deposit/{currency}/newAddress *)
+  module Deposit_address = struct
+    module T = struct
+      let name = "deposit-address"
+
+      (* Path is set per-currency, but we handle it in the post function *)
+      let path = path @ [ "deposit" ]
+
+      type uri_args = unit
+      let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
+      let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
+      let all_of_uri_args = [ () ]
+      let encode_uri_args (_:uri_args) = ""
+      let default_uri_args : uri_args option = None
+
+      type request =
+        { currency : string  (** Currency to generate address for *)
+        ; label : string option [@default None]  (** Optional label for the address *)
+        }
+      [@@deriving sexp, yojson]
+
+      type response =
+        { address : string
+        ; currency : string
+        ; label : string option [@default None]
+        ; network : string option [@default None]
+        }
+      [@@deriving sexp, of_yojson]
+    end
+
+    include T
+
+    (** Custom post that handles currency in path *)
+    let post (module Cfg : Cfg.S) (nonce : Nonce.reader) (request : request) =
+      let path = [ "v1"; "deposit"; String.lowercase request.currency; "newAddress" ] in
+      let payload = request_to_yojson request in
+      Nonce.Request.make ~nonce ~request:(Path.to_string path) ~payload () >>= fun nonce_request ->
+      (Nonce.Request.to_yojson nonce_request |> Yojson.Safe.pretty_to_string |> fun s ->
+       Log.Global.info "deposit address request as json:\n %s" s;
+       return @@ Auth.of_payload s)
+      >>= fun payload_str ->
+      let headers = Auth.to_headers (module Cfg) payload_str in
+      let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path:(Path.to_string path) () in
+      Cohttp_async.Client.post ~headers uri
+      >>= fun (response, body) ->
+      match Cohttp.Response.status response with
+      | `OK ->
+        Cohttp_async.Body.to_string body >>| fun s ->
+        Log.Global.debug "deposit address response:\n %s" s;
+        let yojson = Yojson.Safe.from_string s in
+        (Rest.Response.parse yojson response_of_yojson
+          :> [ `Ok of response | Rest.Error.post ])
+      | `Not_found -> return `Not_found
+      | `Bad_request ->
+        Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
+      | `Unauthorized ->
+        Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
+      | `Service_unavailable ->
+        Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
+      | (code : Cohttp.Code.status_code) ->
+        Cohttp_async.Body.to_string body >>| fun b ->
+        let msg = sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) b in
+        `Service_unavailable msg
+  end
+
+  (** Withdraw crypto - POST /v1/withdraw/{currency} *)
+  module Withdraw = struct
+    module T = struct
+      let name = "withdraw"
+
+      let path = path @ [ "withdraw" ]
+
+      type uri_args = unit
+      let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
+      let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
+      let all_of_uri_args = [ () ]
+      let encode_uri_args (_:uri_args) = ""
+      let default_uri_args : uri_args option = None
+
+      type request =
+        { currency : string         (** Currency to withdraw *)
+        ; address : string          (** Destination blockchain address *)
+        ; amount : Decimal_string.t (** Amount to withdraw *)
+        ; memo : string option [@default None]  (** Optional memo/tag for XRP, XLM *)
+        }
+      [@@deriving sexp, yojson]
+
+      type response =
+        { address : string
+        ; amount : Decimal_string.t
+        ; withdrawalId : string  (** Gemini's withdrawal ID *)
+        ; message : string option [@default None]  (** Status message *)
+        ; txHash : string option [@default None]   (** Blockchain tx hash *)
+        }
+      [@@deriving sexp, of_yojson]
+    end
+
+    include T
+
+    (** Custom post that handles currency in path *)
+    let post (module Cfg : Cfg.S) (nonce : Nonce.reader) (request : request) =
+      let path = [ "v1"; "withdraw"; String.lowercase request.currency ] in
+      let payload = request_to_yojson request in
+      Nonce.Request.make ~nonce ~request:(Path.to_string path) ~payload () >>= fun nonce_request ->
+      (Nonce.Request.to_yojson nonce_request |> Yojson.Safe.pretty_to_string |> fun s ->
+       Log.Global.info "withdraw request as json:\n %s" s;
+       return @@ Auth.of_payload s)
+      >>= fun payload_str ->
+      let headers = Auth.to_headers (module Cfg) payload_str in
+      let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path:(Path.to_string path) () in
+      Cohttp_async.Client.post ~headers uri
+      >>= fun (response, body) ->
+      match Cohttp.Response.status response with
+      | `OK ->
+        Cohttp_async.Body.to_string body >>| fun s ->
+        Log.Global.debug "withdraw response:\n %s" s;
+        let yojson = Yojson.Safe.from_string s in
+        (Rest.Response.parse yojson response_of_yojson
+          :> [ `Ok of response | Rest.Error.post ])
+      | `Not_found -> return `Not_found
+      | `Bad_request ->
+        Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
+      | `Unauthorized ->
+        Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
+      | `Service_unavailable ->
+        Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
+      | (code : Cohttp.Code.status_code) ->
+        Cohttp_async.Body.to_string body >>| fun b ->
+        let msg = sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) b in
+        `Service_unavailable msg
+  end
+
+  (** Get transfers (deposits and withdrawals) - POST /v1/transfers *)
+  module Transfers = struct
+    type transfer_type = [ `Deposit | `Withdrawal ] [@@deriving sexp]
+
+    let transfer_type_of_yojson json =
+      match json with
+      | `String "Deposit" -> Ok `Deposit
+      | `String "Withdrawal" -> Ok `Withdrawal
+      | _ -> Error "Unknown transfer type"
+
+    let transfer_type_to_yojson t =
+      `String (match t with `Deposit -> "Deposit" | `Withdrawal -> "Withdrawal")
+
+    type transfer =
+      { type_ : transfer_type [@key "type"]
+      ; status : string
+      ; timestampms : Timestamp.Ms.t
+      ; eid : Int_number.t        (** Exchange ID *)
+      ; currency : Currency.Enum_or_string.t
+      ; amount : Decimal_string.t
+      ; method_ : string option [@default None] [@key "method"]  (** e.g., "ACH", "Wire" for fiat *)
+      ; txHash : string option [@default None]      (** Blockchain tx hash *)
+      ; outputIdx : Int_number.t option [@default None]  (** Output index for tx *)
+      ; destination : string option [@default None]  (** Destination address *)
+      ; purpose : string option [@default None]
+      ; feeAmount : Decimal_string.t option [@default None]  (** Fee charged *)
+      ; feeCurrency : Currency.Enum_or_string.t option [@default None]
+      }
+    [@@deriving sexp, yojson]
+
+    module T = struct
+      let name = "transfers"
+
+      let path = path @ [ "transfers" ]
+
+      type uri_args = unit
+      let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
+      let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
+      let all_of_uri_args = [ () ]
+      let encode_uri_args (_:uri_args) = ""
+      let default_uri_args : uri_args option = None
+
+      type request =
+        { currency : string option [@default None]  (** Filter by currency *)
+        ; timestamp : Timestamp.Sec.t option [@default None]  (** Filter transfers after this time *)
+        ; limit_transfers : int option [@default None]  (** Max transfers to return *)
+        }
+      [@@deriving sexp, yojson]
+
+      type response = transfer list [@@deriving sexp, of_yojson]
+    end
+
+    include T
+    include Rest.Make (T)
+  end
+
   module Notional_volume = struct
     module T = struct
       let name = "notionalvolume"

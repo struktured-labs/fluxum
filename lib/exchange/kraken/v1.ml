@@ -919,6 +919,502 @@ module Websocket_token = struct
   include Rest.Make_no_arg (T)
 end
 
+(* ============================================================ *)
+(* Account Operations - Deposits/Withdrawals *)
+(* ============================================================ *)
+
+(** Get deposit methods for an asset - POST /0/private/DepositMethods *)
+module Deposit_methods = struct
+  module Deposit_method = struct
+    type t =
+      { method_ : string [@key "method"]
+      ; limit : string [@default ""]
+      ; fee : string [@default "0"]
+      ; address_setup_fee : string option [@default None] [@key "address-setup-fee"]
+      ; gen_address : bool [@default false] [@key "gen-address"]
+      }
+    [@@deriving sexp]
+
+    let of_yojson = function
+      | `Assoc pairs ->
+        let get key = List.Assoc.find pairs key ~equal:String.equal in
+        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
+        let get_str_opt key = match get key with Some (`String s) -> Some s | _ -> None in
+        let get_bool key = match get key with Some (`Bool b) -> b | _ -> false in
+        Result.Ok
+          { method_ = get_str "method"
+          ; limit = get_str "limit"
+          ; fee = get_str "fee"
+          ; address_setup_fee = get_str_opt "address-setup-fee"
+          ; gen_address = get_bool "gen-address"
+          }
+      | _ -> Result.Error "Expected deposit method object"
+  end
+
+  module T = struct
+    let name = "deposit-methods"
+    let endpoint = "DepositMethods"
+
+    type request = { asset : string } [@@deriving sexp]
+
+    let request_to_params { asset } = [ ("asset", asset) ]
+
+    type response = Deposit_method.t list [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `List lst ->
+        let parsed = List.filter_map lst ~f:(fun json ->
+          match Deposit_method.of_yojson json with
+          | Result.Ok m -> Some m
+          | Result.Error _ -> None)
+        in
+        Result.Ok parsed
+      | _ -> Result.Error "Expected deposit methods array"
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let asset = string_flag ~field_name:"asset" ~doc:"Asset name (e.g., XBT, ETH)"
+        in
+        { asset }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
+(** Get deposit addresses - POST /0/private/DepositAddresses *)
+module Deposit_addresses = struct
+  module Deposit_address = struct
+    type t =
+      { address : string
+      ; expiretm : string [@default "0"]
+      ; new_ : bool [@default false] [@key "new"]
+      ; tag : string option [@default None]
+      }
+    [@@deriving sexp]
+
+    let of_yojson = function
+      | `Assoc pairs ->
+        let get key = List.Assoc.find pairs key ~equal:String.equal in
+        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
+        let get_str_opt key = match get key with Some (`String s) -> Some s | _ -> None in
+        let get_bool key = match get key with Some (`Bool b) -> b | _ -> false in
+        Result.Ok
+          { address = get_str "address"
+          ; expiretm = get_str "expiretm"
+          ; new_ = get_bool "new"
+          ; tag = get_str_opt "tag"
+          }
+      | _ -> Result.Error "Expected deposit address object"
+  end
+
+  module T = struct
+    let name = "deposit-addresses"
+    let endpoint = "DepositAddresses"
+
+    type request =
+      { asset : string
+      ; method_ : string
+      ; new_ : bool [@default false]
+      }
+    [@@deriving sexp]
+
+    let request_to_params { asset; method_; new_ } =
+      let base = [ ("asset", asset); ("method", method_) ] in
+      match new_ with
+      | true -> ("new", "true") :: base
+      | false -> base
+
+    type response = Deposit_address.t list [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `List lst ->
+        let parsed = List.filter_map lst ~f:(fun json ->
+          match Deposit_address.of_yojson json with
+          | Result.Ok a -> Some a
+          | Result.Error _ -> None)
+        in
+        Result.Ok parsed
+      | _ -> Result.Error "Expected deposit addresses array"
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let asset = string_flag ~field_name:"asset" ~doc:"Asset name (e.g., XBT, ETH)"
+        and method_ = string_flag ~field_name:"method" ~doc:"Deposit method/network"
+        and new_ = bool_flag ~field_name:"new" ~default:false ~doc:"Generate new address"
+        in
+        { asset; method_; new_ }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
+(** Get deposit status - POST /0/private/DepositStatus *)
+module Deposit_status = struct
+  module Deposit_entry = struct
+    type t =
+      { method_ : string [@key "method"]
+      ; aclass : string [@default "currency"]
+      ; asset : string
+      ; refid : string
+      ; txid : string [@default ""]
+      ; info : string [@default ""]
+      ; amount : string
+      ; fee : string [@default "0"]
+      ; time : float
+      ; status : string
+      ; status_prop : string option [@default None] [@key "status-prop"]
+      }
+    [@@deriving sexp]
+
+    let of_yojson = function
+      | `Assoc pairs ->
+        let get key = List.Assoc.find pairs key ~equal:String.equal in
+        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
+        let get_str_opt key = match get key with Some (`String s) -> Some s | _ -> None in
+        let get_float key = match get key with Some (`Float f) -> f | Some (`Int i) -> Float.of_int i | _ -> 0.0 in
+        Result.Ok
+          { method_ = get_str "method"
+          ; aclass = (match get_str "aclass" with "" -> "currency" | s -> s)
+          ; asset = get_str "asset"
+          ; refid = get_str "refid"
+          ; txid = get_str "txid"
+          ; info = get_str "info"
+          ; amount = get_str "amount"
+          ; fee = get_str "fee"
+          ; time = get_float "time"
+          ; status = get_str "status"
+          ; status_prop = get_str_opt "status-prop"
+          }
+      | _ -> Result.Error "Expected deposit entry object"
+  end
+
+  module T = struct
+    let name = "deposit-status"
+    let endpoint = "DepositStatus"
+
+    type request =
+      { asset : string option [@default None]
+      ; method_ : string option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_params { asset; method_ } =
+      let add_opt key = function
+        | None -> Fun.id
+        | Some v -> List.cons (key, v)
+      in
+      []
+      |> add_opt "asset" asset
+      |> add_opt "method" method_
+
+    type response = Deposit_entry.t list [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `List lst ->
+        let parsed = List.filter_map lst ~f:(fun json ->
+          match Deposit_entry.of_yojson json with
+          | Result.Ok e -> Some e
+          | Result.Error _ -> None)
+        in
+        Result.Ok parsed
+      | _ -> Result.Error "Expected deposit status array"
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let asset = string_flag_option ~field_name:"asset" ~doc:"Filter by asset"
+        and method_ = string_flag_option ~field_name:"method" ~doc:"Filter by deposit method"
+        in
+        { asset; method_ }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
+(** Initiate withdrawal - POST /0/private/Withdraw *)
+module Withdraw = struct
+  module T = struct
+    let name = "withdraw"
+    let endpoint = "Withdraw"
+
+    type request =
+      { asset : string
+      ; key : string  (** Withdrawal key name from account settings *)
+      ; amount : string
+      }
+    [@@deriving sexp]
+
+    let request_to_params { asset; key; amount } =
+      [ ("asset", asset)
+      ; ("key", key)
+      ; ("amount", amount)
+      ]
+
+    type response =
+      { refid : string
+      }
+    [@@deriving sexp, of_yojson]
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let asset = string_flag ~field_name:"asset" ~doc:"Asset to withdraw (e.g., XBT, ETH)"
+        and key = string_flag ~field_name:"key" ~doc:"Withdrawal key name from account settings"
+        and amount = string_flag ~field_name:"amount" ~doc:"Amount to withdraw"
+        in
+        { asset; key; amount }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
+(** Get withdrawal info/fee estimate - POST /0/private/WithdrawInfo *)
+module Withdraw_info = struct
+  module T = struct
+    let name = "withdraw-info"
+    let endpoint = "WithdrawInfo"
+
+    type request =
+      { asset : string
+      ; key : string
+      ; amount : string
+      }
+    [@@deriving sexp]
+
+    let request_to_params { asset; key; amount } =
+      [ ("asset", asset)
+      ; ("key", key)
+      ; ("amount", amount)
+      ]
+
+    type response =
+      { method_ : string [@key "method"]
+      ; limit : string
+      ; amount : string
+      ; fee : string
+      }
+    [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `Assoc pairs ->
+        let get key = List.Assoc.find pairs key ~equal:String.equal in
+        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
+        Result.Ok
+          { method_ = get_str "method"
+          ; limit = get_str "limit"
+          ; amount = get_str "amount"
+          ; fee = get_str "fee"
+          }
+      | _ -> Result.Error "Expected withdraw info object"
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let asset = string_flag ~field_name:"asset" ~doc:"Asset to withdraw"
+        and key = string_flag ~field_name:"key" ~doc:"Withdrawal key name"
+        and amount = string_flag ~field_name:"amount" ~doc:"Amount to withdraw"
+        in
+        { asset; key; amount }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
+(** Get withdrawal status - POST /0/private/WithdrawStatus *)
+module Withdraw_status = struct
+  module Withdrawal_entry = struct
+    type t =
+      { method_ : string [@key "method"]
+      ; aclass : string [@default "currency"]
+      ; asset : string
+      ; refid : string
+      ; txid : string [@default ""]
+      ; info : string [@default ""]
+      ; amount : string
+      ; fee : string [@default "0"]
+      ; time : float
+      ; status : string
+      ; status_prop : string option [@default None] [@key "status-prop"]
+      ; key : string [@default ""]
+      }
+    [@@deriving sexp]
+
+    let of_yojson = function
+      | `Assoc pairs ->
+        let get key = List.Assoc.find pairs key ~equal:String.equal in
+        let get_str k = match get k with Some (`String s) -> s | _ -> "" in
+        let get_str_opt k = match get k with Some (`String s) -> Some s | _ -> None in
+        let get_float k = match get k with Some (`Float f) -> f | Some (`Int i) -> Float.of_int i | _ -> 0.0 in
+        Result.Ok
+          { method_ = get_str "method"
+          ; aclass = (match get_str "aclass" with "" -> "currency" | s -> s)
+          ; asset = get_str "asset"
+          ; refid = get_str "refid"
+          ; txid = get_str "txid"
+          ; info = get_str "info"
+          ; amount = get_str "amount"
+          ; fee = get_str "fee"
+          ; time = get_float "time"
+          ; status = get_str "status"
+          ; status_prop = get_str_opt "status-prop"
+          ; key = get_str "key"
+          }
+      | _ -> Result.Error "Expected withdrawal entry object"
+  end
+
+  module T = struct
+    let name = "withdraw-status"
+    let endpoint = "WithdrawStatus"
+
+    type request =
+      { asset : string option [@default None]
+      ; method_ : string option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_params { asset; method_ } =
+      let add_opt key = function
+        | None -> Fun.id
+        | Some v -> List.cons (key, v)
+      in
+      []
+      |> add_opt "asset" asset
+      |> add_opt "method" method_
+
+    type response = Withdrawal_entry.t list [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `List lst ->
+        let parsed = List.filter_map lst ~f:(fun json ->
+          match Withdrawal_entry.of_yojson json with
+          | Result.Ok e -> Some e
+          | Result.Error _ -> None)
+        in
+        Result.Ok parsed
+      | _ -> Result.Error "Expected withdrawal status array"
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let asset = string_flag_option ~field_name:"asset" ~doc:"Filter by asset"
+        and method_ = string_flag_option ~field_name:"method" ~doc:"Filter by withdrawal method"
+        in
+        { asset; method_ }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
+(** Get saved withdrawal addresses - POST /0/private/WithdrawAddresses *)
+module Withdraw_addresses = struct
+  module Withdraw_address = struct
+    type t =
+      { address : string
+      ; asset : string
+      ; method_ : string [@key "method"]
+      ; key : string
+      ; verified : bool [@default false]
+      }
+    [@@deriving sexp]
+
+    let of_yojson = function
+      | `Assoc pairs ->
+        let get k = List.Assoc.find pairs k ~equal:String.equal in
+        let get_str k = match get k with Some (`String s) -> s | _ -> "" in
+        let get_bool k = match get k with Some (`Bool b) -> b | _ -> false in
+        Result.Ok
+          { address = get_str "address"
+          ; asset = get_str "asset"
+          ; method_ = get_str "method"
+          ; key = get_str "key"
+          ; verified = get_bool "verified"
+          }
+      | _ -> Result.Error "Expected withdraw address object"
+  end
+
+  module T = struct
+    let name = "withdraw-addresses"
+    let endpoint = "WithdrawAddresses"
+
+    type request =
+      { asset : string option [@default None]
+      ; method_ : string option [@default None]
+      ; key : string option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_params { asset; method_; key } =
+      let add_opt k = function
+        | None -> Fun.id
+        | Some v -> List.cons (k, v)
+      in
+      []
+      |> add_opt "asset" asset
+      |> add_opt "method" method_
+      |> add_opt "key" key
+
+    type response = Withdraw_address.t list [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `List lst ->
+        let parsed = List.filter_map lst ~f:(fun json ->
+          match Withdraw_address.of_yojson json with
+          | Result.Ok a -> Some a
+          | Result.Error _ -> None)
+        in
+        Result.Ok parsed
+      | _ -> Result.Error "Expected withdraw addresses array"
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let asset = string_flag_option ~field_name:"asset" ~doc:"Filter by asset"
+        and method_ = string_flag_option ~field_name:"method" ~doc:"Filter by method"
+        and key = string_flag_option ~field_name:"key" ~doc:"Filter by key name"
+        in
+        { asset; method_; key }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
 (** Backwards compatibility wrappers (non-typed versions) *)
 
 (** Get account balances - returns raw JSON *)

@@ -533,6 +533,113 @@ module Candle : sig
   (** Compare candles by open_time *)
 end
 
+(** {1 Account Operations - Deposits/Withdrawals} *)
+
+module Transfer_status : sig
+  (** Status of a deposit or withdrawal transfer *)
+  type t =
+    | Pending      (** Transfer initiated but not processed *)
+    | Processing   (** Transfer is being processed *)
+    | Completed    (** Transfer completed successfully *)
+    | Failed       (** Transfer failed *)
+    | Cancelled    (** Transfer was cancelled *)
+  [@@deriving sexp, compare, equal]
+
+  val to_string : t -> string
+  val of_string_opt : string -> t option
+  val of_string : string -> t
+end
+
+module Deposit_address : sig
+  (** Deposit address for receiving funds
+
+      Contains the address to send funds to, with optional memo/tag
+      for networks that require them (XRP, XLM, etc.).
+  *)
+  type t =
+    { venue : Venue.t
+    ; currency : string           (** Currency code (e.g., "BTC", "ETH") *)
+    ; address : string            (** Blockchain address *)
+    ; tag : string option         (** Memo/tag for XRP, XLM, etc. *)
+    ; network : string option     (** Network identifier (ETH, TRC20, etc.) *)
+    }
+  [@@deriving sexp, compare, equal, fields]
+
+  val create :
+    venue:Venue.t ->
+    currency:string ->
+    address:string ->
+    ?tag:string ->
+    ?network:string ->
+    unit -> t
+end
+
+module Deposit : sig
+  (** Deposit record
+
+      Represents an incoming deposit to the exchange account.
+  *)
+  type t =
+    { venue : Venue.t
+    ; id : string                           (** Exchange's deposit ID *)
+    ; currency : string                     (** Currency code *)
+    ; amount : float                        (** Deposit amount *)
+    ; status : Transfer_status.t            (** Current status *)
+    ; address : string option               (** Receiving address *)
+    ; tx_id : string option                 (** Blockchain transaction ID *)
+    ; created_at : Time_float_unix.t option (** When deposit was detected *)
+    ; updated_at : Time_float_unix.t option (** Last status update *)
+    }
+  [@@deriving sexp, compare, equal, fields]
+
+  val create :
+    venue:Venue.t ->
+    id:string ->
+    currency:string ->
+    amount:float ->
+    status:Transfer_status.t ->
+    ?address:string ->
+    ?tx_id:string ->
+    ?created_at:Time_float_unix.t ->
+    ?updated_at:Time_float_unix.t ->
+    unit -> t
+end
+
+module Withdrawal : sig
+  (** Withdrawal record
+
+      Represents an outgoing withdrawal from the exchange account.
+  *)
+  type t =
+    { venue : Venue.t
+    ; id : string                           (** Exchange's withdrawal ID *)
+    ; currency : string                     (** Currency code *)
+    ; amount : float                        (** Withdrawal amount *)
+    ; fee : float option                    (** Withdrawal fee charged *)
+    ; status : Transfer_status.t            (** Current status *)
+    ; address : string                      (** Destination address *)
+    ; tag : string option                   (** Memo/tag for XRP, XLM, etc. *)
+    ; tx_id : string option                 (** Blockchain transaction ID *)
+    ; created_at : Time_float_unix.t option (** When withdrawal was initiated *)
+    ; updated_at : Time_float_unix.t option (** Last status update *)
+    }
+  [@@deriving sexp, compare, equal, fields]
+
+  val create :
+    venue:Venue.t ->
+    id:string ->
+    currency:string ->
+    amount:float ->
+    ?fee:float ->
+    status:Transfer_status.t ->
+    address:string ->
+    ?tag:string ->
+    ?tx_id:string ->
+    ?created_at:Time_float_unix.t ->
+    ?updated_at:Time_float_unix.t ->
+    unit -> t
+end
+
 (** {1 Error Handling} *)
 
 module Error : sig

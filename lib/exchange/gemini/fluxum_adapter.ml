@@ -47,10 +47,16 @@ module Adapter = struct
      { cfg   : (module Cfg.S)
      ; nonce : Nonce.reader
     ; symbols : string list (* used for public market-data subscription *)
+    ; rate_limiter : Exchange_common.Rate_limiter.t
     }
 
   let create ~cfg ~nonce ?(symbols = []) () =
-    { cfg; nonce; symbols }
+    { cfg
+    ; nonce
+    ; symbols
+    ; rate_limiter = Exchange_common.Rate_limiter.create
+        ~config:Exchange_common.Rate_limiter.Configs.gemini ()
+    }
 
   module Venue = struct
     let t = Types.Venue.Gemini
@@ -99,42 +105,62 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.post
     end
+
+    (** Account operations - deposits/withdrawals *)
+    module Deposit_address = struct
+      type t = V1.Deposit_address.response
+    end
+
+    module Deposit = struct
+      type t = V1.Transfers.transfer
+    end
+
+    module Withdrawal = struct
+      type t =
+        | Withdraw_response of V1.Withdraw.response
+        | Transfer of V1.Transfers.transfer
+    end
   end
 
   let place_order (t : t) (req : Native.Order.request) =
     let (module Cfg) = t.cfg in
-    V1.Order.New.post (module Cfg) t.nonce req
-    >>| function
-    | `Ok r -> Ok r
-      | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Order.New.post (module Cfg) t.nonce req
+      >>| function
+      | `Ok r -> Ok r
+        | (#Rest.Error.post as e) -> Error e)
 
   let cancel_order (t : t) (id : Native.Order.id) =
     let (module Cfg) = t.cfg in
-    V1.Order.Cancel.By_order_id.post (module Cfg) t.nonce { order_id = id }
-    >>| function
-    | `Ok _ -> Ok ()
-      | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Order.Cancel.By_order_id.post (module Cfg) t.nonce { order_id = id }
+      >>| function
+      | `Ok _ -> Ok ()
+        | (#Rest.Error.post as e) -> Error e)
 
   let balances (t : t) =
     let (module Cfg) = t.cfg in
-    V1.Balances.post (module Cfg) t.nonce ()
-    >>| function
-    | `Ok r -> Ok r
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Balances.post (module Cfg) t.nonce ()
+      >>| function
+      | `Ok r -> Ok r
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_order_status (t : t) (id : Native.Order.id) =
     let (module Cfg) = t.cfg in
-    V1.Order.Status.post (module Cfg) t.nonce { order_id = id }
-    >>| function
-    | `Ok r -> Ok r
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Order.Status.post (module Cfg) t.nonce { order_id = id }
+      >>| function
+      | `Ok r -> Ok r
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_open_orders (t : t) ?symbol:_ () =
     let (module Cfg) = t.cfg in
-    V1.Orders.post (module Cfg) t.nonce ()
-    >>| function
-    | `Ok orders -> Ok orders
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Orders.post (module Cfg) t.nonce ()
+      >>| function
+      | `Ok orders -> Ok orders
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_order_history (_ : t) ?symbol:_ ?limit:_ () =
     (* Gemini doesn't have a closed orders endpoint *)
@@ -142,71 +168,79 @@ module Adapter = struct
 
   let get_my_trades (t : t) ~symbol ?limit () =
     let (module Cfg) = t.cfg in
-    V1.Mytrades.post (module Cfg) t.nonce
-      { symbol = V1.Symbol.of_string symbol
-      ; limit_trades = limit
-      ; timestamp = None
-      }
-    >>| function
-    | `Ok trades -> Ok (List.map trades ~f:(fun t -> Native.Trade.Rest t))
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Mytrades.post (module Cfg) t.nonce
+        { symbol = V1.Symbol.of_string symbol
+        ; limit_trades = limit
+        ; timestamp = None
+        }
+      >>| function
+      | `Ok trades -> Ok (List.map trades ~f:(fun t -> Native.Trade.Rest t))
+      | (#Rest.Error.post as e) -> Error e)
 
   let get_symbols (t : t) () =
     let (module Cfg) = t.cfg in
-    (* Fetch details for all known symbols *)
-    Deferred.List.filter_map V1.Symbol.all ~how:`Parallel ~f:(fun sym ->
-      V1.Symbol_details.get (module Cfg) t.nonce ~uri_args:sym ()
+    (* Fetch details for all known symbols - rate limiting applied per request *)
+    Deferred.List.filter_map V1.Symbol.all ~how:`Sequential ~f:(fun sym ->
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Symbol_details.get (module Cfg) t.nonce ~uri_args:sym ()
+        >>| function
+        | `Ok r -> Ok (Some r)
+        | #Rest.Error.get -> Ok None)
       >>| function
-      | `Ok r -> Some r
-      | #Rest.Error.get -> None)
+      | Ok r -> r
+      | Error _ -> None)
     >>| fun results -> Ok results
 
-  let get_ticker (_ : t) ~symbol () =
-    (* Use Gemini public ticker endpoint *)
-    let symbol_lower = String.lowercase symbol in
-    let uri = Uri.of_string (sprintf "https://api.gemini.com/v1/pubticker/%s" symbol_lower) in
-    Monitor.try_with (fun () ->
-      Cohttp_async.Client.get uri >>= fun (_, body) ->
-      Cohttp_async.Body.to_string body
-    ) >>| function
-    | Error _ -> Error (`Network_error "Failed to fetch ticker")
-    | Ok body ->
-      match Yojson.Safe.from_string body with
-      | exception _ -> Error (`Json_parse "Failed to parse ticker response")
-      | json -> Ok json
+  let get_ticker (t : t) ~symbol () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      (* Use Gemini public ticker endpoint *)
+      let symbol_lower = String.lowercase symbol in
+      let uri = Uri.of_string (sprintf "https://api.gemini.com/v1/pubticker/%s" symbol_lower) in
+      Monitor.try_with (fun () ->
+        Cohttp_async.Client.get uri >>= fun (_, body) ->
+        Cohttp_async.Body.to_string body
+      ) >>| function
+      | Error _ -> Error (`Network_error "Failed to fetch ticker")
+      | Ok body ->
+        match Yojson.Safe.from_string body with
+        | exception _ -> Error (`Json_parse "Failed to parse ticker response")
+        | json -> Ok json)
 
-  let get_order_book (_ : t) ~symbol ?limit () =
-    (* Use Gemini public order book endpoint *)
-    let symbol_lower = String.lowercase symbol in
-    let limit_str = match limit with Some n -> sprintf "?limit_bids=%d&limit_asks=%d" n n | None -> "" in
-    let uri = Uri.of_string (sprintf "https://api.gemini.com/v1/book/%s%s" symbol_lower limit_str) in
-    Monitor.try_with (fun () ->
-      Cohttp_async.Client.get uri >>= fun (_, body) ->
-      Cohttp_async.Body.to_string body
-    ) >>| function
-    | Error _ -> Error (`Network_error "Failed to fetch order book")
-    | Ok body ->
-      match Yojson.Safe.from_string body with
-      | exception _ -> Error (`Json_parse "Failed to parse order book response")
-      | json -> Ok json
+  let get_order_book (t : t) ~symbol ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      (* Use Gemini public order book endpoint *)
+      let symbol_lower = String.lowercase symbol in
+      let limit_str = match limit with Some n -> sprintf "?limit_bids=%d&limit_asks=%d" n n | None -> "" in
+      let uri = Uri.of_string (sprintf "https://api.gemini.com/v1/book/%s%s" symbol_lower limit_str) in
+      Monitor.try_with (fun () ->
+        Cohttp_async.Client.get uri >>= fun (_, body) ->
+        Cohttp_async.Body.to_string body
+      ) >>| function
+      | Error _ -> Error (`Network_error "Failed to fetch order book")
+      | Ok body ->
+        match Yojson.Safe.from_string body with
+        | exception _ -> Error (`Json_parse "Failed to parse order book response")
+        | json -> Ok json)
 
-  let get_recent_trades (_ : t) ~symbol ?limit () =
-    (* Use Gemini public trades endpoint *)
-    let symbol_lower = String.lowercase symbol in
-    let limit_str = match limit with Some n -> sprintf "?limit_trades=%d" n | None -> "" in
-    let uri = Uri.of_string (sprintf "https://api.gemini.com/v1/trades/%s%s" symbol_lower limit_str) in
-    Monitor.try_with (fun () ->
-      Cohttp_async.Client.get uri >>= fun (_, body) ->
-      Cohttp_async.Body.to_string body
-    ) >>| function
-    | Error _ -> Error (`Network_error "Failed to fetch recent trades")
-    | Ok body ->
-      match Yojson.Safe.from_string body with
-      | exception _ -> Error (`Json_parse "Failed to parse trades response")
-      | json ->
-        match json with
-        | `List trades -> Ok trades
-        | _ -> Error (`Json_parse "Expected array of trades")
+  let get_recent_trades (t : t) ~symbol ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      (* Use Gemini public trades endpoint *)
+      let symbol_lower = String.lowercase symbol in
+      let limit_str = match limit with Some n -> sprintf "?limit_trades=%d" n | None -> "" in
+      let uri = Uri.of_string (sprintf "https://api.gemini.com/v1/trades/%s%s" symbol_lower limit_str) in
+      Monitor.try_with (fun () ->
+        Cohttp_async.Client.get uri >>= fun (_, body) ->
+        Cohttp_async.Body.to_string body
+      ) >>| function
+      | Error _ -> Error (`Network_error "Failed to fetch recent trades")
+      | Ok body ->
+        match Yojson.Safe.from_string body with
+        | exception _ -> Error (`Json_parse "Failed to parse trades response")
+        | json ->
+          match json with
+          | `List trades -> Ok trades
+          | _ -> Error (`Json_parse "Expected array of trades"))
 
   let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
     (* Gemini does not have a public REST candle/OHLCV endpoint *)
@@ -214,10 +248,66 @@ module Adapter = struct
 
   let cancel_all_orders (t : t) ?symbol:_ () =
     let (module Cfg) = t.cfg in
-    V1.Order.Cancel.All.post (module Cfg) t.nonce ()
-    >>| function
-    | `Ok { details } -> Ok (List.length details.cancelled_orders)
-    | (#Rest.Error.post as e) -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Order.Cancel.All.post (module Cfg) t.nonce ()
+      >>| function
+      | `Ok { details } -> Ok (List.length details.cancelled_orders)
+      | (#Rest.Error.post as e) -> Error e)
+
+  (** {2 Account Operations - Deposits/Withdrawals} *)
+
+  let get_deposit_address (t : t) ~currency ?network:_ () =
+    let (module Cfg) = t.cfg in
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Deposit_address.post (module Cfg) t.nonce { currency; label = None }
+      >>| function
+      | `Ok r -> Ok r
+      | (#Rest.Error.post as e) -> Error e)
+
+  let withdraw (t : t) ~currency ~amount ~address ?tag ?network:_ () =
+    let (module Cfg) = t.cfg in
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Withdraw.post (module Cfg) t.nonce
+        { currency
+        ; address
+        ; amount = Common.Decimal_string.of_string (Float.to_string amount)
+        ; memo = tag
+        }
+      >>| function
+      | `Ok r -> Ok (Native.Withdrawal.Withdraw_response r)
+      | (#Rest.Error.post as e) -> Error e)
+
+  let get_deposits (t : t) ?currency ?limit () =
+    let (module Cfg) = t.cfg in
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Transfers.post (module Cfg) t.nonce
+        { currency; timestamp = None; limit_transfers = limit }
+      >>| function
+      | `Ok transfers ->
+        (* Filter to only deposits *)
+        let deposits = List.filter transfers ~f:(fun tr ->
+          match tr.V1.Transfers.type_ with
+          | `Deposit -> true
+          | `Withdrawal -> false)
+        in
+        Ok deposits
+      | (#Rest.Error.post as e) -> Error e)
+
+  let get_withdrawals (t : t) ?currency ?limit () =
+    let (module Cfg) = t.cfg in
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Transfers.post (module Cfg) t.nonce
+        { currency; timestamp = None; limit_transfers = limit }
+      >>| function
+      | `Ok transfers ->
+        (* Filter to only withdrawals and wrap them *)
+        let withdrawals = List.filter_map transfers ~f:(fun tr ->
+          match tr.V1.Transfers.type_ with
+          | `Withdrawal -> Some (Native.Withdrawal.Transfer tr)
+          | `Deposit -> None)
+        in
+        Ok withdrawals
+      | (#Rest.Error.post as e) -> Error e)
 
   module Streams = struct
     let trades (t : t) =
@@ -585,6 +675,86 @@ module Adapter = struct
       | `Gateway_timeout msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "504"; message = msg }
       | `Json_parse_error { message; body = _ } -> Types.Error.Exchange_specific { venue = Venue.t; code = "json"; message }
       | `Error { reason; message } -> Types.Error.Exchange_specific { venue = Venue.t; code = reason; message }
+
+    (** Account operations normalization *)
+
+    let deposit_address (r : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      Ok ({ venue = Venue.t
+          ; currency = r.currency
+          ; address = r.address
+          ; tag = None  (* Gemini doesn't return tag in this response *)
+          ; network = r.network
+          } : Types.Deposit_address.t)
+
+    let deposit (tr : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string
+        (Common.Decimal_string.to_string tr.amount) in
+      let status = match String.lowercase tr.status with
+        | "complete" | "completed" -> Types.Transfer_status.Completed
+        | "pending" -> Types.Transfer_status.Pending
+        | "processing" | "advanced" -> Types.Transfer_status.Processing
+        | "failed" -> Types.Transfer_status.Failed
+        | "cancelled" | "canceled" -> Types.Transfer_status.Cancelled
+        | _ -> Types.Transfer_status.Pending
+      in
+      Ok ({ venue = Venue.t
+          ; id = Int64.to_string tr.eid
+          ; currency = Common.Currency.Enum_or_string.to_string tr.currency
+          ; amount
+          ; status
+          ; address = tr.destination
+          ; tx_id = tr.txHash
+          ; created_at = Some tr.timestampms
+          ; updated_at = Some tr.timestampms
+          } : Types.Deposit.t)
+
+    let withdrawal (w : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      let open Result.Let_syntax in
+      match w with
+      | Native.Withdrawal.Withdraw_response r ->
+        let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string
+          (Common.Decimal_string.to_string r.amount) in
+        Ok ({ venue = Venue.t
+            ; id = r.withdrawalId
+            ; currency = ""  (* Not in response, would need to be passed from request *)
+            ; amount
+            ; fee = None
+            ; status = Types.Transfer_status.Processing  (* Just submitted *)
+            ; address = r.address
+            ; tag = None
+            ; tx_id = r.txHash
+            ; created_at = Some (Time_float_unix.now ())
+            ; updated_at = Some (Time_float_unix.now ())
+            } : Types.Withdrawal.t)
+      | Native.Withdrawal.Transfer tr ->
+        let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string
+          (Common.Decimal_string.to_string tr.V1.Transfers.amount) in
+        let%bind fee = match tr.V1.Transfers.feeAmount with
+          | Some fa -> Fluxum.Normalize_common.Float_conv.amount_of_string
+              (Common.Decimal_string.to_string fa) |> Result.map ~f:Option.some
+          | None -> Ok None
+        in
+        let status = match String.lowercase tr.V1.Transfers.status with
+          | "complete" | "completed" -> Types.Transfer_status.Completed
+          | "pending" -> Types.Transfer_status.Pending
+          | "processing" | "advanced" -> Types.Transfer_status.Processing
+          | "failed" -> Types.Transfer_status.Failed
+          | "cancelled" | "canceled" -> Types.Transfer_status.Cancelled
+          | _ -> Types.Transfer_status.Pending
+        in
+        Ok ({ venue = Venue.t
+            ; id = Int64.to_string tr.V1.Transfers.eid
+            ; currency = Common.Currency.Enum_or_string.to_string tr.V1.Transfers.currency
+            ; amount
+            ; fee
+            ; status
+            ; address = Option.value tr.V1.Transfers.destination ~default:""
+            ; tag = None
+            ; tx_id = tr.V1.Transfers.txHash
+            ; created_at = Some tr.V1.Transfers.timestampms
+            ; updated_at = Some tr.V1.Transfers.timestampms
+            } : Types.Withdrawal.t)
     end
 end
 

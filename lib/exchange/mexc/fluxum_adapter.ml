@@ -63,10 +63,15 @@ module Adapter = struct
   type t =
     { cfg : (module Cfg.S)
     ; symbols : string list
+    ; rate_limiter : Exchange_common.Rate_limiter.t
     }
 
   let create ~cfg ?(symbols = []) () =
-    { cfg; symbols }
+    { cfg
+    ; symbols
+    ; rate_limiter = Exchange_common.Rate_limiter.create
+        ~config:Exchange_common.Rate_limiter.Configs.mexc ()
+    }
 
   module Venue = struct
     let t = Types.Venue.Mexc
@@ -112,113 +117,141 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.t
     end
+
+    module Deposit_address = struct
+      type t = V1.Deposit_address.response
+    end
+
+    module Deposit = struct
+      type t = V1.Deposit_history.deposit
+    end
+
+    module Withdrawal = struct
+      type t = V1.Withdrawal_history.withdrawal
+    end
   end
 
-  let _create ~cfg ?(symbols = []) () = { cfg; symbols }
+  let _create ~cfg ?(symbols = []) () =
+    { cfg
+    ; symbols
+    ; rate_limiter = Exchange_common.Rate_limiter.create
+        ~config:Exchange_common.Rate_limiter.Configs.mexc ()
+    }
 
   let place_order t (req : Native.Order.request) =
-    V1.New_order.request t.cfg req >>| function
-    | `Ok resp -> Ok resp
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.New_order.request t.cfg req >>| function
+      | `Ok resp -> Ok resp
+      | #Rest.Error.t as e -> Error e)
 
   let cancel_order t (order_id : Native.Order.id) =
     (* Need symbol for cancel - extract from first configured symbol or fail *)
     match t.symbols with
     | symbol :: _ ->
-      V1.Cancel_order.request
-        t.cfg
-        { symbol; orderId = Some order_id; origClientOrderId = None }
-      >>| (function
-      | `Ok _ -> Ok ()
-      | #Rest.Error.t as e -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Cancel_order.request
+          t.cfg
+          { symbol; orderId = Some order_id; origClientOrderId = None }
+        >>| (function
+        | `Ok _ -> Ok ()
+        | #Rest.Error.t as e -> Error e))
     | [] ->
       Deferred.return
         (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
 
   let balances t =
-    V1.Account.request t.cfg () >>| function
-    | `Ok resp -> Ok resp.balances
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Account.request t.cfg () >>| function
+      | `Ok resp -> Ok resp.balances
+      | #Rest.Error.t as e -> Error e)
 
   let get_order_status t (order_id : Native.Order.id) =
     match t.symbols with
     | symbol :: _ ->
-      V1.Query_order.request t.cfg
-        { symbol; orderId = Some order_id; origClientOrderId = None }
-      >>| (function
-        | `Ok resp ->
-          (* Convert Query_order.response to Open_orders.order (same structure) *)
-          let order : V1.Open_orders.order =
-            { symbol = resp.symbol
-            ; orderId = resp.orderId
-            ; orderListId = resp.orderListId
-            ; clientOrderId = resp.clientOrderId
-            ; price = resp.price
-            ; origQty = resp.origQty
-            ; executedQty = resp.executedQty
-            ; cummulativeQuoteQty = resp.cummulativeQuoteQty
-            ; status = resp.status
-            ; timeInForce = resp.timeInForce
-            ; type_ = resp.type_
-            ; side = resp.side
-            ; stopPrice = resp.stopPrice
-            ; time = resp.time
-            ; updateTime = resp.updateTime
-            ; isWorking = resp.isWorking
-            ; origQuoteOrderQty = resp.origQuoteOrderQty
-            }
-          in
-          Ok order
-        | #Rest.Error.t as e -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Query_order.request t.cfg
+          { symbol; orderId = Some order_id; origClientOrderId = None }
+        >>| (function
+          | `Ok resp ->
+            (* Convert Query_order.response to Open_orders.order (same structure) *)
+            let order : V1.Open_orders.order =
+              { symbol = resp.symbol
+              ; orderId = resp.orderId
+              ; orderListId = resp.orderListId
+              ; clientOrderId = resp.clientOrderId
+              ; price = resp.price
+              ; origQty = resp.origQty
+              ; executedQty = resp.executedQty
+              ; cummulativeQuoteQty = resp.cummulativeQuoteQty
+              ; status = resp.status
+              ; timeInForce = resp.timeInForce
+              ; type_ = resp.type_
+              ; side = resp.side
+              ; stopPrice = resp.stopPrice
+              ; time = resp.time
+              ; updateTime = resp.updateTime
+              ; isWorking = resp.isWorking
+              ; origQuoteOrderQty = resp.origQuoteOrderQty
+              }
+            in
+            Ok order
+          | #Rest.Error.t as e -> Error e))
     | [] ->
       Deferred.return
         (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
 
   let get_open_orders t ?symbol () =
-    let symbol = match symbol with Some s -> s | None -> List.hd t.symbols |> Option.value ~default:"" in
-    V1.Open_orders.request t.cfg { symbol = Some symbol }
-    >>| function
-    | `Ok orders -> Ok orders
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let symbol = match symbol with Some s -> s | None -> List.hd t.symbols |> Option.value ~default:"" in
+      V1.Open_orders.request t.cfg { symbol = Some symbol }
+      >>| function
+      | `Ok orders -> Ok orders
+      | #Rest.Error.t as e -> Error e)
 
   let get_order_history t ?symbol ?limit () =
-    let symbol = match symbol with Some s -> s | None -> List.hd t.symbols |> Option.value ~default:"" in
-    V1.All_orders.request t.cfg
-      { symbol; orderId = None; startTime = None; endTime = None; limit }
-    >>| function
-    | `Ok orders -> Ok orders
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let symbol = match symbol with Some s -> s | None -> List.hd t.symbols |> Option.value ~default:"" in
+      V1.All_orders.request t.cfg
+        { symbol; orderId = None; startTime = None; endTime = None; limit }
+      >>| function
+      | `Ok orders -> Ok orders
+      | #Rest.Error.t as e -> Error e)
 
   let get_my_trades t ~symbol ?limit () =
-    V1.My_trades.request t.cfg
-      { symbol; orderId = None; startTime = None; endTime = None; fromId = None; limit }
-    >>| function
-    | `Ok trades -> Ok trades
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.My_trades.request t.cfg
+        { symbol; orderId = None; startTime = None; endTime = None; fromId = None; limit }
+      >>| function
+      | `Ok trades -> Ok trades
+      | #Rest.Error.t as e -> Error e)
 
   let get_symbols t () =
-    V1.Exchange_info.request t.cfg { symbol = None }
-    >>| function
-    | `Ok info -> Ok info.symbols
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Exchange_info.request t.cfg { symbol = None }
+      >>| function
+      | `Ok info -> Ok info.symbols
+      | #Rest.Error.t as e -> Error e)
 
   let get_ticker t ~symbol () =
-    V1.Ticker_24hr.request t.cfg { symbol = Some symbol }
-    >>| function
-    | `Ok ticker -> Ok ticker
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Ticker_24hr.request t.cfg { symbol = Some symbol }
+      >>| function
+      | `Ok ticker -> Ok ticker
+      | #Rest.Error.t as e -> Error e)
 
   let get_order_book t ~symbol ?limit () =
-    V1.Depth.request t.cfg { symbol; limit }
-    >>| function
-    | `Ok depth -> Ok depth
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Depth.request t.cfg { symbol; limit }
+      >>| function
+      | `Ok depth -> Ok depth
+      | #Rest.Error.t as e -> Error e)
 
   let get_recent_trades t ~symbol ?limit () =
-    V1.Recent_trades.request t.cfg { symbol; limit }
-    >>| function
-    | `Ok trades -> Ok trades
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Recent_trades.request t.cfg { symbol; limit }
+      >>| function
+      | `Ok trades -> Ok trades
+      | #Rest.Error.t as e -> Error e)
 
   let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
     Deferred.return (Error (`Bad_request "MEXC candles not yet implemented"))
@@ -226,21 +259,100 @@ module Adapter = struct
   let cancel_all_orders t ?symbol () =
     match symbol with
     | Some sym ->
-      V1.Cancel_all_orders.request t.cfg { symbol = sym }
-      >>| (function
-        | `Ok orders -> Ok (List.length orders)
-        | #Rest.Error.t as e -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Cancel_all_orders.request t.cfg { symbol = sym }
+        >>| (function
+          | `Ok orders -> Ok (List.length orders)
+          | #Rest.Error.t as e -> Error e))
     | None ->
       (* Cancel for first configured symbol if none provided *)
       match t.symbols with
       | sym :: _ ->
-        V1.Cancel_all_orders.request t.cfg { symbol = sym }
-        >>| (function
-          | `Ok orders -> Ok (List.length orders)
-          | #Rest.Error.t as e -> Error e)
+        Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+          V1.Cancel_all_orders.request t.cfg { symbol = sym }
+          >>| (function
+            | `Ok orders -> Ok (List.length orders)
+            | #Rest.Error.t as e -> Error e))
       | [] ->
         Deferred.return
           (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
+
+  (* ============================================================ *)
+  (* Account Operations - Deposits and Withdrawals                *)
+  (* ============================================================ *)
+
+  let get_deposit_address t ~currency ?network () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Deposit_address.request t.cfg { coin = currency; network }
+      >>| function
+      | `Ok resp -> Ok resp
+      | #Rest.Error.t as e -> Error e)
+
+  let get_deposit_history t ?currency ?status ?start_time ?end_time ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let mexc_status =
+        Option.map status ~f:(function
+          | Types.Transfer_status.Pending -> 3
+          | Types.Transfer_status.Processing -> 3
+          | Types.Transfer_status.Completed -> 5
+          | Types.Transfer_status.Failed -> 4
+          | Types.Transfer_status.Cancelled -> 4)
+      in
+      let startTime = Option.map start_time ~f:(fun t ->
+        Time_float_unix.to_span_since_epoch t
+        |> Time_float_unix.Span.to_ms
+        |> Int64.of_float)
+      in
+      let endTime = Option.map end_time ~f:(fun t ->
+        Time_float_unix.to_span_since_epoch t
+        |> Time_float_unix.Span.to_ms
+        |> Int64.of_float)
+      in
+      V1.Deposit_history.request t.cfg
+        { coin = currency; status = mexc_status; startTime; endTime; limit }
+      >>| function
+      | `Ok deposits -> Ok deposits
+      | #Rest.Error.t as e -> Error e)
+
+  let withdraw t ~currency ~address ~amount ?network ?memo () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V1.Withdraw.request t.cfg
+        { coin = currency
+        ; address
+        ; amount = Float.to_string amount
+        ; network
+        ; memo
+        ; withdrawOrderId = None
+        }
+      >>| function
+      | `Ok resp -> Ok resp.id
+      | #Rest.Error.t as e -> Error e)
+
+  let get_withdrawal_history t ?currency ?status ?start_time ?end_time ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let mexc_status =
+        Option.map status ~f:(function
+          | Types.Transfer_status.Pending -> "APPLY"
+          | Types.Transfer_status.Processing -> "PROCESSING"
+          | Types.Transfer_status.Completed -> "SUCCESS"
+          | Types.Transfer_status.Failed -> "FAIL"
+          | Types.Transfer_status.Cancelled -> "CANCEL")
+      in
+      let startTime = Option.map start_time ~f:(fun t ->
+        Time_float_unix.to_span_since_epoch t
+        |> Time_float_unix.Span.to_ms
+        |> Int64.of_float)
+      in
+      let endTime = Option.map end_time ~f:(fun t ->
+        Time_float_unix.to_span_since_epoch t
+        |> Time_float_unix.Span.to_ms
+        |> Int64.of_float)
+      in
+      V1.Withdrawal_history.request t.cfg
+        { coin = currency; status = mexc_status; startTime; endTime; limit }
+      >>| function
+      | `Ok withdrawals -> Ok withdrawals
+      | #Rest.Error.t as e -> Error e)
 
   module Streams = struct
     let trades (_ : t) =
@@ -468,6 +580,66 @@ module Adapter = struct
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "MEXC candle normalization not yet implemented"
+
+    let deposit_address (d : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      Ok ({ venue = Venue.t
+          ; currency = d.coin
+          ; address = d.address
+          ; tag = (match d.tag with "" -> None | s -> Some s)
+          ; network = Some d.network
+          } : Types.Deposit_address.t)
+
+    let deposit (d : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.of_string d.amount in
+      let status =
+        match d.status with
+        | 1 | 2 -> Types.Transfer_status.Processing  (* small/large deposit, processing *)
+        | 3 -> Types.Transfer_status.Pending
+        | 4 -> Types.Transfer_status.Cancelled
+        | 5 -> Types.Transfer_status.Completed
+        | _ -> Types.Transfer_status.Pending
+      in
+      let created_at = Some (Time_float_unix.of_span_since_epoch
+        (Time_float_unix.Span.of_ms (Int64.to_float d.insertTime))) in
+      Ok ({ venue = Venue.t
+          ; id = d.id
+          ; currency = d.coin
+          ; amount
+          ; status
+          ; address = Some d.address
+          ; tx_id = (match d.txId with "" -> None | s -> Some s)
+          ; created_at
+          ; updated_at = None
+          } : Types.Deposit.t)
+
+    let withdrawal (w : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.of_string w.amount in
+      let%bind fee = Fluxum.Normalize_common.Float_conv.of_string w.transactionFee in
+      let status =
+        match w.status with
+        | "APPLY" | "AUDITING" | "WAIT" -> Types.Transfer_status.Pending
+        | "PROCESSING" | "WAIT_PACKAGING" | "WAIT_CONFIRM" -> Types.Transfer_status.Processing
+        | "SUCCESS" -> Types.Transfer_status.Completed
+        | "CANCEL" -> Types.Transfer_status.Cancelled
+        | "FAIL" -> Types.Transfer_status.Failed
+        | _ -> Types.Transfer_status.Pending
+      in
+      let created_at = Some (Time_float_unix.of_span_since_epoch
+        (Time_float_unix.Span.of_ms (Int64.to_float w.applyTime))) in
+      Ok ({ venue = Venue.t
+          ; id = w.id
+          ; currency = w.coin
+          ; amount
+          ; fee = Some fee
+          ; status
+          ; address = w.address
+          ; tag = (match w.memo with "" -> None | s -> Some s)
+          ; tx_id = (match w.txId with "" -> None | s -> Some s)
+          ; created_at
+          ; updated_at = None
+          } : Types.Withdrawal.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

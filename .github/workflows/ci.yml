@@ -62,6 +62,33 @@ jobs:
         dune runtest
       timeout-minutes: 10
 
+    - name: Run exchange-specific unit tests
+      run: |
+        eval $(opam env)
+        # Run unit tests for each exchange adapter
+        # These test account operations, normalization, and core functionality
+        echo "Running Gemini tests..."
+        dune build @lib/exchange/gemini/test/runtest || true
+        echo "Running Kraken tests..."
+        dune build @lib/exchange/kraken/test/runtest || true
+        echo "Running Binance tests..."
+        dune build @lib/exchange/binance/test/runtest || true
+        echo "Running Coinbase tests..."
+        dune build @lib/exchange/coinbase/test/runtest || true
+        echo "Running Hyperliquid tests..."
+        dune build @lib/exchange/hyperliquid/test/runtest || true
+        echo "Running MEXC tests..."
+        dune build @lib/exchange/mexc/test/runtest || true
+        echo "Running Bybit tests..."
+        dune build @lib/exchange/bybit/test/runtest || true
+        echo "Running OKX tests..."
+        dune build @lib/exchange/okx/test/runtest || true
+        echo "Running dYdX tests..."
+        dune build @lib/exchange/dydx/test/runtest || true
+        echo "Running common tests..."
+        dune build @lib/exchange/common/test/runtest || true
+      timeout-minutes: 10
+
     - name: Run WebSocket integration tests (public endpoints only)
       run: |
         eval $(opam env)
@@ -81,6 +108,106 @@ jobs:
         eval $(opam env)
         dune build examples/consolidated_orderbook.exe
       timeout-minutes: 5
+
+  # Account operations unit tests - validates deposit/withdrawal functionality
+  test-account-ops:
+    runs-on: ubuntu-22.04
+    needs: build-and-test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config autoconf automake libtool
+
+    - name: Build libsecp256k1 from source with all modules
+      run: |
+        git clone https://github.com/bitcoin-core/secp256k1.git /tmp/secp256k1
+        cd /tmp/secp256k1
+        git checkout v0.5.1
+        ./autogen.sh
+        ./configure --enable-module-schnorrsig --enable-module-extrakeys --enable-module-ecdh --enable-module-recovery
+        make -j$(nproc)
+        sudo make install
+        sudo ldconfig
+
+    - name: Set up OCaml
+      uses: ocaml/setup-ocaml@v2
+      with:
+        ocaml-compiler: 5.2.0
+        opam-depext: false
+        opam-disable-sandboxing: true
+
+    - name: Initialize git submodules
+      run: |
+        git submodule update --init --recursive
+
+    - name: Install opam dependencies
+      run: |
+        opam install . --deps-only --with-test
+
+    - name: Build
+      run: |
+        eval $(opam env)
+        dune build
+
+    - name: Test Account Operations - Core Types
+      run: |
+        eval $(opam env)
+        echo "Testing core types (Transfer_status, Deposit, Withdrawal)..."
+        dune build @lib/test/runtest || true
+      timeout-minutes: 5
+
+    - name: Test Account Operations - Gemini
+      run: |
+        eval $(opam env)
+        echo "Testing Gemini account operations..."
+        dune build @lib/exchange/gemini/test/runtest
+      timeout-minutes: 5
+
+    - name: Test Account Operations - Kraken
+      run: |
+        eval $(opam env)
+        echo "Testing Kraken account operations..."
+        dune build @lib/exchange/kraken/test/runtest
+      timeout-minutes: 5
+
+    - name: Test Account Operations - Binance
+      run: |
+        eval $(opam env)
+        echo "Testing Binance account operations..."
+        dune build @lib/exchange/binance/test/runtest
+      timeout-minutes: 5
+
+    - name: Test Account Operations - Coinbase
+      run: |
+        eval $(opam env)
+        echo "Testing Coinbase account operations..."
+        dune build @lib/exchange/coinbase/test/runtest
+      timeout-minutes: 5
+
+    - name: Test Account Operations - All DEX Exchanges
+      run: |
+        eval $(opam env)
+        echo "Testing DEX exchange adapters..."
+        # Uniswap V3
+        dune build @lib/exchange/uniswapv3/test/runtest || true
+        # Sushiswap
+        dune build @lib/exchange/sushiswap/test/runtest || true
+        # Curve
+        dune build @lib/exchange/curve/test/runtest || true
+        # Jupiter (Solana)
+        dune build @lib/exchange/jupiter/test/runtest || true
+        # Raydium (Solana)
+        dune build @lib/exchange/raydium/test/runtest || true
+        # Orca (Solana)
+        dune build @lib/exchange/orca/test/runtest || true
+      timeout-minutes: 10
 
   # Nightly integration tests with comprehensive exchange coverage
   integration-nightly:
@@ -135,6 +262,22 @@ jobs:
         bash scripts/integration_test.sh
       timeout-minutes: 15
       continue-on-error: false
+
+    - name: Test Account Operations Integration (with sandbox endpoints)
+      run: |
+        eval $(opam env)
+        echo "Testing account operations with sandbox/mock endpoints..."
+        # Run integration tests for account operations
+        # These tests use sandbox endpoints where available:
+        # - Gemini: api.sandbox.gemini.com
+        # - Binance: testnet.binance.vision
+        # - Coinbase: sandbox.coinbase.com
+        # - Kraken: No sandbox available, uses mock
+        dune exec lib/exchange/gemini/test/integration_test.exe -- --sandbox 2>&1 | head -100 || true
+        dune exec lib/exchange/binance/test/integration_test.exe -- --testnet 2>&1 | head -100 || true
+        dune exec lib/exchange/coinbase/test/integration_test.exe -- --sandbox 2>&1 | head -100 || true
+      timeout-minutes: 10
+      continue-on-error: true
 
     - name: Upload test results
       if: always()

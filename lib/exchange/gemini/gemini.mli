@@ -447,6 +447,94 @@ module V1 : sig
     val command : string * Command.t
   end
 
+  (** Deposit address generation - POST /v1/deposit/{currency}/newAddress *)
+  module Deposit_address : sig
+    type request =
+      { currency : string
+      ; label : string option
+      }
+    [@@deriving sexp, yojson]
+
+    type response =
+      { address : string
+      ; currency : string
+      ; label : string option
+      ; network : string option
+      }
+    [@@deriving sexp]
+
+    val post :
+      (module Cfg.S) ->
+      Nonce.reader ->
+      request ->
+      [ Rest.Error.post | `Ok of response ] Deferred.t
+  end
+
+  (** Withdraw crypto - POST /v1/withdraw/{currency} *)
+  module Withdraw : sig
+    type request =
+      { currency : string
+      ; address : string
+      ; amount : Decimal_string.t
+      ; memo : string option
+      }
+    [@@deriving sexp, yojson]
+
+    type response =
+      { address : string
+      ; amount : Decimal_string.t
+      ; withdrawalId : string
+      ; message : string option
+      ; txHash : string option
+      }
+    [@@deriving sexp]
+
+    val post :
+      (module Cfg.S) ->
+      Nonce.reader ->
+      request ->
+      [ Rest.Error.post | `Ok of response ] Deferred.t
+  end
+
+  (** Transfers (deposits and withdrawals) history - POST /v1/transfers *)
+  module Transfers : sig
+    type transfer_type = [ `Deposit | `Withdrawal ] [@@deriving sexp]
+
+    type transfer =
+      { type_ : transfer_type
+      ; status : string
+      ; timestampms : Timestamp.Ms.t
+      ; eid : Int_number.t
+      ; currency : Currency.Enum_or_string.t
+      ; amount : Decimal_string.t
+      ; method_ : string option
+      ; txHash : string option
+      ; outputIdx : Int_number.t option
+      ; destination : string option
+      ; purpose : string option
+      ; feeAmount : Decimal_string.t option
+      ; feeCurrency : Currency.Enum_or_string.t option
+      }
+    [@@deriving sexp, yojson]
+
+    type request =
+      { currency : string option
+      ; timestamp : Timestamp.Sec.t option
+      ; limit_transfers : int option
+      }
+    [@@deriving sexp, yojson]
+
+    type response = transfer list [@@deriving sexp]
+
+    val post :
+      (module Cfg.S) ->
+      Nonce.reader ->
+      request ->
+      [ Rest.Error.post | `Ok of response ] Deferred.t
+
+    val command : string * Command.t
+  end
+
   (** Gets symbol details for a specific symbol using a GET endpoint on the
       Gemini trading exchange. *)
   module Symbol_details : sig

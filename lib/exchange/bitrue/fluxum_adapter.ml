@@ -55,10 +55,15 @@ module Adapter = struct
   type t =
     { cfg : (module Cfg.S)
     ; symbols : string list
+    ; rate_limiter : Exchange_common.Rate_limiter.t
     }
 
   let create ~cfg ?(symbols = []) () =
-    { cfg; symbols }
+    { cfg
+    ; symbols
+    ; rate_limiter = Exchange_common.Rate_limiter.create
+        ~config:Exchange_common.Rate_limiter.Configs.bitrue ()
+    }
 
   module Venue = struct
     let t = Types.Venue.Bitrue
@@ -104,34 +109,52 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.t
     end
+
+    (** Account operations - deposits/withdrawals (stub types) *)
+    module Deposit_address = struct
+      type t = unit  (* TODO: Implement when Bitrue API supports *)
+    end
+
+    module Deposit = struct
+      type t = unit  (* TODO: Implement when Bitrue API supports *)
+    end
+
+    module Withdrawal = struct
+      type t = unit  (* TODO: Implement when Bitrue API supports *)
+    end
   end
 
   let place_order t (req : Native.Order.request) =
-    Rest.new_order t.cfg req >>| function
-    | Ok response -> Ok response
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.new_order t.cfg req >>| function
+      | Ok response -> Ok response
+      | Error e -> Error e)
 
   let cancel_order t ~symbol ~order_id =
-    Rest.cancel_order t.cfg ~symbol ~order_id >>| function
-    | Ok _response -> Ok ()  (* Cancel response has orderId, we just return success *)
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.cancel_order t.cfg ~symbol ~order_id >>| function
+      | Ok _response -> Ok ()  (* Cancel response has orderId, we just return success *)
+      | Error e -> Error e)
 
   let balances t =
-    Rest.account t.cfg >>| function
-    | Ok resp -> Ok resp.balances
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.account t.cfg >>| function
+      | Ok resp -> Ok resp.balances
+      | Error e -> Error e)
 
   let get_order_status t ~symbol ~order_id =
-    Rest.query_order t.cfg ~symbol ~order_id >>| function
-    | Ok status -> Ok status
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.query_order t.cfg ~symbol ~order_id >>| function
+      | Ok status -> Ok status
+      | Error e -> Error e)
 
   let get_open_orders t ?symbol () =
     match symbol with
     | Some symbol ->
-      Rest.open_orders t.cfg ~symbol >>| (function
-      | Ok orders -> Ok orders
-      | Error e -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        Rest.open_orders t.cfg ~symbol >>| (function
+        | Ok orders -> Ok orders
+        | Error e -> Error e))
     | None ->
       (* Bitrue requires symbol for open orders - return empty if not provided *)
       Deferred.return (Ok [])
@@ -145,26 +168,30 @@ module Adapter = struct
     Deferred.return (Error (`Api_error "Bitrue: my trades not supported by API"))
 
   let get_symbols t () =
-    Rest.exchange_info t.cfg >>| function
-    | Ok info -> Ok info.symbols
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.exchange_info t.cfg >>| function
+      | Ok info -> Ok info.symbols
+      | Error e -> Error e)
 
   let get_ticker t ~symbol () =
-    Rest.ticker_24hr t.cfg ~symbol >>| function
-    | Ok ticker -> Ok ticker
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Rest.ticker_24hr t.cfg ~symbol >>| function
+      | Ok ticker -> Ok ticker
+      | Error e -> Error e)
 
   let get_order_book t ~symbol ?limit () =
-    let limit = Option.value limit ~default:100 in
-    Rest.depth t.cfg ~symbol ~limit () >>| function
-    | Ok book -> Ok book
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let limit = Option.value limit ~default:100 in
+      Rest.depth t.cfg ~symbol ~limit () >>| function
+      | Ok book -> Ok book
+      | Error e -> Error e)
 
   let get_recent_trades t ~symbol ?limit () =
-    let limit = Option.value limit ~default:500 in
-    Rest.trades t.cfg ~symbol ~limit () >>| function
-    | Ok trades -> Ok trades
-    | Error e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let limit = Option.value limit ~default:500 in
+      Rest.trades t.cfg ~symbol ~limit () >>| function
+      | Ok trades -> Ok trades
+      | Error e -> Error e)
 
   let cancel_all_orders _t ?symbol:_ () =
     (* Bitrue API doesn't have a cancel-all endpoint *)
@@ -172,6 +199,20 @@ module Adapter = struct
 
   let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
     Deferred.return (Error (`Api_error "Bitrue candles not yet implemented"))
+
+  (** {2 Account Operations - Deposits/Withdrawals (Stubs)} *)
+
+  let get_deposit_address (_ : t) ~currency:_ ?network:_ () =
+    Deferred.return (Error (`Api_error "Bitrue deposit address not yet implemented"))
+
+  let withdraw (_ : t) ~currency:_ ~amount:_ ~address:_ ?tag:_ ?network:_ () =
+    Deferred.return (Error (`Api_error "Bitrue withdraw not yet implemented"))
+
+  let get_deposits (_ : t) ?currency:_ ?limit:_ () =
+    Deferred.return (Error (`Api_error "Bitrue deposit history not yet implemented"))
+
+  let get_withdrawals (_ : t) ?currency:_ ?limit:_ () =
+    Deferred.return (Error (`Api_error "Bitrue withdrawal history not yet implemented"))
 
   module Streams = struct
     let trades (_ : t) =
@@ -391,6 +432,16 @@ module Adapter = struct
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "Bitrue candle normalization not yet implemented"
+
+    (** Account operations normalization (stubs) *)
+    let deposit_address (_ : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      Error "Bitrue deposit_address normalization not yet implemented"
+
+    let deposit (_ : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      Error "Bitrue deposit normalization not yet implemented"
+
+    let withdrawal (_ : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      Error "Bitrue withdrawal normalization not yet implemented"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

@@ -298,3 +298,44 @@ let%test_module "opcodes" = (module struct
   let%test "opcode 9 (ping)" = check_opcode ~opcode:9
   let%test "opcode 10 (pong)" = check_opcode ~opcode:10
 end)
+
+(* ────────────────────────────────────────────────────────────────────────
+   Tests: ping frame encoding (RFC 6455 health monitoring support)
+   ──────────────────────────────────────────────────────────────────────── *)
+
+let%test_module "ping_frame" = (module struct
+  let%test "ping frame has opcode 9" =
+    let frame = Websocket_curl.encode_ping_frame "" in
+    let (_fin, opcode, _masked, _len, _hlen) = decode_frame_header frame in
+    opcode = 9
+
+  let%test "ping frame with payload" =
+    let payload = "health-check-123" in
+    let frame = Websocket_curl.encode_ping_frame payload in
+    let (_fin, opcode, _masked, payload_len, header_len) = decode_frame_header frame in
+    let mask = extract_mask frame ~header_len in
+    let recovered = unmask_payload frame ~header_len ~mask ~payload_len in
+    opcode = 9 && String.equal recovered payload
+
+  let%test "ping frame is masked (client-to-server)" =
+    let frame = Websocket_curl.encode_ping_frame "test" in
+    let (_fin, _opcode, masked, _len, _hlen) = decode_frame_header frame in
+    masked
+
+  let%test "ping frame has FIN bit set" =
+    let frame = Websocket_curl.encode_ping_frame "" in
+    let (fin, _opcode, _masked, _len, _hlen) = decode_frame_header frame in
+    fin
+
+  let%test "empty ping frame is 6 bytes (2 header + 4 mask)" =
+    let frame = Websocket_curl.encode_ping_frame "" in
+    String.length frame = 6
+
+  let%test "ping and pong differ only in opcode" =
+    let payload = "echo-test" in
+    let ping = Websocket_curl.encode_ping_frame payload in
+    let pong = Websocket_curl.encode_pong_frame payload in
+    let (_, ping_opc, _, ping_len, _) = decode_frame_header ping in
+    let (_, pong_opc, _, pong_len, _) = decode_frame_header pong in
+    ping_opc = 9 && pong_opc = 10 && ping_len = pong_len
+end)

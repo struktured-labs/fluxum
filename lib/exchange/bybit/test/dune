@@ -1,6 +1,17 @@
+; Comprehensive unit tests for Bybit unified adapter
+; Run with: dune runtest lib/exchange/bybit/test
 (test
  (name run_tests)
  (modules run_tests)
+ (libraries core bybit fluxum)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
+
+; Account operations tests (deposits/withdrawals)
+; Run with: dune build @lib/exchange/bybit/test/runtest
+(test
+ (name test_account_ops)
+ (modules test_account_ops)
  (libraries core bybit fluxum)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core))

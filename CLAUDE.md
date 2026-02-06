@@ -75,8 +75,87 @@ module F = Fluxum.Make(E)(E.Builder)
 
 **Error handling:** Exchange-specific polymorphic variants normalized to `Types.Error.t`
 
-## Code Style
+## Code Style & Conventions
+
+### Core Principles (MUST FOLLOW)
+
+1. **Jane Street First**: Always use Jane Street libraries (Core, Async, Base) over stdlib
+   - `Core.List` not `List`, `Core.String` not `String`
+   - `Time_float_unix` for timestamps
+   - `Deferred.t` for async operations
+
+2. **Dune Build System**: All builds via dune, no makefiles for OCaml code
+
+3. **Async Over Blocking**: Use `Async` almost always
+   - `Deferred.t` for I/O operations
+   - `Pipe.Reader.t` for streams
+   - Never use blocking I/O in production code
+   - Only exception: CLI argument parsing
+
+4. **Prefer Polymorphic Variants for Errors**:
+   ```ocaml
+   (* GOOD - polymorphic variant per error type *)
+   type error = [ `Http of int * string | `Json_parse of string | `Api_error of string ]
+
+   (* AVOID - single Result.Error variant *)
+   type error = Error of string
+   ```
+
+5. **No if/else Blocks**: Use pattern matching
+   ```ocaml
+   (* GOOD *)
+   match condition with
+   | true -> do_something ()
+   | false -> do_other ()
+
+   (* BAD *)
+   if condition then do_something () else do_other ()
+   ```
+
+6. **Minimize Mutability**: Prefer immutable data structures
+   - Use `ref` only when performance requires it
+   - Prefer `Map.t` over `Hashtbl.t` unless benchmarks show need
+   - Document why mutable state is used when necessary
+
+7. **Native OCaml Where Possible**: Avoid external dependencies when stdlib/Core suffices
+
+### File Conventions
 
 - Files use `-open Core -open Async` (see dune flags)
 - PPX: `ppx_jane`, `ppx_deriving_yojson`, `ppx_csv_conv`
 - Types derive `sexp`, `compare`, `equal` for Core compatibility
+- Public functions should have `_exn` variants where appropriate
+
+### Error Handling Pattern
+
+```ocaml
+(* Define exchange-specific errors as polymorphic variants *)
+type error = [
+  | `Http of int * string
+  | `Json_parse of string
+  | `Api_error of string
+  | `Unauthorized
+]
+
+(* Return Deferred.Result with polymorphic variant error *)
+val fetch : t -> (response, [> error]) Deferred.Result.t
+
+(* Normalize to Types.Error.t at adapter boundary *)
+val normalize_error : error -> Types.Error.t
+```
+
+### Async Patterns
+
+```ocaml
+(* Use let%bind for sequential async *)
+let%bind result1 = fetch_data () in
+let%bind result2 = process result1 in
+return result2
+
+(* Use Deferred.all for parallel async *)
+let%bind results = Deferred.all [fetch_a (); fetch_b (); fetch_c ()] in
+
+(* Use Pipe for streams *)
+let%bind reader = subscribe_to_updates () in
+Pipe.iter_without_pushback reader ~f:handle_update
+```

@@ -700,3 +700,263 @@ module Cancel_all_orders = struct
 
   include Rest.Make_with_params (T) (Params)
 end
+
+(* ============================================================ *)
+(* Capital/Wallet Endpoints - Deposits and Withdrawals          *)
+(* ============================================================ *)
+
+(** Get deposit address - GET /api/v3/capital/deposit/address *)
+module Deposit_address = struct
+  module T = struct
+    let name = "deposit-address"
+    let endpoint = "capital/deposit/address"
+    let http_method = `GET
+    let requires_auth = true
+
+    type request =
+      { coin : string
+      ; network : string option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_params { coin; network } =
+      let base = [ ("coin", coin) ] in
+      match network with
+      | Some n -> base @ [ ("network", n) ]
+      | None -> base
+
+    type response =
+      { coin : string
+      ; address : string
+      ; tag : string [@default ""]
+      ; network : string
+      }
+    [@@deriving sexp, of_yojson]
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let coin =
+          string_flag ~field_name:"coin" ~doc:"Coin symbol (e.g., BTC, ETH)"
+        and network =
+          string_flag_option ~field_name:"network" ~doc:"Network (e.g., ERC20, TRC20)"
+        in
+        { coin; network }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
+(** Get deposit history - GET /api/v3/capital/deposit/hisrec *)
+module Deposit_history = struct
+  module T = struct
+    let name = "deposit-history"
+    let endpoint = "capital/deposit/hisrec"
+    let http_method = `GET
+    let requires_auth = true
+
+    type request =
+      { coin : string option [@default None]
+      ; status : int option [@default None]  (** 1=small, 2=large, 3=pending, 4=cancelled, 5=completed *)
+      ; startTime : int64 option [@default None]
+      ; endTime : int64 option [@default None]
+      ; limit : int option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_params { coin; status; startTime; endTime; limit } =
+      let add_opt key f = function
+        | None -> Fun.id
+        | Some v -> List.cons (key, f v)
+      in
+      []
+      |> add_opt "coin" Fn.id coin
+      |> add_opt "status" Int.to_string status
+      |> add_opt "startTime" Int64.to_string startTime
+      |> add_opt "endTime" Int64.to_string endTime
+      |> add_opt "limit" Int.to_string limit
+
+    type deposit =
+      { id : string
+      ; amount : string
+      ; coin : string
+      ; network : string
+      ; status : int  (** 1=small, 2=large, 3=pending, 4=cancelled, 5=completed *)
+      ; address : string
+      ; txId : string [@default ""]
+      ; insertTime : int64
+      ; confirmTimes : string [@default "0/0"]
+      }
+    [@@deriving sexp, of_yojson]
+
+    type response = deposit list [@@deriving sexp, of_yojson]
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let coin =
+          string_flag_option ~field_name:"coin" ~doc:"Filter by coin"
+        and status =
+          int_flag_option ~field_name:"status" ~doc:"Status: 1=small, 2=large, 3=pending, 4=cancelled, 5=completed"
+        and startTime =
+          int64_flag_option ~field_name:"startTime" ~doc:"Start time (ms)"
+        and endTime =
+          int64_flag_option ~field_name:"endTime" ~doc:"End time (ms)"
+        and limit =
+          int_flag_option ~field_name:"limit" ~doc:"Max results"
+        in
+        { coin; status; startTime; endTime; limit }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
+(** Withdraw - POST /api/v3/capital/withdraw *)
+module Withdraw = struct
+  module T = struct
+    let name = "withdraw"
+    let endpoint = "capital/withdraw"
+    let http_method = `POST
+    let requires_auth = true
+
+    type request =
+      { coin : string
+      ; address : string
+      ; amount : string
+      ; network : string option [@default None]
+      ; memo : string option [@default None]  (** Tag/memo for coins like XRP, XLM *)
+      ; withdrawOrderId : string option [@default None]  (** Client-defined ID *)
+      }
+    [@@deriving sexp]
+
+    let request_to_params { coin; address; amount; network; memo; withdrawOrderId } =
+      let base =
+        [ ("coin", coin)
+        ; ("address", address)
+        ; ("amount", amount)
+        ]
+      in
+      let add_opt key = function
+        | None -> Fun.id
+        | Some v -> List.cons (key, v)
+      in
+      base
+      |> add_opt "network" network
+      |> add_opt "memo" memo
+      |> add_opt "withdrawOrderId" withdrawOrderId
+
+    type response =
+      { id : string
+      }
+    [@@deriving sexp, of_yojson]
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let coin =
+          string_flag ~field_name:"coin" ~doc:"Coin symbol (e.g., BTC, ETH)"
+        and address =
+          string_flag ~field_name:"address" ~doc:"Withdrawal address"
+        and amount =
+          string_flag ~field_name:"amount" ~doc:"Withdrawal amount"
+        and network =
+          string_flag_option ~field_name:"network" ~doc:"Network (e.g., ERC20, TRC20)"
+        and memo =
+          string_flag_option ~field_name:"memo" ~doc:"Memo/tag for XRP, XLM, etc."
+        and withdrawOrderId =
+          string_flag_option ~field_name:"withdrawOrderId" ~doc:"Client-defined withdrawal ID"
+        in
+        { coin; address; amount; network; memo; withdrawOrderId }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
+(** Get withdrawal history - GET /api/v3/capital/withdraw/history *)
+module Withdrawal_history = struct
+  module T = struct
+    let name = "withdrawal-history"
+    let endpoint = "capital/withdraw/history"
+    let http_method = `GET
+    let requires_auth = true
+
+    type request =
+      { coin : string option [@default None]
+      ; status : string option [@default None]  (** APPLY, AUDITING, WAIT, PROCESSING, WAIT_PACKAGING, WAIT_CONFIRM, SUCCESS, CANCEL, FAIL *)
+      ; startTime : int64 option [@default None]
+      ; endTime : int64 option [@default None]
+      ; limit : int option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_params { coin; status; startTime; endTime; limit } =
+      let add_opt key f = function
+        | None -> Fun.id
+        | Some v -> List.cons (key, f v)
+      in
+      []
+      |> add_opt "coin" Fn.id coin
+      |> add_opt "status" Fn.id status
+      |> add_opt "startTime" Int64.to_string startTime
+      |> add_opt "endTime" Int64.to_string endTime
+      |> add_opt "limit" Int.to_string limit
+
+    type withdrawal =
+      { id : string
+      ; amount : string
+      ; transactionFee : string [@default "0"]
+      ; coin : string
+      ; status : string  (** APPLY, AUDITING, WAIT, PROCESSING, WAIT_PACKAGING, WAIT_CONFIRM, SUCCESS, CANCEL, FAIL *)
+      ; address : string
+      ; txId : string [@default ""]
+      ; applyTime : int64
+      ; network : string
+      ; transferType : int [@default 0]  (** 0=external, 1=internal *)
+      ; info : string [@default ""]
+      ; confirmNo : int [@default 0]
+      ; withdrawOrderId : string [@default ""]
+      ; memo : string [@default ""]
+      }
+    [@@deriving sexp, of_yojson]
+
+    type response = withdrawal list [@@deriving sexp, of_yojson]
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let coin =
+          string_flag_option ~field_name:"coin" ~doc:"Filter by coin"
+        and status =
+          string_flag_option ~field_name:"status" ~doc:"Status filter"
+        and startTime =
+          int64_flag_option ~field_name:"startTime" ~doc:"Start time (ms)"
+        and endTime =
+          int64_flag_option ~field_name:"endTime" ~doc:"End time (ms)"
+        and limit =
+          int_flag_option ~field_name:"limit" ~doc:"Max results"
+        in
+        { coin; status; startTime; endTime; limit }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end

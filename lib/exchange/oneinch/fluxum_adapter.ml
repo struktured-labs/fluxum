@@ -120,6 +120,20 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.t
     end
+
+    (** Account operations - deposits/withdrawals (stubs)
+        Note: 1inch is an EVM DEX aggregator - deposits/withdrawals happen on-chain *)
+    module Deposit_address = struct
+      type t = unit
+    end
+
+    module Deposit = struct
+      type t = unit
+    end
+
+    module Withdrawal = struct
+      type t = unit
+    end
   end
 
   (* Trading operations - require wallet *)
@@ -149,6 +163,21 @@ module Adapter = struct
 
   let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
     Deferred.return (Error (`Api_error "1inch doesn't provide historical candle data"))
+
+  (** {2 Account Operations - Deposits/Withdrawals (Stubs)}
+      Note: 1inch is an EVM DEX aggregator - deposits/withdrawals happen on-chain *)
+
+  let get_deposit_address (_ : t) ~currency:_ ?network:_ () =
+    Deferred.return (Error (`Api_error "1inch is an EVM DEX - use wallet address for deposits"))
+
+  let withdraw (_ : t) ~currency:_ ~amount:_ ~address:_ ?tag:_ ?network:_ () =
+    Deferred.return (Error (`Api_error "1inch is an EVM DEX - use wallet for transfers"))
+
+  let get_deposits (_ : t) ?currency:_ ?limit:_ () =
+    Deferred.return (Error (`Api_error "1inch is an EVM DEX - use blockchain explorer"))
+
+  let get_withdrawals (_ : t) ?currency:_ ?limit:_ () =
+    Deferred.return (Error (`Api_error "1inch is an EVM DEX - use blockchain explorer"))
 
   (* Public market data *)
   let get_symbols (t : t) () =
@@ -296,6 +325,16 @@ module Adapter = struct
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "1inch doesn't provide candle data"
+
+    (** Account operations normalization (stubs) *)
+    let deposit_address (_ : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      Error "1inch is an EVM DEX - use wallet address"
+
+    let deposit (_ : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      Error "1inch is an EVM DEX - use blockchain explorer"
+
+    let withdrawal (_ : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      Error "1inch is an EVM DEX - use blockchain explorer"
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

@@ -308,3 +308,60 @@ let cancel_all_orders ~cfg =
   let open Deferred.Result.Let_syntax in
   let%bind json_str = make_auth_request ~cfg ~endpoint:"cancel_all_orders" ~params:[] in
   return json_str  (* Returns success message *)
+
+(** {1 Deposit Endpoints} *)
+
+(** Get deposit address for a currency
+    Currency should be lowercase: btc, eth, ltc, xrp, etc.
+*)
+let deposit_address ~cfg ~currency =
+  let open Deferred.Result.Let_syntax in
+  let endpoint = sprintf "%s_address" (String.lowercase currency) in
+  let%bind json_str = make_auth_request ~cfg ~endpoint ~params:[] in
+  match Yojson.Safe.from_string json_str with
+  | `Assoc fields ->
+    let address = List.Assoc.find fields ~equal:String.equal "address"
+      |> Option.bind ~f:(function `String s -> Some s | _ -> None)
+      |> Option.value ~default:""
+    in
+    let destination_tag = List.Assoc.find fields ~equal:String.equal "destination_tag"
+      |> Option.bind ~f:(function `String s -> Some s | _ -> None)
+    in
+    return ({ Types.address; destination_tag } : Types.deposit_address)
+  | _ -> Deferred.Result.fail (`Json_parse "Unexpected deposit address response format")
+
+(** {1 Withdrawal Endpoints} *)
+
+(** Request a cryptocurrency withdrawal
+    Currency should be lowercase: btc, eth, ltc, xrp, etc.
+*)
+let withdraw ~cfg ~currency ~amount ~address ?destination_tag ?instant () =
+  let open Deferred.Result.Let_syntax in
+  let endpoint = sprintf "%s_withdrawal" (String.lowercase currency) in
+  let params = List.filter_opt [
+    Some ("amount", Float.to_string amount);
+    Some ("address", address);
+    Option.map destination_tag ~f:(fun tag -> ("destination_tag", tag));
+    Option.map instant ~f:(fun i -> ("instant", match i with true -> "1" | false -> "0"));
+  ] in
+  let%bind json_str = make_auth_request ~cfg ~endpoint ~params in
+  match Yojson.Safe.from_string json_str |> Types.withdrawal_response_of_yojson with
+  | Ok response -> return response
+  | Error msg -> Deferred.Result.fail (`Json_parse msg)
+
+(** Get withdrawal status/history
+    timedelta: Return withdrawals from the past N seconds (optional)
+*)
+let withdrawal_requests ~cfg ?timedelta () =
+  let open Deferred.Result.Let_syntax in
+  let params = match timedelta with
+    | Some t -> [("timedelta", Int.to_string t)]
+    | None -> []
+  in
+  let%bind json_str = make_auth_request ~cfg ~endpoint:"withdrawal-requests" ~params in
+  match Yojson.Safe.from_string json_str with
+  | `List requests ->
+    (match Result.all (List.map requests ~f:Types.withdrawal_request_of_yojson) with
+     | Ok requests -> return requests
+     | Error msg -> Deferred.Result.fail (`Json_parse msg))
+  | _ -> Deferred.Result.fail (`Json_parse "Expected array of withdrawal requests")

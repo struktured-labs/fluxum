@@ -216,6 +216,38 @@ module type S = sig
           - Kraken: polymorphic variant [`Unknown_asset_pair | `Invalid_volume | ...]
       *)
     end
+
+    (** {3 Account Operations - Deposits/Withdrawals} *)
+
+    module Deposit_address : sig
+      type t
+      (** Exchange-specific deposit address representation
+
+          Use [Normalize.deposit_address] to convert to [Types.Deposit_address.t].
+
+          Contains: currency, address, memo/tag (if applicable), network
+      *)
+    end
+
+    module Deposit : sig
+      type t
+      (** Exchange-specific deposit record
+
+          Use [Normalize.deposit] to convert to [Types.Deposit.t].
+
+          Contains: id, currency, amount, status, tx_id, timestamps
+      *)
+    end
+
+    module Withdrawal : sig
+      type t
+      (** Exchange-specific withdrawal record
+
+          Use [Normalize.withdrawal] to convert to [Types.Withdrawal.t].
+
+          Contains: id, currency, amount, fee, status, address, tx_id, timestamps
+      *)
+    end
   end
 
   (** {2 Trading Operations} *)
@@ -471,6 +503,89 @@ module type S = sig
       Some exchanges may have rate limit penalties for bulk cancellations.
   *)
 
+  (** {2 Account Operations - Deposits/Withdrawals} *)
+
+  val get_deposit_address :
+    t ->
+    currency:string ->
+    ?network:string ->
+    unit ->
+    (Native.Deposit_address.t, Native.Error.t) Deferred.Result.t
+  (** Get a deposit address for a currency
+
+      @param currency Currency code (e.g., "BTC", "ETH")
+      @param network Optional network (e.g., "ETH", "TRC20" for USDT)
+      @return Deposit address with optional memo/tag
+
+      {b Note:} Some exchanges generate new addresses each call,
+      others return the same address. Check exchange documentation.
+
+      {b Warning:} Always verify the address matches the currency.
+      Sending to wrong address may result in lost funds.
+  *)
+
+  val withdraw :
+    t ->
+    currency:string ->
+    amount:float ->
+    address:string ->
+    ?tag:string ->
+    ?network:string ->
+    unit ->
+    (Native.Withdrawal.t, Native.Error.t) Deferred.Result.t
+  (** Initiate a withdrawal
+
+      @param currency Currency code (e.g., "BTC", "ETH")
+      @param amount Amount to withdraw
+      @param address Destination blockchain address
+      @param tag Optional memo/tag for XRP, XLM, etc.
+      @param network Optional network for multi-network tokens (USDT, etc.)
+      @return Withdrawal record with status
+
+      {b Warning:} Double-check the address before calling.
+      Withdrawals to incorrect addresses cannot be reversed.
+
+      {b Rate Limits:} Some exchanges limit withdrawal frequency.
+
+      {b Security:} Ensure withdrawal addresses are whitelisted if required.
+  *)
+
+  val get_deposits :
+    t ->
+    ?currency:string ->
+    ?limit:int ->
+    unit ->
+    (Native.Deposit.t list, Native.Error.t) Deferred.Result.t
+  (** Get deposit history
+
+      @param currency Optional filter by currency
+      @param limit Maximum number of deposits to return
+      @return List of deposit records
+
+      Use for:
+      - Tracking incoming deposits
+      - Reconciliation
+      - Verifying deposit confirmations
+  *)
+
+  val get_withdrawals :
+    t ->
+    ?currency:string ->
+    ?limit:int ->
+    unit ->
+    (Native.Withdrawal.t list, Native.Error.t) Deferred.Result.t
+  (** Get withdrawal history
+
+      @param currency Optional filter by currency
+      @param limit Maximum number of withdrawals to return
+      @return List of withdrawal records
+
+      Use for:
+      - Tracking outgoing withdrawals
+      - Reconciliation
+      - Verifying withdrawal status
+  *)
+
   (** {2 Real-Time Streams} *)
 
   module Streams : sig
@@ -672,6 +787,34 @@ module type S = sig
         - Rate_limit_exceeded
         - Authentication_failed
         - etc.
+    *)
+
+    (** {3 Account Operations Normalization} *)
+
+    val deposit_address : Native.Deposit_address.t -> (Types.Deposit_address.t, string) Result.t
+    (** Normalize deposit address
+
+        {b Errors:}
+        - Missing address
+        - Invalid currency
+    *)
+
+    val deposit : Native.Deposit.t -> (Types.Deposit.t, string) Result.t
+    (** Normalize deposit record
+
+        {b Errors:}
+        - Invalid amount
+        - Unknown status
+        - Missing required fields
+    *)
+
+    val withdrawal : Native.Withdrawal.t -> (Types.Withdrawal.t, string) Result.t
+    (** Normalize withdrawal record
+
+        {b Errors:}
+        - Invalid amount or fee
+        - Unknown status
+        - Missing required fields
     *)
   end
 end

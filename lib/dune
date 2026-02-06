@@ -1,7 +1,7 @@
 (library
  (name fluxum)
  (public_name fluxum)
- (modules :standard \ websocket_curl curl_ext consolidated_order_book consolidated_balance pool_intf amm_pricing consolidated_pools pool_common)
+ (modules :standard \ websocket_curl curl_ext consolidated_order_book consolidated_balance pool_intf amm_pricing consolidated_pools pool_common ws_health)
  (libraries core async csvfields yojson)
  (preprocess (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))
@@ -55,6 +55,14 @@
  (modules websocket_curl)
  (libraries core async curl curl_ext uri base64 digestif)
  (preprocess (pps ppx_jane)))
+
+(library
+ (name ws_health)
+ (public_name fluxum.ws_health)
+ (modules ws_health)
+ (libraries core async)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (library
  (name consolidated_order_book)

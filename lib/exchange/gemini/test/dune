@@ -6,6 +6,14 @@
  (preprocess (pps ppx_jane))
  (flags :standard -open Core))
 
+; Account operations tests - run with: dune exec ./lib/exchange/gemini/test/test_account_ops.exe
+(test
+ (name test_account_ops)
+ (modules test_account_ops)
+ (libraries core yojson gemini fluxum)
+ (preprocess (pps ppx_jane))
+ (flags :standard -open Core))
+
 ; Integration tests - run manually with: dune exec ./lib/exchange/gemini/test/integration_test.exe
 (executable
  (name integration_test)

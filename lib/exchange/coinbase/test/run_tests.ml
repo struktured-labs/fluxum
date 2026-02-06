@@ -435,6 +435,179 @@ let test_normalize_book_update_empty_levels () =
      incr tests_failed;
      printf "  ✗ FAIL: Should accept empty book update: %s\n" msg)
 
+(* ===== ACCOUNT OPERATIONS TESTS ===== *)
+
+let test_normalize_deposit_address () =
+  printf "\n[Normalize] Deposit address\n";
+  let addr : Coinbase.Rest.Deposit_address.t = {
+    id = "addr-123";
+    address = "0x1234567890abcdef1234567890abcdef12345678";
+    address_info = Some { address = "0x1234567890abcdef1234567890abcdef12345678"; destination_tag = None };
+    name = Some "My BTC Address";
+    created_at = Some "2023-01-01T00:00:00Z";
+    updated_at = Some "2023-01-01T00:00:00Z";
+    network = Some "ethereum";
+    uri_scheme = None;
+    resource = Some "address";
+    resource_path = None;
+    deposit_uri = None;
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.deposit_address addr with
+   | Ok da ->
+     incr tests_passed;
+     ignore (assert_string_equal "0x1234567890abcdef1234567890abcdef12345678" da.address "Address matches");
+     ignore (assert_string_equal "ethereum" (Option.value da.network ~default:"") "Network is ethereum");
+     printf "  ✓ Valid deposit address normalized\n"
+   | Error msg ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should accept valid deposit address: %s\n" msg)
+
+let test_normalize_deposit_address_with_tag () =
+  printf "\n[Normalize] Deposit address with destination tag (XRP-style)\n";
+  let addr : Coinbase.Rest.Deposit_address.t = {
+    id = "addr-456";
+    address = "rN7n3473SaZBCG4dFL83w7a1RXtXtbk2D9";
+    address_info = Some { address = "rN7n3473SaZBCG4dFL83w7a1RXtXtbk2D9"; destination_tag = Some "12345678" };
+    name = Some "My XRP Address";
+    created_at = None;
+    updated_at = None;
+    network = Some "ripple";
+    uri_scheme = None;
+    resource = None;
+    resource_path = None;
+    deposit_uri = None;
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.deposit_address addr with
+   | Ok da ->
+     incr tests_passed;
+     ignore (assert_string_equal "12345678" (Option.value da.tag ~default:"") "Destination tag extracted");
+     printf "  ✓ Deposit address with tag normalized\n"
+   | Error msg ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should accept address with tag: %s\n" msg)
+
+let test_normalize_deposit () =
+  printf "\n[Normalize] Deposit transaction\n";
+  let tx : Coinbase.Rest.Transaction.t = {
+    id = "tx-123";
+    type_ = "receive";
+    status = "completed";
+    amount = { amount = "0.5"; currency = "BTC" };
+    native_amount = Some { amount = "25000.00"; currency = "USD" };
+    description = Some "Deposit from external wallet";
+    created_at = Some "2023-01-01T12:00:00Z";
+    updated_at = Some "2023-01-01T12:30:00Z";
+    resource = Some "transaction";
+    resource_path = None;
+    network = Some { status = Some "confirmed"; hash = Some "0xabc123"; transaction_url = None; name = Some "bitcoin" };
+    to_ = None;
+    from_ = Some { id = None; resource = None; address = Some "bc1qexample"; currency = None; address_info = None };
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.deposit tx with
+   | Ok dep ->
+     incr tests_passed;
+     ignore (assert_string_equal "tx-123" dep.id "Deposit ID matches");
+     ignore (assert_string_equal "BTC" dep.currency "Currency is BTC");
+     ignore (assert_float_equal 0.5 dep.amount "Amount is 0.5");
+     ignore (assert_string_equal "0xabc123" (Option.value dep.tx_id ~default:"") "TX hash extracted");
+     printf "  ✓ Valid deposit normalized\n"
+   | Error msg ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should accept valid deposit: %s\n" msg)
+
+let test_normalize_deposit_invalid_amount () =
+  printf "\n[Normalize] Deposit with invalid amount\n";
+  let tx : Coinbase.Rest.Transaction.t = {
+    id = "tx-bad";
+    type_ = "receive";
+    status = "completed";
+    amount = { amount = "not_a_number"; currency = "BTC" };
+    native_amount = None;
+    description = None;
+    created_at = None;
+    updated_at = None;
+    resource = None;
+    resource_path = None;
+    network = None;
+    to_ = None;
+    from_ = None;
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.deposit tx with
+   | Error msg ->
+     incr tests_passed;
+     printf "  ✓ Rejected invalid amount: %s\n" msg
+   | Ok _ ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should reject non-numeric amount\n")
+
+let test_normalize_withdrawal () =
+  printf "\n[Normalize] Withdrawal transaction\n";
+  let tx : Coinbase.Rest.Transaction.t = {
+    id = "tx-789";
+    type_ = "send";
+    status = "pending";
+    amount = { amount = "1.0"; currency = "ETH" };
+    native_amount = Some { amount = "2000.00"; currency = "USD" };
+    description = Some "Withdrawal to external wallet";
+    created_at = Some "2023-01-01T14:00:00Z";
+    updated_at = Some "2023-01-01T14:00:00Z";
+    resource = Some "transaction";
+    resource_path = None;
+    network = Some { status = Some "pending"; hash = None; transaction_url = None; name = Some "ethereum" };
+    to_ = Some { id = None; resource = None; address = Some "0xdestination"; currency = None; address_info = None };
+    from_ = None;
+  } in
+  incr tests_run;
+  (match Coinbase.Fluxum_adapter.Adapter.Normalize.withdrawal tx with
+   | Ok wd ->
+     incr tests_passed;
+     ignore (assert_string_equal "tx-789" wd.id "Withdrawal ID matches");
+     ignore (assert_string_equal "ETH" wd.currency "Currency is ETH");
+     ignore (assert_float_equal 1.0 wd.amount "Amount is 1.0");
+     ignore (assert_string_equal "0xdestination" wd.address "Destination address extracted");
+     printf "  ✓ Valid withdrawal normalized\n"
+   | Error msg ->
+     incr tests_failed;
+     printf "  ✗ FAIL: Should accept valid withdrawal: %s\n" msg)
+
+let test_normalize_withdrawal_status_mapping () =
+  printf "\n[Normalize] Withdrawal status mapping\n";
+  let make_tx status = {
+    Coinbase.Rest.Transaction.id = "tx-status";
+    type_ = "send";
+    status;
+    amount = { amount = "1.0"; currency = "BTC" };
+    native_amount = None;
+    description = None;
+    created_at = None;
+    updated_at = None;
+    resource = None;
+    resource_path = None;
+    network = None;
+    to_ = Some { id = None; resource = None; address = Some "0xaddr"; currency = None; address_info = None };
+    from_ = None;
+  } in
+  (* Test various status mappings *)
+  let check_status input_status expected_str =
+    let tx = make_tx input_status in
+    match Coinbase.Fluxum_adapter.Adapter.Normalize.withdrawal tx with
+    | Ok wd ->
+      let status_str = Fluxum.Types.Transfer_status.to_string wd.status in
+      ignore (assert_string_equal expected_str status_str (sprintf "Status '%s' -> '%s'" input_status expected_str))
+    | Error _ ->
+      incr tests_run;
+      incr tests_failed;
+      printf "  ✗ FAIL: Failed to normalize withdrawal with status '%s'\n" input_status
+  in
+  check_status "pending" "pending";
+  check_status "completed" "completed";
+  check_status "failed" "failed";
+  check_status "canceled" "cancelled"
+
 (* Main test runner *)
 let () =
   printf "===========================================\n";
@@ -473,6 +646,14 @@ let () =
   let _ = test_normalize_public_trade_zero_qty () in
   let _ = test_normalize_symbol_info_missing_fields () in
   let _ = test_normalize_book_update_empty_levels () in
+
+  (* Account Operations Tests *)
+  let _ = test_normalize_deposit_address () in
+  let _ = test_normalize_deposit_address_with_tag () in
+  let _ = test_normalize_deposit () in
+  let _ = test_normalize_deposit_invalid_amount () in
+  let _ = test_normalize_withdrawal () in
+  let _ = test_normalize_withdrawal_status_mapping () in
 
   (* Summary *)
   printf "\n===========================================\n";

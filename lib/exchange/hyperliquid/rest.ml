@@ -586,3 +586,161 @@ let cancel_order ~cfg ~private_key ~(cancels : Signing.cancel_request list) ()
     ] in
 
     post_exchange ~cfg ~action:action_json ~signature ~nonce ()
+
+(* ============================================================ *)
+(* Account Operations - Withdrawals *)
+(* ============================================================ *)
+
+(** Withdraw USDC from Hyperliquid to Arbitrum using withdraw3 action
+
+    Note: There is a $1 USDC withdrawal fee deducted from your balance.
+    Withdrawals are processed to Arbitrum L2.
+*)
+let withdraw ~cfg ~private_key ~destination ~amount ~is_mainnet ()
+    : (ExchangeResponse.t, [> Error.t ]) result Deferred.t =
+  let time = Int64.of_int (Int.of_float (Time_float_unix.now () |> Time_float_unix.to_span_since_epoch |> Time_float_unix.Span.to_ms)) in
+  let nonce = time in
+
+  (* Build withdraw request *)
+  let req : Signing.withdraw_request = {
+    hyperliquid_chain = (match is_mainnet with true -> "Mainnet" | false -> "Testnet");
+    signature_chain_id = "0xa4b1";  (* Arbitrum chain ID *)
+    destination;
+    amount;
+    time;
+  } in
+
+  (* Sign the withdrawal *)
+  match Signing.sign_withdraw ~private_key ~req with
+  | Error err -> return (Error (`Api_error err))
+  | Ok signature ->
+    (* Build the action JSON *)
+    let action_json = `Assoc [
+      ("type", `String "withdraw3");
+      ("hyperliquidChain", `String req.hyperliquid_chain);
+      ("signatureChainId", `String req.signature_chain_id);
+      ("destination", `String destination);
+      ("amount", `String amount);
+      ("time", `Int (Int64.to_int_exn time));
+    ] in
+
+    post_exchange ~cfg ~action:action_json ~signature ~nonce ()
+
+(* ============================================================ *)
+(* Transfer History *)
+(* ============================================================ *)
+
+(** Transfer record from Hyperliquid *)
+module TransferTypes = struct
+  (** User funding record (deposits/withdrawals) *)
+  type user_funding = {
+    time : int64;
+    hash : string;
+    usdc : string;       (** Amount (negative for withdrawals) *)
+    delta : string;      (** Change in balance *)
+    type_ : string;      (** "deposit", "withdraw", etc. *)
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type user_fundings = user_funding list [@@deriving sexp]
+
+  let user_fundings_of_yojson json =
+    match json with
+    | `List items ->
+      let rec parse acc = function
+        | [] -> Ok (List.rev acc)
+        | item :: rest ->
+          match user_funding_of_yojson item with
+          | Error e -> Error e
+          | Ok f -> parse (f :: acc) rest
+      in
+      parse [] items
+    | _ -> Error "Expected list for user fundings"
+
+  (** Non-funding ledger updates (internal transfers, liquidations, etc.) *)
+  type ledger_update = {
+    time : int64;
+    hash : string;
+    delta : (string * string) list;  (** coin -> amount *)
+  } [@@deriving sexp]
+
+  let ledger_update_of_yojson json =
+    match json with
+    | `Assoc fields ->
+      (match List.Assoc.find fields ~equal:String.equal "time",
+             List.Assoc.find fields ~equal:String.equal "hash",
+             List.Assoc.find fields ~equal:String.equal "delta" with
+       | Some (`Int time), Some (`String hash), Some (`Assoc delta_fields) ->
+         let time = Int64.of_int time in
+         let delta = List.map delta_fields ~f:(fun (k, v) ->
+           (k, match v with `String s -> s | _ -> "0")) in
+         Ok { time; hash; delta }
+       | Some (`Intlit time_str), Some (`String hash), Some (`Assoc delta_fields) ->
+         let time = Int64.of_string time_str in
+         let delta = List.map delta_fields ~f:(fun (k, v) ->
+           (k, match v with `String s -> s | _ -> "0")) in
+         Ok { time; hash; delta }
+       | _ -> Error "Missing required fields in ledger update")
+    | _ -> Error "Expected object for ledger update"
+
+  type ledger_updates = ledger_update list [@@deriving sexp]
+
+  let ledger_updates_of_yojson json =
+    match json with
+    | `List items ->
+      let rec parse acc = function
+        | [] -> Ok (List.rev acc)
+        | item :: rest ->
+          match ledger_update_of_yojson item with
+          | Error e -> Error e
+          | Ok u -> parse (u :: acc) rest
+      in
+      parse [] items
+    | _ -> Error "Expected list for ledger updates"
+end
+
+(** Get user's funding history (deposits/withdrawals)
+
+    This endpoint returns deposit and withdrawal records.
+*)
+let user_fundings cfg ~user ~start_time ?end_time ()
+    : (TransferTypes.user_fundings, [> Error.t ]) result Deferred.t =
+  let body =
+    let base = [
+      ("type", `String "userFundings");
+      ("user", `String user);
+      ("startTime", `Int (Int64.to_int_exn start_time));
+    ] in
+    let with_end = match end_time with
+      | None -> base
+      | Some t -> ("endTime", `Int (Int64.to_int_exn t)) :: base
+    in
+    `Assoc with_end
+  in
+  post ~cfg ~body >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match TransferTypes.user_fundings_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok fundings -> Ok fundings
+
+(** Get user's non-funding ledger updates *)
+let user_non_funding_ledger_updates cfg ~user ~start_time ?end_time ()
+    : (TransferTypes.ledger_updates, [> Error.t ]) result Deferred.t =
+  let body =
+    let base = [
+      ("type", `String "userNonFundingLedgerUpdates");
+      ("user", `String user);
+      ("startTime", `Int (Int64.to_int_exn start_time));
+    ] in
+    let with_end = match end_time with
+      | None -> base
+      | Some t -> ("endTime", `Int (Int64.to_int_exn t)) :: base
+    in
+    `Assoc with_end
+  in
+  post ~cfg ~body >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match TransferTypes.ledger_updates_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok updates -> Ok updates

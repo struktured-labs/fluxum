@@ -63,10 +63,16 @@ module Adapter = struct
     { cfg : (module Cfg.S)
     ; symbols : string list
     ; category : V5.Category.t
+    ; rate_limiter : Exchange_common.Rate_limiter.t
     }
 
   let create ~cfg ?(symbols = []) ?(category = `Spot) () =
-    { cfg; symbols; category }
+    { cfg
+    ; symbols
+    ; category
+    ; rate_limiter = Exchange_common.Rate_limiter.create
+        ~config:Exchange_common.Rate_limiter.Configs.bybit ()
+    }
 
   module Venue = struct
     let t = Types.Venue.Bybit
@@ -112,130 +118,161 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.t
     end
+
+    (** Account operations - deposits/withdrawals *)
+    module Deposit_address = struct
+      (** Native deposit address with chain info *)
+      type t =
+        { coin : string
+        ; chain_info : V5.Deposit_address.chain_info
+        }
+    end
+
+    module Deposit = struct
+      type t = V5.Deposit_record.deposit
+    end
+
+    module Withdrawal = struct
+      (** Withdrawal can be either a history entry or a new withdrawal response *)
+      type t =
+        | History of V5.Withdrawal_record.withdrawal
+        | Response of { id : string; coin : string; amount : string }
+    end
   end
 
   let place_order t (req : Native.Order.request) =
-    V5.Create_order.request t.cfg req >>| function
-    | `Ok resp -> Ok resp
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V5.Create_order.request t.cfg req >>| function
+      | `Ok resp -> Ok resp
+      | #Rest.Error.t as e -> Error e)
 
   let cancel_order t ~symbol (order_id : Native.Order.id) =
-    V5.Cancel_order.request
-      t.cfg
-      { category = t.category
-      ; symbol
-      ; orderId = Some order_id
-      ; orderLinkId = None
-      }
-    >>| function
-    | `Ok _ -> Ok ()
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V5.Cancel_order.request
+        t.cfg
+        { category = t.category
+        ; symbol
+        ; orderId = Some order_id
+        ; orderLinkId = None
+        }
+      >>| function
+      | `Ok _ -> Ok ()
+      | #Rest.Error.t as e -> Error e)
 
   let balances t =
-    V5.Wallet_balance.request t.cfg
-      { accountType = "UNIFIED"  (* Unified trading account *)
-      ; coin = None
-      }
-    >>| function
-    | `Ok resp ->
-      (match resp.list with
-       | account :: _ -> Ok account.coin
-       | [] -> Error (`Api_error Rest.Error.{ retCode = -1; retMsg = "No account data" }))
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V5.Wallet_balance.request t.cfg
+        { accountType = "UNIFIED"  (* Unified trading account *)
+        ; coin = None
+        }
+      >>| function
+      | `Ok resp ->
+        (match resp.list with
+         | account :: _ -> Ok account.coin
+         | [] -> Error (`Api_error Rest.Error.{ retCode = -1; retMsg = "No account data" }))
+      | #Rest.Error.t as e -> Error e)
 
   let get_order_status t ~symbol (order_id : Native.Order.id) =
-    V5.Order_realtime.request t.cfg
-      { category = t.category
-      ; symbol = Some symbol
-      ; orderId = Some order_id
-      ; orderLinkId = None
-      }
-    >>| function
-    | `Ok resp ->
-      (match resp.list with
-       | order :: _ -> Ok order
-       | [] -> Error (`Api_error Rest.Error.{ retCode = -1; retMsg = "Order not found" }))
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V5.Order_realtime.request t.cfg
+        { category = t.category
+        ; symbol = Some symbol
+        ; orderId = Some order_id
+        ; orderLinkId = None
+        }
+      >>| function
+      | `Ok resp ->
+        (match resp.list with
+         | order :: _ -> Ok order
+         | [] -> Error (`Api_error Rest.Error.{ retCode = -1; retMsg = "Order not found" }))
+      | #Rest.Error.t as e -> Error e)
 
   let get_open_orders t ?symbol () =
-    V5.Order_realtime.request t.cfg
-      { category = t.category
-      ; symbol
-      ; orderId = None
-      ; orderLinkId = None
-      }
-    >>| function
-    | `Ok resp -> Ok resp.list
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V5.Order_realtime.request t.cfg
+        { category = t.category
+        ; symbol
+        ; orderId = None
+        ; orderLinkId = None
+        }
+      >>| function
+      | `Ok resp -> Ok resp.list
+      | #Rest.Error.t as e -> Error e)
 
   let get_order_history t ?symbol ?limit () =
-    (* V5 API uses same endpoint for open and historical orders *)
-    V5.Order_realtime.request t.cfg
-      { category = t.category
-      ; symbol
-      ; orderId = None
-      ; orderLinkId = None
-      }
-    >>| function
-    | `Ok resp ->
-      let orders = match limit with
-        | Some n -> List.take resp.list n
-        | None -> resp.list
-      in
-      Ok orders
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      (* V5 API uses same endpoint for open and historical orders *)
+      V5.Order_realtime.request t.cfg
+        { category = t.category
+        ; symbol
+        ; orderId = None
+        ; orderLinkId = None
+        }
+      >>| function
+      | `Ok resp ->
+        let orders = match limit with
+          | Some n -> List.take resp.list n
+          | None -> resp.list
+        in
+        Ok orders
+      | #Rest.Error.t as e -> Error e)
 
   let get_my_trades t ~symbol ?limit () =
-    V5.Execution_list.request t.cfg
-      { category = t.category
-      ; symbol = Some symbol
-      ; orderId = None
-      ; limit
-      }
-    >>| function
-    | `Ok resp -> Ok resp.list
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V5.Execution_list.request t.cfg
+        { category = t.category
+        ; symbol = Some symbol
+        ; orderId = None
+        ; limit
+        }
+      >>| function
+      | `Ok resp -> Ok resp.list
+      | #Rest.Error.t as e -> Error e)
 
   let get_symbols t () =
-    V5.Instruments_info.request t.cfg
-      { category = t.category
-      ; symbol = None
-      }
-    >>| function
-    | `Ok info -> Ok info.list
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V5.Instruments_info.request t.cfg
+        { category = t.category
+        ; symbol = None
+        }
+      >>| function
+      | `Ok info -> Ok info.list
+      | #Rest.Error.t as e -> Error e)
 
   let get_ticker t ~symbol () =
-    V5.Market_tickers.request t.cfg
-      { category = t.category
-      ; symbol = Some symbol
-      }
-    >>| function
-    | `Ok resp ->
-      (match resp.list with
-       | ticker :: _ -> Ok ticker
-       | [] -> Error (`Api_error Rest.Error.{ retCode = -1; retMsg = "No ticker data" }))
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V5.Market_tickers.request t.cfg
+        { category = t.category
+        ; symbol = Some symbol
+        }
+      >>| function
+      | `Ok resp ->
+        (match resp.list with
+         | ticker :: _ -> Ok ticker
+         | [] -> Error (`Api_error Rest.Error.{ retCode = -1; retMsg = "No ticker data" }))
+      | #Rest.Error.t as e -> Error e)
 
   let get_order_book t ~symbol ?limit () =
-    V5.Orderbook.request t.cfg
-      { category = t.category
-      ; symbol
-      ; limit
-      }
-    >>| function
-    | `Ok book -> Ok book
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V5.Orderbook.request t.cfg
+        { category = t.category
+        ; symbol
+        ; limit
+        }
+      >>| function
+      | `Ok book -> Ok book
+      | #Rest.Error.t as e -> Error e)
 
   let get_recent_trades t ~symbol ?limit () =
-    V5.Recent_trade.request t.cfg
-      { category = t.category
-      ; symbol
-      ; limit
-      }
-    >>| function
-    | `Ok resp -> Ok resp.list
-    | #Rest.Error.t as e -> Error e
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      V5.Recent_trade.request t.cfg
+        { category = t.category
+        ; symbol
+        ; limit
+        }
+      >>| function
+      | `Ok resp -> Ok resp.list
+      | #Rest.Error.t as e -> Error e)
 
   let cancel_all_orders t ?symbol () =
     (* Bybit V5 doesn't have bulk cancel, need to cancel individually *)
@@ -253,6 +290,83 @@ module Adapter = struct
   let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
     (* TODO: Implement using V5.Kline endpoint *)
     Deferred.return (Error (`Api_error Rest.Error.{ retCode = -1; retMsg = "Bybit candles not yet implemented" }))
+
+  (** {2 Account Operations - Deposits/Withdrawals} *)
+
+  let get_deposit_address t ~currency ?network () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let%bind result = V5.Deposit_address.request t.cfg { coin = currency; chainType = network } in
+      match result with
+      | `Ok resp ->
+        (* Filter by network/chain if specified, otherwise return the first *)
+        let chains = resp.chains in
+        let matching = match network with
+          | Some n ->
+            List.find chains ~f:(fun c -> String.equal c.chainType n)
+          | None ->
+            List.hd chains
+        in
+        (match matching with
+         | Some chain_info ->
+           return (Ok { Native.Deposit_address.coin = resp.coin; chain_info })
+         | None -> return (Error (`Bad_request "No deposit address found for this coin/chain")))
+      | #Rest.Error.t as e -> return (Error e))
+
+  let withdraw t ~currency ~amount ~address ?tag ?network () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let chain = match network with
+        | Some n -> n
+        | None -> ""  (* Bybit requires chain, will likely error if not provided *)
+      in
+      let timestamp = Int63.to_int64 (Int63.of_float (Core_unix.gettimeofday () *. 1000.0)) in
+      let req : V5.Withdraw_create.request =
+        { coin = currency
+        ; chain
+        ; address
+        ; tag
+        ; amount = Float.to_string amount
+        ; timestamp
+        ; forceChain = Some 0
+        ; accountType = Some "UNIFIED"
+        }
+      in
+      let%bind result = V5.Withdraw_create.request t.cfg req in
+      match result with
+      | `Ok resp ->
+        return (Ok (Native.Withdrawal.Response { id = resp.id; coin = currency; amount = Float.to_string amount }))
+      | #Rest.Error.t as e -> return (Error e))
+
+  let get_deposits t ?currency ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let req : V5.Deposit_record.request =
+        { coin = currency
+        ; startTime = None
+        ; endTime = None
+        ; limit
+        ; cursor = None
+        }
+      in
+      let%bind result = V5.Deposit_record.request t.cfg req in
+      match result with
+      | `Ok resp -> return (Ok resp.rows)
+      | #Rest.Error.t as e -> return (Error e))
+
+  let get_withdrawals t ?currency ?limit () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      let req : V5.Withdrawal_record.request =
+        { withdrawID = None
+        ; coin = currency
+        ; withdrawType = Some 2  (* 2 = all types *)
+        ; startTime = None
+        ; endTime = None
+        ; limit
+        ; cursor = None
+        }
+      in
+      let%bind result = V5.Withdrawal_record.request t.cfg req in
+      match result with
+      | `Ok resp -> return (Ok (List.map resp.rows ~f:(fun w -> Native.Withdrawal.History w)))
+      | #Rest.Error.t as e -> return (Error e))
 
   module Streams = struct
     let trades (_ : t) =
@@ -453,6 +567,140 @@ module Adapter = struct
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "Bybit candle normalization not yet implemented"
+
+    (** Convert Bybit deposit status code to normalized Transfer_status *)
+    let transfer_status_of_bybit_deposit_status (status : int) : Types.Transfer_status.t =
+      match status with
+      | 0 -> Types.Transfer_status.Pending      (* unknown *)
+      | 1 -> Types.Transfer_status.Pending      (* toBeConfirmed *)
+      | 2 -> Types.Transfer_status.Processing   (* processing *)
+      | 3 -> Types.Transfer_status.Completed    (* success *)
+      | 4 -> Types.Transfer_status.Failed       (* depositFailed *)
+      | _ -> Types.Transfer_status.Pending
+
+    (** Convert Bybit withdrawal status string to normalized Transfer_status *)
+    let transfer_status_of_bybit_withdrawal_status (status : string) : Types.Transfer_status.t =
+      match String.lowercase status with
+      | "securitycheck" -> Types.Transfer_status.Pending
+      | "pending" -> Types.Transfer_status.Pending
+      | "success" -> Types.Transfer_status.Completed
+      | "cancelbyuser" -> Types.Transfer_status.Cancelled
+      | "reject" -> Types.Transfer_status.Failed
+      | "fail" -> Types.Transfer_status.Failed
+      | "blockchainconfirmed" -> Types.Transfer_status.Completed
+      | _ -> Types.Transfer_status.Pending
+
+    (** Normalize deposit address *)
+    let deposit_address (addr : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      let tag = match String.is_empty addr.chain_info.tagDeposit with
+        | true -> None
+        | false -> Some addr.chain_info.tagDeposit
+      in
+      Ok ({ venue = Venue.t
+      ; currency = addr.coin
+      ; address = addr.chain_info.addressDeposit
+      ; tag
+      ; network = Some addr.chain_info.chainType
+      } : Types.Deposit_address.t)
+
+    (** Normalize deposit record *)
+    let deposit (d : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string d.amount in
+      let status = transfer_status_of_bybit_deposit_status d.status in
+      let created_at =
+        match String.is_empty d.successAt with
+        | true -> None
+        | false ->
+          (try
+            let ms = Int64.of_string d.successAt in
+            Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_ms (Int64.to_float ms)))
+          with _ -> None)
+      in
+      let tx_id = match String.is_empty d.txID with
+        | true -> None
+        | false -> Some d.txID
+      in
+      let address = match String.is_empty d.toAddress with
+        | true -> None
+        | false -> Some d.toAddress
+      in
+      (* Use txIndex as deposit ID (Bybit doesn't have a dedicated deposit ID) *)
+      let id = match String.is_empty d.txIndex with
+        | true -> d.txID  (* fallback to txID *)
+        | false -> d.txIndex
+      in
+      Ok ({ venue = Venue.t
+      ; id
+      ; currency = d.coin
+      ; amount
+      ; status
+      ; address
+      ; tx_id
+      ; created_at
+      ; updated_at = None
+      } : Types.Deposit.t)
+
+    (** Normalize withdrawal *)
+    let withdrawal (w : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      let open Result.Let_syntax in
+      match w with
+      | Native.Withdrawal.History wh ->
+        let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string wh.amount in
+        let%bind fee = Fluxum.Normalize_common.Float_conv.amount_of_string wh.withdrawFee in
+        let status = transfer_status_of_bybit_withdrawal_status wh.status in
+        let created_at =
+          match String.is_empty wh.createTime with
+          | true -> None
+          | false ->
+            (try
+              let ms = Int64.of_string wh.createTime in
+              Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_ms (Int64.to_float ms)))
+            with _ -> None)
+        in
+        let updated_at =
+          match String.is_empty wh.updateTime with
+          | true -> None
+          | false ->
+            (try
+              let ms = Int64.of_string wh.updateTime in
+              Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_ms (Int64.to_float ms)))
+            with _ -> None)
+        in
+        let tx_id = match String.is_empty wh.txID with
+          | true -> None
+          | false -> Some wh.txID
+        in
+        let tag = match String.is_empty wh.tag with
+          | true -> None
+          | false -> Some wh.tag
+        in
+        Ok ({ venue = Venue.t
+        ; id = wh.withdrawId
+        ; currency = wh.coin
+        ; amount
+        ; fee = Some fee
+        ; status
+        ; address = wh.toAddress
+        ; tag
+        ; tx_id
+        ; created_at
+        ; updated_at
+        } : Types.Withdrawal.t)
+      | Native.Withdrawal.Response { id; coin; amount = amount_str } ->
+        let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string amount_str in
+        Ok ({ venue = Venue.t
+        ; id
+        ; currency = coin
+        ; amount
+        ; fee = None
+        ; status = Types.Transfer_status.Pending
+        ; address = ""
+        ; tag = None
+        ; tx_id = None
+        ; created_at = Some (Time_float_unix.now ())
+        ; updated_at = None
+        } : Types.Withdrawal.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with

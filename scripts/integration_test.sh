@@ -220,7 +220,7 @@ else
 fi
 
 # Test 12: Memory/Resource Test - Check for leaks
-echo -e "${BLUE}[12/12]${NC} Testing resource usage..."
+echo -e "${BLUE}[12/15]${NC} Testing resource usage..."
 print_status "INFO" "Monitoring resource usage during 30s test..."
 
 # Run a test and monitor (use Kraken which works in CI)
@@ -237,6 +237,57 @@ fi
 
 # Cleanup
 wait $TEST_PID 2>/dev/null || true
+
+# Test 13: Account Operations - Core Types Unit Tests
+echo -e "${BLUE}[13/15]${NC} Testing account operations core types..."
+print_status "INFO" "Running account operations unit tests..."
+
+if dune build @lib/test/runtest > tmp/account_ops_core.log 2>&1; then
+    print_status "PASS" "Account operations core types: Unit tests passed"
+else
+    # Check if test stanza exists
+    if grep -q "No rule found" tmp/account_ops_core.log 2>/dev/null; then
+        print_status "SKIP" "Account operations core types: No test stanza defined yet"
+    else
+        print_status "FAIL" "Account operations core types: Unit tests failed"
+        echo "  Last 10 lines:" >> "$RESULTS_FILE"
+        tail -10 tmp/account_ops_core.log | sed 's/^/    /' >> "$RESULTS_FILE"
+    fi
+fi
+
+# Test 14: Account Operations - Exchange Adapter Tests
+echo -e "${BLUE}[14/15]${NC} Testing exchange adapter account operations..."
+
+# Test each major exchange's account operations
+for exchange in gemini kraken binance coinbase; do
+    print_status "INFO" "Testing $exchange account operations..."
+    test_log="tmp/account_ops_${exchange}.log"
+
+    if dune build @lib/exchange/${exchange}/test/runtest > "$test_log" 2>&1; then
+        print_status "PASS" "$exchange: Account operations tests passed"
+    else
+        if grep -q "No rule found" "$test_log" 2>/dev/null; then
+            print_status "SKIP" "$exchange: No test stanza defined"
+        else
+            print_status "FAIL" "$exchange: Account operations tests failed"
+            echo "  Last 5 lines:" >> "$RESULTS_FILE"
+            tail -5 "$test_log" | sed 's/^/    /' >> "$RESULTS_FILE"
+        fi
+    fi
+done
+
+# Test 15: Account Operations - Deposit/Withdrawal Types
+echo -e "${BLUE}[15/15]${NC} Testing deposit/withdrawal type normalization..."
+print_status "INFO" "Verifying Transfer_status, Deposit, Withdrawal types compile..."
+
+# Simple compilation test - if types are defined, they should compile
+if dune build lib/types.ml > tmp/types_compile.log 2>&1; then
+    print_status "PASS" "Account operation types: Compilation successful"
+else
+    print_status "FAIL" "Account operation types: Compilation failed"
+    echo "  Error:" >> "$RESULTS_FILE"
+    tail -10 tmp/types_compile.log | sed 's/^/    /' >> "$RESULTS_FILE"
+fi
 
 # Print summary
 echo ""
@@ -260,9 +311,10 @@ echo "Failed:       $FAILED_TESTS" >> "$RESULTS_FILE"
 echo "" >> "$RESULTS_FILE"
 
 # Exit with appropriate code
-# In CI, we consider the run successful if at least 2 WebSocket tests pass
+# In CI, we consider the run successful if at least 4 tests pass
 # (some exchanges like Gemini require API credentials not available in CI)
-MIN_PASS_THRESHOLD=2
+# Increased threshold to include account operations tests
+MIN_PASS_THRESHOLD=4
 
 if [ $FAILED_TESTS -eq 0 ]; then
     echo -e "${GREEN}All tests passed!${NC}"

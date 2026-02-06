@@ -49,6 +49,19 @@ module type S = sig
     module Error : sig
       type t
     end
+
+    (** Account operations - deposits/withdrawals *)
+    module Deposit_address : sig
+      type t
+    end
+
+    module Deposit : sig
+      type t
+    end
+
+    module Withdrawal : sig
+      type t
+    end
   end
 
   val place_order
@@ -141,6 +154,43 @@ module type S = sig
     -> unit
     -> (int, Native.Error.t) Deferred.Result.t
 
+  (** {2 Account Operations - Deposits/Withdrawals} *)
+
+  (** Get a deposit address for a currency *)
+  val get_deposit_address
+    :  t
+    -> currency:string
+    -> ?network:string
+    -> unit
+    -> (Native.Deposit_address.t, Native.Error.t) Deferred.Result.t
+
+  (** Initiate a withdrawal *)
+  val withdraw
+    :  t
+    -> currency:string
+    -> amount:float
+    -> address:string
+    -> ?tag:string
+    -> ?network:string
+    -> unit
+    -> (Native.Withdrawal.t, Native.Error.t) Deferred.Result.t
+
+  (** Get deposit history *)
+  val get_deposits
+    :  t
+    -> ?currency:string
+    -> ?limit:int
+    -> unit
+    -> (Native.Deposit.t list, Native.Error.t) Deferred.Result.t
+
+  (** Get withdrawal history *)
+  val get_withdrawals
+    :  t
+    -> ?currency:string
+    -> ?limit:int
+    -> unit
+    -> (Native.Withdrawal.t list, Native.Error.t) Deferred.Result.t
+
   module Streams : sig
     val trades : t -> Native.Trade.t Pipe.Reader.t Deferred.t
     val book_updates : t -> Native.Book.update Pipe.Reader.t Deferred.t
@@ -159,5 +209,10 @@ module type S = sig
     val public_trade     : Native.Public_trade.t -> (Public_trade.t, string) Result.t
     val candle           : Native.Candle.t       -> (Candle.t, string) Result.t
     val error            : Native.Error.t        -> Error.t
+
+    (** Normalize account operations *)
+    val deposit_address  : Native.Deposit_address.t -> (Deposit_address.t, string) Result.t
+    val deposit          : Native.Deposit.t         -> (Deposit.t, string) Result.t
+    val withdrawal       : Native.Withdrawal.t      -> (Withdrawal.t, string) Result.t
   end
 end

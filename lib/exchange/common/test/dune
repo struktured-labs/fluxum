@@ -1,7 +1,7 @@
 (library
  (name exchange_common_test)
- (modules test_order_book_base)
- (libraries core async exchange_common)
+ (modules test_order_book_base test_auto_restart)
+ (libraries core async core_unix exchange_common)
  (inline_tests)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core))
