@@ -200,6 +200,139 @@ let test_adapter_recent_trades () =
     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e)))
 
 (* ============================================================ *)
+(* Account Operations Tests (require valid dYdX address) *)
+(* ============================================================ *)
+
+(* Use a known active dYdX address for testing - this is a public indexer query *)
+let test_address = "dydx1v88c3xv9xyv3eetdx0z5gnzcpu86j36npce9wf"
+
+let test_subaccount () =
+  printf "\n[Account] Subaccount Info\n";
+  Dydx.Rest.subaccount (module Dydx.Cfg.Production)
+    ~address:test_address ~subaccount_number:0 >>| function
+  | Ok sub ->
+    pass (sprintf "Address: %s" sub.address);
+    pass (sprintf "Subaccount: %d" sub.subaccountNumber);
+    pass (sprintf "Equity: %s" sub.equity);
+    pass (sprintf "Free collateral: %s" sub.freeCollateral);
+    pass (sprintf "Asset positions: %d" (List.length sub.assetPositions));
+    pass (sprintf "Perpetual positions: %d" (List.length sub.perpetualPositions))
+  | Error `Not_found ->
+    pass "Subaccount not found (may not exist)"
+  | Error err ->
+    fail (sprintf "Error: %s" (Sexp.to_string_hum (Dydx.Rest.Error.sexp_of_t err)))
+
+let test_transfers () =
+  printf "\n[Account] Transfer History\n";
+  Dydx.Rest.transfers (module Dydx.Cfg.Production)
+    ~address:test_address ~subaccount_number:0 ~limit:5 () >>| function
+  | Ok transfers ->
+    pass (sprintf "Got %d transfers" (List.length transfers));
+    (match List.hd transfers with
+     | Some tr ->
+       let type_str = match tr.type_ with
+         | Dydx.Rest.Account_types.DEPOSIT -> "DEPOSIT"
+         | Dydx.Rest.Account_types.WITHDRAWAL -> "WITHDRAWAL"
+         | Dydx.Rest.Account_types.TRANSFER_IN -> "TRANSFER_IN"
+         | Dydx.Rest.Account_types.TRANSFER_OUT -> "TRANSFER_OUT"
+       in
+       pass (sprintf "Latest: %s %s" type_str tr.size);
+       pass (sprintf "Created: %s" tr.createdAt)
+     | None -> pass "No transfers found")
+  | Error err ->
+    fail (sprintf "Error: %s" (Sexp.to_string_hum (Dydx.Rest.Error.sexp_of_t err)))
+
+let test_deposits () =
+  printf "\n[Account] Deposit History\n";
+  Dydx.Rest.deposits (module Dydx.Cfg.Production)
+    ~address:test_address ~subaccount_number:0 ~limit:5 () >>| function
+  | Ok deposits ->
+    pass (sprintf "Got %d deposits" (List.length deposits));
+    (match List.hd deposits with
+     | Some tr ->
+       pass (sprintf "Latest deposit: %s" tr.size);
+       Option.iter tr.transactionHash ~f:(fun h ->
+         pass (sprintf "Tx hash: %s" h))
+     | None -> pass "No deposits found")
+  | Error err ->
+    fail (sprintf "Error: %s" (Sexp.to_string_hum (Dydx.Rest.Error.sexp_of_t err)))
+
+let test_withdrawals () =
+  printf "\n[Account] Withdrawal History\n";
+  Dydx.Rest.withdrawals (module Dydx.Cfg.Production)
+    ~address:test_address ~subaccount_number:0 ~limit:5 () >>| function
+  | Ok withdrawals ->
+    pass (sprintf "Got %d withdrawals" (List.length withdrawals));
+    (match List.hd withdrawals with
+     | Some tr ->
+       pass (sprintf "Latest withdrawal: %s" tr.size);
+       (match tr.recipient with
+        | Some r -> pass (sprintf "To: %s" r.recipient_address)
+        | None -> ())
+     | None -> pass "No withdrawals found")
+  | Error err ->
+    fail (sprintf "Error: %s" (Sexp.to_string_hum (Dydx.Rest.Error.sexp_of_t err)))
+
+let test_adapter_account_ops () =
+  printf "\n[Adapter] Account Operations\n";
+  let adapter = Dydx.Fluxum_adapter.Adapter.create
+    ~cfg:(module Dydx.Cfg.Production)
+    ~address:test_address
+    ~subaccount_number:0
+    ~symbols:[]
+    () in
+
+  (* Test deposit address *)
+  Dydx.Fluxum_adapter.Adapter.get_deposit_address adapter ~currency:"USDC" () >>= fun result ->
+  (match result with
+   | Ok addr_native ->
+     (match Dydx.Fluxum_adapter.Adapter.Normalize.deposit_address addr_native with
+      | Ok addr ->
+        pass (sprintf "Deposit address: %s" addr.address);
+        pass (sprintf "Currency: %s" addr.currency);
+        Option.iter addr.network ~f:(fun n -> pass (sprintf "Network: %s" n))
+      | Error msg -> fail (sprintf "Normalize error: %s" msg))
+   | Error err ->
+     let e = Dydx.Fluxum_adapter.Adapter.Normalize.error err in
+     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e))));
+
+  (* Test get deposits *)
+  Dydx.Fluxum_adapter.Adapter.get_deposits adapter ~limit:3 () >>= fun result ->
+  (match result with
+   | Ok deposits_native ->
+     pass (sprintf "Deposits from adapter: %d" (List.length deposits_native));
+     (match List.hd deposits_native with
+      | Some d ->
+        (match Dydx.Fluxum_adapter.Adapter.Normalize.deposit d with
+         | Ok deposit ->
+           pass (sprintf "Normalized deposit: %.4f %s (status: %s)"
+             deposit.amount deposit.currency
+             (Fluxum.Types.Transfer_status.to_string deposit.status))
+         | Error msg -> fail (sprintf "Normalize error: %s" msg))
+      | None -> pass "No deposits to normalize")
+   | Error err ->
+     let e = Dydx.Fluxum_adapter.Adapter.Normalize.error err in
+     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e))));
+
+  (* Test get withdrawals *)
+  Dydx.Fluxum_adapter.Adapter.get_withdrawals adapter ~limit:3 () >>| fun result ->
+  (match result with
+   | Ok withdrawals_native ->
+     pass (sprintf "Withdrawals from adapter: %d" (List.length withdrawals_native));
+     (match List.hd withdrawals_native with
+      | Some w ->
+        (match Dydx.Fluxum_adapter.Adapter.Normalize.withdrawal w with
+         | Ok withdrawal ->
+           pass (sprintf "Normalized withdrawal: %.4f %s (status: %s)"
+             withdrawal.amount withdrawal.currency
+             (Fluxum.Types.Transfer_status.to_string withdrawal.status))
+         | Error msg -> fail (sprintf "Normalize error: %s" msg))
+      | None -> pass "No withdrawals to normalize")
+   | Error err ->
+     let e = Dydx.Fluxum_adapter.Adapter.Normalize.error err in
+     fail (sprintf "Error: %s" (Sexp.to_string_hum (Fluxum.Types.Error.sexp_of_t e))))
+
+(* ============================================================ *)
 (* Main *)
 (* ============================================================ *)
 
@@ -220,6 +353,13 @@ let run_tests () =
   test_adapter_ticker () >>= fun () ->
   test_adapter_order_book () >>= fun () ->
   test_adapter_recent_trades () >>= fun () ->
+
+  (* Account operations tests *)
+  test_subaccount () >>= fun () ->
+  test_transfers () >>= fun () ->
+  test_deposits () >>= fun () ->
+  test_withdrawals () >>= fun () ->
+  test_adapter_account_ops () >>= fun () ->
 
   (* Summary *)
   printf "\n===========================================\n";

@@ -23,10 +23,12 @@ module Adapter = struct
   type t =
     { cfg : (module Cfg.S)
     ; symbols : string list
+    ; address : string option  (** dYdX address for account operations *)
+    ; subaccount_number : int  (** Subaccount number (default 0) *)
     }
 
-  let create ~cfg ?(symbols = []) () =
-    { cfg; symbols }
+  let create ~cfg ?(symbols = []) ?address ?(subaccount_number = 0) () =
+    { cfg; symbols; address; subaccount_number }
 
   module Venue = struct
     let t = Types.Venue.Dydx
@@ -72,6 +74,31 @@ module Adapter = struct
     module Error = struct
       type t = Rest.Error.t
     end
+
+    (** Account operations - deposits/withdrawals/transfers *)
+    module Deposit_address = struct
+      (** dYdX v4 uses Cosmos addresses - deposit address is the user's dYdX address *)
+      type t = {
+        address : string;
+        subaccount_number : int;
+      }
+    end
+
+    module Deposit = struct
+      type t = Rest.Account_types.transfer
+    end
+
+    module Withdrawal = struct
+      type t = Rest.Account_types.transfer
+    end
+
+    module Subaccount = struct
+      type t = Rest.Account_types.subaccount
+    end
+
+    module Asset_position = struct
+      type t = Rest.Account_types.asset_position
+    end
   end
 
   (* Trading operations - not supported via REST (requires wallet signing) *)
@@ -81,8 +108,17 @@ module Adapter = struct
   let cancel_order (_ : t) (_ : Native.Order.id) =
     Deferred.return (Error (`Api_error "Trading requires wallet signing - use dYdX TypeScript/Python SDK"))
 
-  let balances (_ : t) =
-    Deferred.return (Error (`Api_error "Balances require subaccount query with address"))
+  let balances (t : t) =
+    match t.address with
+    | None ->
+      Deferred.return (Error (`Api_error "Balances require address - create adapter with ~address"))
+    | Some address ->
+      let cfg = t.cfg in
+      Rest.subaccount cfg ~address ~subaccount_number:t.subaccount_number >>| function
+      | Error _ as err -> err
+      | Ok sub ->
+        (* Convert asset positions to a list - dYdX mainly holds USDC *)
+        Ok sub.assetPositions
 
   let get_order_status (_ : t) (_ : Native.Order.id) =
     Deferred.return (Error (`Api_error "Order status requires subaccount address"))
@@ -127,6 +163,89 @@ module Adapter = struct
     Rest.trades cfg ~market:symbol ?limit () >>| function
     | Error _ as err -> err
     | Ok trades -> Ok trades
+
+  (** {2 Account Operations - Deposits/Withdrawals} *)
+
+  (** Get deposit address - for dYdX v4, this is just the user's Cosmos address.
+      Note: dYdX v4 deposits come from bridging assets from Ethereum or other chains.
+      The deposit address is the user's dYdX chain address, which is derived from
+      their Cosmos wallet. *)
+  let get_deposit_address (t : t) ~currency:_ ?network:_ () =
+    match t.address with
+    | None ->
+      Deferred.return (Error (`Api_error "Deposit address requires address - create adapter with ~address"))
+    | Some address ->
+      Deferred.return (Ok { Native.Deposit_address.address; subaccount_number = t.subaccount_number })
+
+  (** Get subaccount info *)
+  let get_subaccount (t : t) () =
+    match t.address with
+    | None ->
+      Deferred.return (Error (`Api_error "Subaccount query requires address - create adapter with ~address"))
+    | Some address ->
+      let cfg = t.cfg in
+      Rest.subaccount cfg ~address ~subaccount_number:t.subaccount_number
+
+  (** Get all subaccounts for address *)
+  let get_subaccounts (t : t) () =
+    match t.address with
+    | None ->
+      Deferred.return (Error (`Api_error "Subaccounts query requires address - create adapter with ~address"))
+    | Some address ->
+      let cfg = t.cfg in
+      Rest.subaccounts cfg ~address
+
+  (** Request a withdrawal - dYdX v4 withdrawals require wallet signing on the Cosmos chain.
+      This function returns an error because withdrawals must be executed through
+      the dYdX chain directly (via wallet/signing client). *)
+  let withdraw (_ : t) ~currency:_ ~amount:_ ~address:_ ?tag:_ ?network:_ () =
+    Deferred.return (Error (`Api_error
+      "dYdX withdrawals require Cosmos chain signing - use dYdX TypeScript/Python SDK or Keplr wallet"))
+
+  (** Get deposit history *)
+  let get_deposits (t : t) ?currency:_ ?limit () =
+    match t.address with
+    | None ->
+      Deferred.return (Error (`Api_error "Deposit history requires address - create adapter with ~address"))
+    | Some address ->
+      let cfg = t.cfg in
+      Rest.deposits cfg ~address ~subaccount_number:t.subaccount_number ?limit ()
+
+  (** Get withdrawal history *)
+  let get_withdrawals (t : t) ?currency:_ ?limit () =
+    match t.address with
+    | None ->
+      Deferred.return (Error (`Api_error "Withdrawal history requires address - create adapter with ~address"))
+    | Some address ->
+      let cfg = t.cfg in
+      Rest.withdrawals cfg ~address ~subaccount_number:t.subaccount_number ?limit ()
+
+  (** Get all transfers (deposits, withdrawals, internal) *)
+  let get_transfers (t : t) ?limit () =
+    match t.address with
+    | None ->
+      Deferred.return (Error (`Api_error "Transfer history requires address - create adapter with ~address"))
+    | Some address ->
+      let cfg = t.cfg in
+      Rest.transfers cfg ~address ~subaccount_number:t.subaccount_number ?limit ()
+
+  (** Get asset positions (USDC balance) *)
+  let get_asset_positions (t : t) () =
+    match t.address with
+    | None ->
+      Deferred.return (Error (`Api_error "Asset positions require address - create adapter with ~address"))
+    | Some address ->
+      let cfg = t.cfg in
+      Rest.asset_positions cfg ~address ~subaccount_number:t.subaccount_number
+
+  (** Get perpetual positions *)
+  let get_perpetual_positions (t : t) () =
+    match t.address with
+    | None ->
+      Deferred.return (Error (`Api_error "Perpetual positions require address - create adapter with ~address"))
+    | Some address ->
+      let cfg = t.cfg in
+      Rest.perpetual_positions cfg ~address ~subaccount_number:t.subaccount_number
 
   module Streams = struct
     let trades (t : t) =
@@ -335,6 +454,92 @@ module Adapter = struct
         Types.Error.Exchange_specific { venue = Venue.t; code = "api"; message = msg }
       | `Not_found ->
         Types.Error.Exchange_specific { venue = Venue.t; code = "404"; message = "not_found" }
+
+    (** {2 Account Operations Normalization} *)
+
+    (** Convert dYdX deposit address to normalized form *)
+    let deposit_address (addr : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+      Ok ({ venue = Venue.t
+          ; currency = "USDC"  (* dYdX v4 primarily uses USDC *)
+          ; address = addr.address
+          ; tag = Some (Int.to_string addr.subaccount_number)  (* subaccount as tag *)
+          ; network = Some "dydx"  (* dYdX Cosmos chain *)
+          } : Types.Deposit_address.t)
+
+    (** Parse ISO8601 timestamp from dYdX *)
+    let parse_timestamp s =
+      try Some (Time_float_unix.of_string s)
+      with _ -> None
+
+    (** Convert dYdX transfer to normalized deposit *)
+    let deposit (tr : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string tr.size in
+      (* dYdX doesn't have explicit status in transfer - infer from presence of tx hash *)
+      let status =
+        match tr.transactionHash with
+        | Some _ -> Types.Transfer_status.Completed
+        | None -> Types.Transfer_status.Processing
+      in
+      let ts = parse_timestamp tr.createdAt in
+      Ok ({ venue = Venue.t
+          ; id = tr.id
+          ; currency = Option.value tr.symbol ~default:"USDC"
+          ; amount
+          ; status
+          ; address = Option.map tr.sender ~f:(fun s -> s.Rest.Account_types.sender_address)
+          ; tx_id = tr.transactionHash
+          ; created_at = ts
+          ; updated_at = ts
+          } : Types.Deposit.t)
+
+    (** Convert dYdX transfer to normalized withdrawal *)
+    let withdrawal (tr : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string tr.size in
+      (* dYdX doesn't have explicit status in transfer - infer from presence of tx hash *)
+      let status =
+        match tr.transactionHash with
+        | Some _ -> Types.Transfer_status.Completed
+        | None -> Types.Transfer_status.Processing
+      in
+      let ts = parse_timestamp tr.createdAt in
+      let address =
+        match tr.recipient with
+        | Some r -> r.Rest.Account_types.recipient_address
+        | None -> ""
+      in
+      Ok ({ venue = Venue.t
+          ; id = tr.id
+          ; currency = Option.value tr.symbol ~default:"USDC"
+          ; amount
+          ; fee = None  (* dYdX gas fees are not included in transfer response *)
+          ; status
+          ; address
+          ; tag = None
+          ; tx_id = tr.transactionHash
+          ; created_at = ts
+          ; updated_at = ts
+          } : Types.Withdrawal.t)
+
+    (** Convert dYdX asset position to normalized balance *)
+    let asset_position_to_balance (pos : Native.Asset_position.t) : (Types.Balance.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind total = Fluxum.Normalize_common.Float_conv.qty_of_string pos.size in
+      (* On dYdX, asset positions are the equity - all is available for trading *)
+      Ok ({ venue = Venue.t
+          ; currency = pos.symbol
+          ; total
+          ; available = total  (* dYdX doesn't lock funds separately *)
+          ; locked = 0.0
+          } : Types.Balance.t)
+
+    (** Convert dYdX subaccount to list of balances *)
+    let subaccount_to_balances (sub : Native.Subaccount.t)
+      : (Types.Balance.t list, string) Result.t =
+      sub.assetPositions
+      |> List.map ~f:asset_position_to_balance
+      |> Fluxum.Normalize_common.Result_util.transpose
   end
 end
 

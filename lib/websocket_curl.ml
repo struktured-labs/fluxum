@@ -1,6 +1,9 @@
 open Core
 open Async
 
+(* Suppress unused value warnings for helper functions *)
+[@@@warning "-32"]
+
 (* WebSocket client using libcurl's send/recv (TLS-aware) *)
 
 let random_key () =
@@ -219,6 +222,9 @@ let encode_text_frame payload = encode_frame ~opcode:1 payload
 (* Encode WebSocket pong frame (opcode 10) — echo ping payload per RFC 6455 *)
 let encode_pong_frame payload = encode_frame ~opcode:10 payload
 
+(* Encode WebSocket ping frame (opcode 9) — for proactive health monitoring *)
+let encode_ping_frame payload = encode_frame ~opcode:9 payload
+
 (* Blocking pong send — called from within In_thread.run receive context *)
 let send_pong_blocking t payload =
   let frame = encode_pong_frame payload in
@@ -233,6 +239,35 @@ let send_pong_blocking t payload =
       | false -> send_all (offset + sent)
   in
   send_all 0
+
+(* Send a ping frame asynchronously *)
+let send_ping t ?(payload = "") () =
+  match t.closed with
+  | true -> Deferred.Or_error.error_string "WebSocket connection closed"
+  | false ->
+    let send_with_timeout () =
+      Deferred.any
+        [ (Deferred.Or_error.try_with (fun () ->
+             In_thread.run (fun () ->
+               let frame = encode_ping_frame payload in
+               let bytes = Bytes.of_string frame in
+               let rec send_all offset =
+                 match offset >= Bytes.length bytes with
+                 | true -> ()
+                 | false ->
+                   let sent = Curl_ext.send t.curl bytes offset (Bytes.length bytes - offset) in
+                   match sent = 0 with
+                   | true -> failwith "Connection closed"
+                   | false -> send_all (offset + sent)
+               in
+               send_all 0
+             )
+           ))
+        ; (let%map () = after (Time_float.Span.of_sec 1.5) in
+           Error (Error.of_string "WebSocket ping send timeout after 1.5s"))
+        ]
+    in
+    send_with_timeout ()
 
 let send t payload =
   match t.closed with
@@ -265,9 +300,17 @@ let send t payload =
     | Ok () -> ()
     | Error _ -> ()
 
-let receive t =
+(** Result type for receive operations that distinguishes message types *)
+type receive_result =
+  | Message of string        (** Application data (text/binary frame) *)
+  | Pong_received            (** Pong frame was received (for health monitoring) *)
+  | Connection_closed        (** Connection was closed *)
+
+(** Internal receive implementation that returns detailed frame info.
+    @param on_pong Optional callback invoked when pong frames are received *)
+let receive_internal t ~on_pong =
   match t.closed with
-  | true -> return None
+  | true -> return Connection_closed
   | false ->
     Deferred.Or_error.try_with (fun () ->
       In_thread.run (fun () ->
@@ -343,33 +386,27 @@ let receive t =
                (* Final fragment - return assembled message *)
                let result = Buffer.contents t.fragment_buf in
                Buffer.clear t.fragment_buf;
-               result
+               `Message result
              | false ->
                (* More fragments expected - keep reading *)
                read_message ())
           | 8 ->
             (* Close frame *)
-            failwith "WebSocket close frame received"
+            `Closed
           | 9 ->
             (* Ping frame - respond with pong per RFC 6455 *)
             send_pong_blocking t payload;
             read_message ()
           | 10 ->
-            (* Pong frame - ignore, continue reading *)
-            read_message ()
+            (* Pong frame - notify callback and continue reading *)
+            Option.iter on_pong ~f:(fun f -> f ());
+            `Pong
           | _ ->
             (* Text (1) or Binary (2) frame *)
             (match fin with
              | true ->
                (* Complete message in a single frame *)
-               (match Buffer.length t.fragment_buf > 0 with
-                | true ->
-                  (* We're in the middle of reassembling a fragmented message,
-                     but received a complete independent message (e.g., heartbeat).
-                     Return the independent message; fragments continue next call. *)
-                  payload
-                | false ->
-                  payload)
+               `Message payload
              | false ->
                (* Start of a new fragmented message *)
                Buffer.clear t.fragment_buf;
@@ -380,8 +417,38 @@ let receive t =
       )
     )
     >>| function
-    | Ok payload -> Some payload
-    | Error _ -> None
+    | Ok (`Message payload) -> Message payload
+    | Ok `Pong -> Pong_received
+    | Ok `Closed -> Connection_closed
+    | Error _ -> Connection_closed
+
+(** Receive a message, with optional callback when pong frames are received.
+    This is the recommended API for health-monitored connections.
+
+    @param on_pong Callback invoked when a pong frame is received (for health tracking)
+    @return The next application message, or None if connection closed
+*)
+let receive_with_pong_callback t ~on_pong =
+  let rec loop () =
+    let%bind result = receive_internal t ~on_pong:(Some on_pong) in
+    match result with
+    | Message payload -> return (Some payload)
+    | Pong_received -> loop ()  (* Continue reading after pong *)
+    | Connection_closed -> return None
+  in
+  loop ()
+
+(** Receive a message (original API, ignores pong frames).
+    For backward compatibility with existing code. *)
+let receive t =
+  let rec loop () =
+    let%bind result = receive_internal t ~on_pong:None in
+    match result with
+    | Message payload -> return (Some payload)
+    | Pong_received -> loop ()  (* Continue reading after pong *)
+    | Connection_closed -> return None
+  in
+  loop ()
 
 let close t =
   match t.closed with
