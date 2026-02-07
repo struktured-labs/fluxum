@@ -515,11 +515,11 @@ module Candle = struct
 
   (** Calculate close time based on timeframe *)
   let close_time t =
-    let span = Time.Span.of_int_sec (Timeframe.to_seconds t.timeframe) in
-    Time.add t.open_time span
+    let span = Time_float_unix.Span.of_int_sec (Timeframe.to_seconds t.timeframe) in
+    Time_float_unix.add t.open_time span
 
   (** Compare candles by open time *)
-  let compare_by_time a b = Time.compare a.open_time b.open_time
+  let compare_by_time a b = Time_float_unix.compare a.open_time b.open_time
 end
 
 (** Transfer/withdrawal status for deposits and withdrawals *)
