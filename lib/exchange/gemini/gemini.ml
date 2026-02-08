@@ -1,4 +1,5 @@
 open Common
+module Common = Common
 module Auth = Auth
 module Cfg = Cfg
 module Nonce = Nonce
