@@ -260,6 +260,7 @@ module Currency = struct
       | `Pnut
       | `Chillguy
       | `Elon
+      | `Uni
       ]
     [@@deriving sexp, enumerate, equal, compare]
   end
@@ -323,6 +324,7 @@ module Symbol = struct
       | `Chillguyusd
       | `Elonusd
       | `Trumpusd
+      | `Uniusd
       ]
     [@@deriving sexp, enumerate, equal, compare]
   end
