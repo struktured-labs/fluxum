@@ -234,6 +234,7 @@ module Currency = struct
       | `Dot
       | `Rare
       | `Qnt
+      | `Skl
       | `Sol
       | `Fet
       | `Imx
@@ -243,6 +244,7 @@ module Currency = struct
       | `Rbn
       | `Mpl
       | `Metis
+      | `Moodeng
       | `Lqty
       | `Jam
       | `Fida
@@ -314,8 +316,10 @@ module Symbol = struct
       | `Zbcusd
       | `Avaxusd
       | `Jamusd
+      | `Moodengusd
       | `Pnutusd
       | `Rndrusd
+      | `Sklusd
       | `Chillguyusd
       | `Elonusd
       | `Trumpusd
