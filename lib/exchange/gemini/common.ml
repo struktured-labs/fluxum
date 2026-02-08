@@ -260,7 +260,70 @@ module Currency = struct
       | `Pnut
       | `Chillguy
       | `Elon
+      | `Trump
+      | `Twoz
+      | `Ankr
+      | `Ape
+      | `Api3
+      | `Arb
+      | `Atom
+      | `Aud
+      | `Bat
+      | `Bnb
+      | `Bome
+      | `Bonk
+      | `Comp
+      | `Dai
+      | `Drift
+      | `Ens
+      | `Eur
+      | `Fartcoin
+      | `Fil
+      | `Floki
+      | `Gmt
+      | `Goat
+      | `Grt
+      | `Gusd
+      | `Hnt
+      | `Hype
+      | `Jitosol
+      | `Jto
+      | `Jup
+      | `Kmno
+      | `Ldo
+      | `Links
+      | `Lpt
+      | `Lrc
+      | `Mana
+      | `Mask
+      | `Mew
+      | `Mon
+      | `Op
+      | `Paxg
+      | `Pengu
+      | `Pol
+      | `Popcat
+      | `Pump
+      | `Pyth
+      | `Rlusd
+      | `Samo
+      | `Sand
+      | `Shib
+      | `Sky
+      | `Storj
+      | `Sushi
+      | `Ton
+      | `Uma
       | `Uni
+      | `Usd1
+      | `Usdc
+      | `Usdg
+      | `Usdt
+      | `Wct
+      | `Wif
+      | `Wld
+      | `Wlfi
+      | `Yfi
       ]
     [@@deriving sexp, enumerate, equal, compare]
   end
@@ -279,52 +342,124 @@ module Symbol = struct
   module T = struct
     (** The type of a symbol pair. See the [Symbol] module for details. *)
     type t =
-      [ `Btcusd
+      [ (* Major pairs *)
+      | `Btcusd
       | `Ethusd
       | `Ethbtc
+      (* ZEC cross pairs *)
       | `Zecusd
       | `Zecbtc
       | `Zeceth
       | `Zecbch
       | `Zecltc
+      (* LTC cross pairs *)
       | `Ltcusd
       | `Ltcbtc
       | `Ltceth
       | `Ltcbch
+      (* BCH cross pairs *)
       | `Bchusd
       | `Bchbtc
       | `Bcheth
-      | `Lunausd
-      | `Xtzusd
-      | `Xrpusd
-      | `Linkusd
+      (* Alt USD pairs *)
+      | `Twozusd
       | `Aaveusd
-      | `Crvusd
-      | `Injusd
-      | `Maticusd
-      | `Ftmusd
-      | `Dogeusd
-      | `Cubeusd
-      | `Chzusd
-      | `Dotusd
-      | `Rareusd
-      | `Qntusd
-      | `Ernusd
-      | `Ctxusd
+      | `Aliusd
       | `Ampusd
-      | `Pepeusd
-      | `Solusd
-      | `Zbcusd
+      | `Ankrusd
+      | `Apeusd
+      | `Api3usd
+      | `Arbusd
+      | `Atomusd
+      | `Audusd
       | `Avaxusd
-      | `Jamusd
-      | `Moodengusd
-      | `Pnutusd
-      | `Rndrusd
-      | `Sklusd
+      | `Batusd
+      | `Bnbusd
+      | `Bomeusd
+      | `Bonkusd
       | `Chillguyusd
+      | `Chzusd
+      | `Compusd
+      | `Crvusd
+      | `Ctxusd
+      | `Cubeusd
+      | `Daiusd
+      | `Dogeusd
+      | `Dotusd
+      | `Driftusd
       | `Elonusd
+      | `Ensusd
+      | `Ernusd
+      | `Eurusd
+      | `Fartcoinusd
+      | `Fetusd
+      | `Filusd
+      | `Flokiusd
+      | `Ftmusd
+      | `Galausd
+      | `Gmtusd
+      | `Goatusd
+      | `Grtusd
+      | `Gusdusd
+      | `Hntusd
+      | `Hypeusd
+      | `Imxusd
+      | `Injusd
+      | `Iotxusd
+      | `Jamusd
+      | `Jitosolusd
+      | `Jtousd
+      | `Jupusd
+      | `Kmnousd
+      | `Ldousd
+      | `Linkusd
+      | `Linksusd
+      | `Lptusd
+      | `Lrcusd
+      | `Lunausd
+      | `Manausd
+      | `Maskusd
+      | `Maticusd
+      | `Mewusd
+      | `Monusd
+      | `Moodengusd
+      | `Opusd
+      | `Paxgusd
+      | `Penguusd
+      | `Pepeusd
+      | `Pnutusd
+      | `Polusd
+      | `Popcatusd
+      | `Pumpusd
+      | `Pythusd
+      | `Qntusd
+      | `Rareusd
+      | `Rlusdusd
+      | `Rndrusd
+      | `Samousd
+      | `Sandusd
+      | `Shibusd
+      | `Sklusd
+      | `Skyusd
+      | `Solusd
+      | `Storjusd
+      | `Sushiusd
+      | `Tonusd
       | `Trumpusd
+      | `Umausd
       | `Uniusd
+      | `Usd1usd
+      | `Usdcusd
+      | `Usdgusd
+      | `Usdtusd
+      | `Wctusd
+      | `Wifusd
+      | `Wldusd
+      | `Wlfiusd
+      | `Xrpusd
+      | `Xtzusd
+      | `Yfiusd
+      | `Zbcusd
       ]
     [@@deriving sexp, enumerate, equal, compare]
   end
