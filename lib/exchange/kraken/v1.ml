@@ -75,6 +75,7 @@ module Open_orders = struct
       ; limitprice : string [@default "0"]
       ; misc : string
       ; oflags : string
+      ; time_in_force : string [@default "gtc"]  (* gtc, gtd, ioc - added for GTD expiry orders *)
       }
     [@@deriving sexp, of_yojson]
   end

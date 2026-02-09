@@ -236,6 +236,7 @@ module Events = struct
                     ; limitprice = update.limit_price
                     ; misc = update.misc
                     ; oflags = update.oflags
+                    ; time_in_force = "gtc"  (* Default, actual value not in update *)
                     }
                   in
                   let _ = order_id in
