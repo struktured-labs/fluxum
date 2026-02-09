@@ -153,7 +153,10 @@ module Timestamp = struct
 
     let to_string t =
       Time_float_unix.to_span_since_epoch t
-      |> Time_float_unix.Span.to_ms |> Float.to_string
+      |> Time_float_unix.Span.to_ms
+      |> Float.round_down
+      |> Int64.of_float
+      |> Int64.to_string
 
     let to_yojson t = to_string t |> fun s -> `String s
 
