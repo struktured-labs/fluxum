@@ -608,6 +608,90 @@ module Withdrawal = struct
     { venue; id; currency; amount; fee; status; address; tag; tx_id; created_at; updated_at }
 end
 
+(** {1 Prediction Markets} *)
+
+module Prediction_outcome = struct
+  type t = Yes | No [@@deriving sexp, compare, equal]
+
+  let to_string = function
+    | Yes -> "yes"
+    | No -> "no"
+
+  let of_string_opt = function
+    | "yes" | "Yes" | "YES" -> Some Yes
+    | "no" | "No" | "NO" -> Some No
+    | _ -> None
+
+  let of_string s =
+    match of_string_opt s with
+    | Some t -> t
+    | None -> failwith (sprintf "Unknown prediction outcome: %s" s)
+end
+
+module Prediction_contract = struct
+  type t =
+    { instrument_symbol : string
+    ; label : string
+    ; ticker : string
+    ; last_price : Price.t option
+    ; best_bid : Price.t option
+    ; best_ask : Price.t option
+    ; total_shares : Qty.t
+    ; status : string
+    }
+  [@@deriving sexp, fields]
+end
+
+module Prediction_event = struct
+  type t =
+    { venue : Venue.t
+    ; id : string
+    ; title : string
+    ; description : string
+    ; category : string
+    ; ticker : string
+    ; status : string
+    ; volume : Qty.t
+    ; liquidity : Qty.t
+    ; contracts : Prediction_contract.t list
+    ; is_live : bool
+    }
+  [@@deriving sexp, fields]
+end
+
+module Prediction_order = struct
+  type t =
+    { venue : Venue.t
+    ; id : string
+    ; symbol : string
+    ; side : Side.t
+    ; outcome : Prediction_outcome.t
+    ; qty : Qty.t
+    ; filled : Qty.t
+    ; remaining : Qty.t
+    ; price : Price.t
+    ; avg_execution_price : Price.t option
+    ; status : string
+    ; event_ticker : string option
+    ; created_at : Time_float_unix.t option
+    ; updated_at : Time_float_unix.t option
+    }
+  [@@deriving sexp, fields]
+end
+
+module Prediction_position = struct
+  type t =
+    { venue : Venue.t
+    ; symbol : string
+    ; outcome : Prediction_outcome.t
+    ; qty : Qty.t
+    ; avg_price : Price.t
+    ; event_ticker : string option
+    ; contract_name : string option
+    }
+  [@@deriving sexp, fields]
+end
+
 module Error = struct
   type t =
     | Transport of exn [@sexp.opaque]

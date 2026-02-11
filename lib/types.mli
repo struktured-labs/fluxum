@@ -640,6 +640,85 @@ module Withdrawal : sig
     unit -> t
 end
 
+(** {1 Prediction Markets} *)
+
+module Prediction_outcome : sig
+  (** Binary outcome for prediction market contracts *)
+  type t = Yes | No [@@deriving sexp, compare, equal]
+
+  val to_string : t -> string
+  val of_string_opt : string -> t option
+  val of_string : string -> t
+end
+
+module Prediction_contract : sig
+  (** A single contract within a prediction market event *)
+  type t =
+    { instrument_symbol : string  (** Tradeable symbol (e.g., GEMI-BTC100K-YES) *)
+    ; label : string
+    ; ticker : string
+    ; last_price : Price.t option  (** Last trade price (0.00-1.00) *)
+    ; best_bid : Price.t option
+    ; best_ask : Price.t option
+    ; total_shares : Qty.t
+    ; status : string
+    }
+  [@@deriving sexp, fields]
+end
+
+module Prediction_event : sig
+  (** A prediction market event with its contracts *)
+  type t =
+    { venue : Venue.t
+    ; id : string
+    ; title : string
+    ; description : string
+    ; category : string
+    ; ticker : string              (** Event ticker (e.g., BTC100K) *)
+    ; status : string
+    ; volume : Qty.t
+    ; liquidity : Qty.t
+    ; contracts : Prediction_contract.t list
+    ; is_live : bool
+    }
+  [@@deriving sexp, fields]
+end
+
+module Prediction_order : sig
+  (** A prediction market order *)
+  type t =
+    { venue : Venue.t
+    ; id : string
+    ; symbol : string              (** Instrument symbol *)
+    ; side : Side.t
+    ; outcome : Prediction_outcome.t
+    ; qty : Qty.t                  (** Number of contracts *)
+    ; filled : Qty.t
+    ; remaining : Qty.t
+    ; price : Price.t              (** Probability price (0.00-1.00) *)
+    ; avg_execution_price : Price.t option
+    ; status : string
+    ; event_ticker : string option
+    ; created_at : Time_float_unix.t option
+    ; updated_at : Time_float_unix.t option
+    }
+  [@@deriving sexp, fields]
+end
+
+module Prediction_position : sig
+  (** A prediction market position *)
+  type t =
+    { venue : Venue.t
+    ; symbol : string              (** Instrument symbol *)
+    ; outcome : Prediction_outcome.t
+    ; qty : Qty.t
+    ; avg_price : Price.t          (** Average entry price (0.00-1.00) *)
+    ; event_ticker : string option
+    ; contract_name : string option
+    }
+  [@@deriving sexp, fields]
+end
+
 (** {1 Error Handling} *)
 
 module Error : sig

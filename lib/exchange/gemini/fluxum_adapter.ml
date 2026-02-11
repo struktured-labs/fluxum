@@ -664,6 +664,72 @@ module Adapter = struct
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "Gemini does not support candle/klines data"
 
+    (** {2 Prediction Market Normalization} *)
+
+    let prediction_outcome (o : Prediction_markets.Outcome.t) : Types.Prediction_outcome.t =
+      match o with
+      | `Yes -> Types.Prediction_outcome.Yes
+      | `No -> Types.Prediction_outcome.No
+
+    let prediction_contract (c : Prediction_markets.Contract.t) : Types.Prediction_contract.t =
+      let last_price = Option.bind c.prices ~f:(fun p ->
+        Option.bind p.last_trade_price ~f:Float.of_string_opt) in
+      let best_bid = Option.bind c.prices ~f:(fun p ->
+        Option.bind p.best_bid ~f:Float.of_string_opt) in
+      let best_ask = Option.bind c.prices ~f:(fun p ->
+        Option.bind p.best_ask ~f:Float.of_string_opt) in
+      { instrument_symbol = c.instrument_symbol
+      ; label = c.label
+      ; ticker = c.ticker
+      ; last_price
+      ; best_bid
+      ; best_ask
+      ; total_shares = Float.of_string c.total_shares
+      ; status = c.status
+      }
+
+    let prediction_event (e : Prediction_markets.Event.t) : Types.Prediction_event.t =
+      { venue = Venue.t
+      ; id = e.id
+      ; title = e.title
+      ; description = e.description
+      ; category = e.category
+      ; ticker = e.ticker
+      ; status = Prediction_markets.Event_status.to_string e.status
+      ; volume = Float.of_string e.volume
+      ; liquidity = Float.of_string e.liquidity
+      ; contracts = List.map e.contracts ~f:prediction_contract
+      ; is_live = e.is_live
+      }
+
+    let prediction_order (r : Prediction_markets.Place_order.response) : Types.Prediction_order.t =
+      let side' = match r.side with `Buy -> Types.Side.Buy | `Sell -> Types.Side.Sell in
+      { venue = Venue.t
+      ; id = Int64.to_string r.order_id
+      ; symbol = r.symbol
+      ; side = side'
+      ; outcome = prediction_outcome r.outcome
+      ; qty = Float.of_string r.quantity
+      ; filled = Float.of_string r.filled_quantity
+      ; remaining = Float.of_string r.remaining_quantity
+      ; price = Float.of_string r.price
+      ; avg_execution_price = Option.map r.avg_execution_price ~f:Float.of_string
+      ; status = r.status
+      ; event_ticker = Option.bind r.contract_metadata ~f:(fun m -> m.event_ticker)
+      ; created_at = None
+      ; updated_at = None
+      }
+
+    let prediction_position (p : Prediction_markets.Positions.position) : Types.Prediction_position.t =
+      { venue = Venue.t
+      ; symbol = p.symbol
+      ; outcome = prediction_outcome p.outcome
+      ; qty = Float.of_string p.total_quantity
+      ; avg_price = Float.of_string p.avg_price
+      ; event_ticker = Option.bind p.contract_metadata ~f:(fun m -> m.event_ticker)
+      ; contract_name = Option.bind p.contract_metadata ~f:(fun m -> m.contract_name)
+      }
+
     let error (e : Native.Error.t) : Types.Error.t =
       match e with
       | `Bad_request msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "400"; message = msg }
@@ -756,6 +822,50 @@ module Adapter = struct
             ; updated_at = Some tr.V1.Transfers.timestampms
             } : Types.Withdrawal.t)
     end
+
+  (** {2 Prediction Market Operations} *)
+
+  let prediction_list_events (t : t) ?status ?category ?search ?limit ?offset () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Prediction_markets.List_events.get t.cfg ?status ?category ?search ?limit ?offset ()
+      >>| function
+      | `Ok events -> Ok (List.map events ~f:Normalize.prediction_event)
+      | (#Rest.Error.get as e) -> Error e)
+
+  let prediction_get_event (t : t) ~event_ticker () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Prediction_markets.Get_event.get t.cfg ~event_ticker ()
+      >>| function
+      | `Ok event -> Ok (Normalize.prediction_event event)
+      | (#Rest.Error.get as e) -> Error e)
+
+  let prediction_place_order (t : t) request =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Prediction_markets.Place_order.post t.cfg t.nonce request
+      >>| function
+      | `Ok r -> Ok (Normalize.prediction_order r)
+      | (#Rest.Error.post as e) -> Error e)
+
+  let prediction_cancel_order (t : t) ~order_id =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Prediction_markets.Cancel_order.post t.cfg t.nonce { order_id }
+      >>| function
+      | `Ok r -> Ok r
+      | (#Rest.Error.post as e) -> Error e)
+
+  let prediction_active_orders (t : t) () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Prediction_markets.Active_orders.post t.cfg t.nonce ()
+      >>| function
+      | `Ok orders -> Ok (List.map orders ~f:Normalize.prediction_order)
+      | (#Rest.Error.post as e) -> Error e)
+
+  let prediction_positions (t : t) () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Prediction_markets.Positions.post t.cfg t.nonce ()
+      >>| function
+      | `Ok positions -> Ok (List.map positions ~f:Normalize.prediction_position)
+      | (#Rest.Error.post as e) -> Error e)
 end
 
 (* Adapter constructor is defined inside the Adapter module *)
