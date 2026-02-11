@@ -671,64 +671,87 @@ module Adapter = struct
       | `Yes -> Types.Prediction_outcome.Yes
       | `No -> Types.Prediction_outcome.No
 
-    let prediction_contract (c : Prediction_markets.Contract.t) : Types.Prediction_contract.t =
+    let prediction_contract (c : Prediction_markets.Contract.t)
+        : (Types.Prediction_contract.t, string) Result.t =
+      let open Result.Let_syntax in
       let last_price = Option.bind c.prices ~f:(fun p ->
         Option.bind p.last_trade_price ~f:Float.of_string_opt) in
       let best_bid = Option.bind c.prices ~f:(fun p ->
         Option.bind p.best_bid ~f:Float.of_string_opt) in
       let best_ask = Option.bind c.prices ~f:(fun p ->
         Option.bind p.best_ask ~f:Float.of_string_opt) in
-      { instrument_symbol = c.instrument_symbol
-      ; label = c.label
-      ; ticker = c.ticker
-      ; last_price
-      ; best_bid
-      ; best_ask
-      ; total_shares = Float.of_string c.total_shares
-      ; status = c.status
-      }
+      let%bind total_shares = Fluxum.Normalize_common.Float_conv.qty_of_string c.total_shares in
+      Ok ({ instrument_symbol = c.instrument_symbol
+          ; label = c.label
+          ; ticker = c.ticker
+          ; last_price
+          ; best_bid
+          ; best_ask
+          ; total_shares
+          ; status = c.status
+          } : Types.Prediction_contract.t)
 
-    let prediction_event (e : Prediction_markets.Event.t) : Types.Prediction_event.t =
-      { venue = Venue.t
-      ; id = e.id
-      ; title = e.title
-      ; description = e.description
-      ; category = e.category
-      ; ticker = e.ticker
-      ; status = Prediction_markets.Event_status.to_string e.status
-      ; volume = Float.of_string e.volume
-      ; liquidity = Float.of_string e.liquidity
-      ; contracts = List.map e.contracts ~f:prediction_contract
-      ; is_live = e.is_live
-      }
+    let prediction_event (e : Prediction_markets.Event.t)
+        : (Types.Prediction_event.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string e.volume in
+      let%bind liquidity = Fluxum.Normalize_common.Float_conv.qty_of_string e.liquidity in
+      let%bind contracts = List.map e.contracts ~f:prediction_contract
+        |> Result.all in
+      Ok ({ venue = Venue.t
+          ; id = e.id
+          ; title = e.title
+          ; description = e.description
+          ; category = e.category
+          ; ticker = e.ticker
+          ; status = Prediction_markets.Event_status.to_string e.status
+          ; volume
+          ; liquidity
+          ; contracts
+          ; is_live = e.is_live
+          } : Types.Prediction_event.t)
 
-    let prediction_order (r : Prediction_markets.Place_order.response) : Types.Prediction_order.t =
+    let prediction_order (r : Prediction_markets.Place_order.response)
+        : (Types.Prediction_order.t, string) Result.t =
+      let open Result.Let_syntax in
       let side' = match r.side with `Buy -> Types.Side.Buy | `Sell -> Types.Side.Sell in
-      { venue = Venue.t
-      ; id = Int64.to_string r.order_id
-      ; symbol = r.symbol
-      ; side = side'
-      ; outcome = prediction_outcome r.outcome
-      ; qty = Float.of_string r.quantity
-      ; filled = Float.of_string r.filled_quantity
-      ; remaining = Float.of_string r.remaining_quantity
-      ; price = Float.of_string r.price
-      ; avg_execution_price = Option.map r.avg_execution_price ~f:Float.of_string
-      ; status = r.status
-      ; event_ticker = Option.bind r.contract_metadata ~f:(fun m -> m.event_ticker)
-      ; created_at = None
-      ; updated_at = None
-      }
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string r.quantity in
+      let%bind filled = Fluxum.Normalize_common.Float_conv.qty_of_string r.filled_quantity in
+      let%bind remaining = Fluxum.Normalize_common.Float_conv.qty_of_string r.remaining_quantity in
+      let%bind price = Fluxum.Normalize_common.Float_conv.of_string r.price in
+      let%bind avg_execution_price = match r.avg_execution_price with
+        | None -> Ok None
+        | Some s -> Fluxum.Normalize_common.Float_conv.of_string s |> Result.map ~f:Option.some
+      in
+      Ok ({ venue = Venue.t
+          ; id = Int64.to_string r.order_id
+          ; symbol = r.symbol
+          ; side = side'
+          ; outcome = prediction_outcome r.outcome
+          ; qty
+          ; filled
+          ; remaining
+          ; price
+          ; avg_execution_price
+          ; status = r.status
+          ; event_ticker = Option.bind r.contract_metadata ~f:(fun m -> m.event_ticker)
+          ; created_at = None
+          ; updated_at = None
+          } : Types.Prediction_order.t)
 
-    let prediction_position (p : Prediction_markets.Positions.position) : Types.Prediction_position.t =
-      { venue = Venue.t
-      ; symbol = p.symbol
-      ; outcome = prediction_outcome p.outcome
-      ; qty = Float.of_string p.total_quantity
-      ; avg_price = Float.of_string p.avg_price
-      ; event_ticker = Option.bind p.contract_metadata ~f:(fun m -> m.event_ticker)
-      ; contract_name = Option.bind p.contract_metadata ~f:(fun m -> m.contract_name)
-      }
+    let prediction_position (p : Prediction_markets.Positions.position)
+        : (Types.Prediction_position.t, string) Result.t =
+      let open Result.Let_syntax in
+      let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string p.total_quantity in
+      let%bind avg_price = Fluxum.Normalize_common.Float_conv.of_string p.avg_price in
+      Ok ({ venue = Venue.t
+          ; symbol = p.symbol
+          ; outcome = prediction_outcome p.outcome
+          ; qty
+          ; avg_price
+          ; event_ticker = Option.bind p.contract_metadata ~f:(fun m -> m.event_ticker)
+          ; contract_name = Option.bind p.contract_metadata ~f:(fun m -> m.contract_name)
+          } : Types.Prediction_position.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with
@@ -829,21 +852,34 @@ module Adapter = struct
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       Prediction_markets.List_events.get t.cfg ?status ?category ?search ?limit ?offset ()
       >>| function
-      | `Ok events -> Ok (List.map events ~f:Normalize.prediction_event)
+      | `Ok events ->
+        let normalized = List.filter_map events ~f:(fun e ->
+          match Normalize.prediction_event e with
+          | Ok n -> Some n
+          | Error err ->
+            Log.Global.error "prediction event normalize error (ticker=%s): %s" e.ticker err;
+            None) in
+        Ok normalized
       | (#Rest.Error.get as e) -> Error e)
 
   let prediction_get_event (t : t) ~event_ticker () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       Prediction_markets.Get_event.get t.cfg ~event_ticker ()
       >>| function
-      | `Ok event -> Ok (Normalize.prediction_event event)
+      | `Ok event ->
+        (match Normalize.prediction_event event with
+         | Ok n -> Ok n
+         | Error err -> Error (`Normalize_error err))
       | (#Rest.Error.get as e) -> Error e)
 
   let prediction_place_order (t : t) request =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       Prediction_markets.Place_order.post t.cfg t.nonce request
       >>| function
-      | `Ok r -> Ok (Normalize.prediction_order r)
+      | `Ok r ->
+        (match Normalize.prediction_order r with
+         | Ok n -> Ok n
+         | Error err -> Error (`Normalize_error err))
       | (#Rest.Error.post as e) -> Error e)
 
   let prediction_cancel_order (t : t) ~order_id =
@@ -857,21 +893,42 @@ module Adapter = struct
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       Prediction_markets.Active_orders.get ?limit ?offset ?symbol t.cfg t.nonce ()
       >>| function
-      | `Ok orders -> Ok (List.map orders ~f:Normalize.prediction_order)
+      | `Ok orders ->
+        let normalized = List.filter_map orders ~f:(fun o ->
+          match Normalize.prediction_order o with
+          | Ok n -> Some n
+          | Error err ->
+            Log.Global.error "prediction order normalize error (id=%Ld): %s" o.order_id err;
+            None) in
+        Ok normalized
       | (#Rest.Error.post as e) -> Error e)
 
   let prediction_order_history (t : t) ?limit ?offset ?symbol () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       Prediction_markets.Order_history.get ?limit ?offset ?symbol t.cfg t.nonce ()
       >>| function
-      | `Ok orders -> Ok (List.map orders ~f:Normalize.prediction_order)
+      | `Ok orders ->
+        let normalized = List.filter_map orders ~f:(fun o ->
+          match Normalize.prediction_order o with
+          | Ok n -> Some n
+          | Error err ->
+            Log.Global.error "prediction order normalize error (id=%Ld): %s" o.order_id err;
+            None) in
+        Ok normalized
       | (#Rest.Error.post as e) -> Error e)
 
   let prediction_positions (t : t) () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       Prediction_markets.Positions.post t.cfg t.nonce ()
       >>| function
-      | `Ok positions -> Ok (List.map positions ~f:Normalize.prediction_position)
+      | `Ok positions ->
+        let normalized = List.filter_map positions ~f:(fun p ->
+          match Normalize.prediction_position p with
+          | Ok n -> Some n
+          | Error err ->
+            Log.Global.error "prediction position normalize error (symbol=%s): %s" p.symbol err;
+            None) in
+        Ok normalized
       | (#Rest.Error.post as e) -> Error e)
 end
 

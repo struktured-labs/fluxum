@@ -118,6 +118,7 @@ module Books = struct
   (** Create pipes for multiple symbols *)
   let pipe (module Cfg : Cfg.S) ?(symbols = Symbol.all) () :
       [ `Ok of Book.t | Market_data.Error.t ] Pipe.Reader.t Symbol.Map.t Deferred.t =
+    let symbols = List.dedup_and_sort symbols ~compare:Symbol.compare in
     Deferred.List.map ~how:`Parallel symbols ~f:(fun symbol ->
       Deferred.both (return symbol) (Book.pipe (module Cfg) ~symbol ()))
     >>| Symbol.Map.of_alist_exn

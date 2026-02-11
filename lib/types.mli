@@ -663,7 +663,7 @@ module Prediction_contract : sig
     ; total_shares : Qty.t
     ; status : string
     }
-  [@@deriving sexp, fields]
+  [@@deriving sexp, compare, equal, fields]
 end
 
 module Prediction_event : sig
@@ -681,7 +681,7 @@ module Prediction_event : sig
     ; contracts : Prediction_contract.t list
     ; is_live : bool
     }
-  [@@deriving sexp, fields]
+  [@@deriving sexp, compare, equal, fields]
 end
 
 module Prediction_order : sig
@@ -702,7 +702,7 @@ module Prediction_order : sig
     ; created_at : Time_float_unix.t option
     ; updated_at : Time_float_unix.t option
     }
-  [@@deriving sexp, fields]
+  [@@deriving sexp, compare, equal, fields]
 end
 
 module Prediction_position : sig
@@ -716,7 +716,7 @@ module Prediction_position : sig
     ; event_ticker : string option
     ; contract_name : string option
     }
-  [@@deriving sexp, fields]
+  [@@deriving sexp, compare, equal, fields]
 end
 
 (** {1 Error Handling} *)

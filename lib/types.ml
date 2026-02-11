@@ -639,7 +639,7 @@ module Prediction_contract = struct
     ; total_shares : Qty.t
     ; status : string
     }
-  [@@deriving sexp, fields]
+  [@@deriving sexp, compare, equal, fields]
 end
 
 module Prediction_event = struct
@@ -656,7 +656,7 @@ module Prediction_event = struct
     ; contracts : Prediction_contract.t list
     ; is_live : bool
     }
-  [@@deriving sexp, fields]
+  [@@deriving sexp, compare, equal, fields]
 end
 
 module Prediction_order = struct
@@ -676,7 +676,7 @@ module Prediction_order = struct
     ; created_at : Time_float_unix.t option
     ; updated_at : Time_float_unix.t option
     }
-  [@@deriving sexp, fields]
+  [@@deriving sexp, compare, equal, fields]
 end
 
 module Prediction_position = struct
@@ -689,7 +689,7 @@ module Prediction_position = struct
     ; event_ticker : string option
     ; contract_name : string option
     }
-  [@@deriving sexp, fields]
+  [@@deriving sexp, compare, equal, fields]
 end
 
 module Error = struct

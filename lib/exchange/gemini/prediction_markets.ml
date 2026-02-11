@@ -139,7 +139,11 @@ module Contract = struct
         ; ticker = find_str_d "ticker" ~default:""
         ; instrument_symbol = find_str_d "instrumentSymbol" ~default:""
         ; prices = (match find "prices" with
-            | Some p -> (match Contract_prices.of_yojson p with Ok v -> Some v | Error _ -> None)
+            | Some p -> (match Contract_prices.of_yojson p with
+              | Ok v -> Some v
+              | Error e ->
+                Log.Global.debug "skipping contract prices parse error: %s" e;
+                None)
             | None -> None)
         ; total_shares = find_str_d "totalShares" ~default:"0"
         ; status = find_str_d "status" ~default:""
@@ -207,7 +211,11 @@ module Event = struct
       let contracts = match find "contracts" with
         | Some (`List items) ->
           List.filter_map items ~f:(fun item ->
-            match Contract.of_yojson item with Ok c -> Some c | Error _ -> None)
+            match Contract.of_yojson item with
+            | Ok c -> Some c
+            | Error e ->
+              Log.Global.debug "skipping contract parse error: %s" e;
+              None)
         | _ -> []
       in
       let is_live = match find "isLive" with
@@ -292,7 +300,10 @@ let http_get uri =
   | `OK ->
     Cohttp_async.Body.to_string body >>| fun s ->
     Log.Global.debug "prediction markets response:\n %s" s;
-    `Ok (Yojson.Safe.from_string s)
+    (match Yojson.Safe.from_string s with
+     | json -> `Ok json
+     | exception Yojson.Json_error msg ->
+       `Json_parse_error Rest.Error.{ message = msg; body = s })
   | `Not_found -> return `Not_found
   | `Not_acceptable ->
     Cohttp_async.Body.to_string body >>| fun b -> `Not_acceptable b
@@ -569,8 +580,16 @@ module Place_order = struct
           in
           fun () ->
             let config = Cfg.or_default config in
-            let side = Side.of_string (String.lowercase side) in
-            let outcome = Outcome.of_string (String.lowercase outcome) in
+            let side = match Side.of_string_opt (String.lowercase side) with
+              | Some s -> s
+              | None -> failwiths ~here:[%here] "invalid side (expected: buy, sell)"
+                  side String.sexp_of_t
+            in
+            let outcome = match Outcome.of_string_opt (String.lowercase outcome) with
+              | Some o -> o
+              | None -> failwiths ~here:[%here] "invalid outcome (expected: yes, no)"
+                  outcome String.sexp_of_t
+            in
             let request =
               { symbol; order_type = "limit"; side; quantity
               ; price; outcome; time_in_force
