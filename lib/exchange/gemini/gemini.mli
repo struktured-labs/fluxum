@@ -569,4 +569,6 @@ module V1 : sig
   module Order_events = Order_events
 end
 
+module Prediction_markets = Prediction_markets
+
 val command : Command.t

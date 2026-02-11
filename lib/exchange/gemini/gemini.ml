@@ -14,6 +14,7 @@ module Ledger = Ledger
 module Session = Session
 module Unified_adapter = Unified_adapter
 module Fluxum_adapter = Fluxum_adapter
+module Prediction_markets = Prediction_markets
 open V1
 
 let command : Command.t =
@@ -30,5 +31,6 @@ let command : Command.t =
       Order_book.command;
       Ledger.command;
       Symbols.command;
-      Symbol_details.command
+      Symbol_details.command;
+      Prediction_markets.command
     ]
