@@ -721,3 +721,66 @@ let get_withdrawals cfg ?currency ?limit () : (Transaction.t list, [> Error.t ])
           String.equal tx.type_ "fiat_withdrawal" ||
           String.equal tx.type_ "pro_withdrawal"))
     >>| fun all_withdrawals -> Ok all_withdrawals
+
+(* ============================================================ *)
+(* Transaction Summary (Fee Tier) *)
+(* ============================================================ *)
+
+(** Transaction summary containing fee tier information
+    GET /api/v3/brokerage/transaction_summary *)
+module Transaction_summary = struct
+  type fee_tier = {
+    pricing_tier: string;
+    usd_from: string option; [@default None]
+    usd_to: string option; [@default None]
+    taker_fee_rate: string;
+    maker_fee_rate: string;
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type margin_rate = {
+    value: string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type goods_and_services_tax = {
+    rate: string option; [@default None]
+    type_: string option; [@default None] [@key "type"]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  type response = {
+    total_volume: float;
+    total_fees: float;
+    fee_tier: fee_tier;
+    margin_rate: margin_rate option; [@default None]
+    goods_and_services_tax: goods_and_services_tax option; [@default None]
+    advanced_trade_only_volume: float option; [@default None]
+    advanced_trade_only_fees: float option; [@default None]
+    coinbase_pro_volume: float option; [@default None]
+    coinbase_pro_fees: float option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+end
+
+(** Get transaction summary including fee tier *)
+let transaction_summary cfg : (Transaction_summary.response, [> Error.t ]) result Deferred.t =
+  get_authenticated ~cfg ~path:"/api/v3/brokerage/transaction_summary" >>| function
+  | Error _ as err -> err
+  | Ok json ->
+    match Transaction_summary.response_of_yojson json with
+    | Error e -> Error (`Json_parse e)
+    | Ok summary -> Ok summary
+
+(** Get current maker fee rate in basis points *)
+let get_maker_fee_bps cfg : (float, [> Error.t ]) result Deferred.t =
+  transaction_summary cfg >>| function
+  | Error _ as err -> err
+  | Ok summary ->
+    let rate = Float.of_string summary.fee_tier.maker_fee_rate in
+    (* Rate is returned as decimal (e.g., 0.004 = 0.4% = 40 bps) *)
+    Ok (rate *. 10000.0)
+
+(** Get current taker fee rate in basis points *)
+let get_taker_fee_bps cfg : (float, [> Error.t ]) result Deferred.t =
+  transaction_summary cfg >>| function
+  | Error _ as err -> err
+  | Ok summary ->
+    let rate = Float.of_string summary.fee_tier.taker_fee_rate in
+    Ok (rate *. 10000.0)

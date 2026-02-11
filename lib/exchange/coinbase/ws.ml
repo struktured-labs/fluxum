@@ -26,6 +26,7 @@ module Stream = struct
     | Status                       (* All products *)
     | Candles of string list       (* product_ids *)
     | Heartbeats of string list    (* product_ids *)
+    | User of string list          (* product_ids - requires authentication *)
   [@@deriving sexp]
 
   let channel_name = function
@@ -36,10 +37,11 @@ module Stream = struct
     | Status -> "status"
     | Candles _ -> "candles"
     | Heartbeats _ -> "heartbeats"
+    | User _ -> "user"
 
   let product_ids = function
     | Level2 ids | MarketTrades ids | Ticker ids
-    | TickerBatch ids | Candles ids | Heartbeats ids -> ids
+    | TickerBatch ids | Candles ids | Heartbeats ids | User ids -> ids
     | Status -> []
 
   let to_subscribe_message streams =
@@ -186,12 +188,45 @@ module Message = struct
     channels: subscriptions list;
   } [@@deriving yojson { strict = false }, sexp]
 
+  (** Order update from user channel - individual order within events array *)
+  type order_update = {
+    order_id: string;
+    client_order_id: string option; [@default None]
+    product_id: string;
+    side: string;  (* "BUY" or "SELL" *)
+    order_type: string;  (* "LIMIT", "MARKET", etc. *)
+    status: string;  (* "PENDING", "OPEN", "FILLED", "CANCELLED", "EXPIRED", "FAILED" *)
+    time_in_force: string option; [@default None]
+    created_time: string option; [@default None]
+    completion_percentage: string option; [@default None]
+    filled_size: string option; [@default None]
+    average_filled_price: string option; [@default None]
+    total_fees: string option; [@default None]
+    total_value_after_fees: string option; [@default None]
+    outstanding_hold_amount: string option; [@default None]
+    trigger_status: string option; [@default None]
+    order_placement_source: string option; [@default None]
+    reject_reason: string option; [@default None]
+    settled: bool option; [@default None]
+    cancel_message: string option; [@default None]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** User channel message - contains order updates *)
+  type user_message = {
+    channel: string;
+    client_id: string;
+    timestamp: string;
+    sequence_num: int64;
+    events: order_update list;
+  } [@@deriving yojson { strict = false }, sexp]
+
   (** Parsed message type *)
   type t =
     | Level2 of level2
     | MarketTrades of market_trades
     | Ticker of ticker
     | Heartbeat of heartbeat
+    | User of user_message
     | Subscriptions of subscribe_response
     | Error of string
     | Unknown of string
@@ -201,6 +236,7 @@ module Message = struct
     | MarketTrades msg -> Sexp.List [Sexp.Atom "MarketTrades"; sexp_of_market_trades msg]
     | Ticker msg -> Sexp.List [Sexp.Atom "Ticker"; sexp_of_ticker msg]
     | Heartbeat msg -> Sexp.List [Sexp.Atom "Heartbeat"; sexp_of_heartbeat msg]
+    | User msg -> Sexp.List [Sexp.Atom "User"; sexp_of_user_message msg]
     | Subscriptions resp -> Sexp.List [Sexp.Atom "Subscriptions"; sexp_of_subscribe_response resp]
     | Error msg -> Sexp.List [Sexp.Atom "Error"; Sexp.Atom msg]
     | Unknown msg -> Sexp.List [Sexp.Atom "Unknown"; Sexp.Atom msg]
@@ -249,6 +285,10 @@ let parse_message (msg : string) : Message.t =
       | Some "heartbeats" ->
         (match Message.heartbeat_of_yojson json with
          | Ok hb -> Message.Heartbeat hb
+         | Error _ -> Message.Unknown msg)
+      | Some "user" ->
+        (match Message.user_message_of_yojson json with
+         | Ok user -> Message.User user
          | Error _ -> Message.Unknown msg)
       | _ -> Message.Unknown msg
   with _ -> Message.Unknown msg
