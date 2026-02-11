@@ -502,3 +502,19 @@ end
 
 include T
 include Ws.Make_no_request (T)
+
+(** Connect to market data WebSocket for an arbitrary instrument symbol string.
+    Useful for prediction market symbols like GEMI-BTC100K-YES that aren't
+    static Symbol.t variants. *)
+let client_for_string_symbol (module Cfg : Cfg.S) ~symbol () =
+  let module Instrument_channel = struct
+    include T
+
+    type uri_args = string [@@deriving sexp]
+
+    let all_of_uri_args : uri_args list = []
+    let encode_uri_args s = s
+    let default_uri_args : uri_args option = None
+  end in
+  let module WS = Ws.Impl (Instrument_channel) in
+  WS.client (module Cfg) ~uri_args:symbol ?nonce:None ()

@@ -234,3 +234,11 @@ include
     with type response := response
 
 val command : string * Command.t
+
+(** Connect to market data WebSocket for an arbitrary instrument symbol string.
+    Useful for prediction market symbols like GEMI-BTC100K-YES. *)
+val client_for_string_symbol :
+  (module Cfg.S) ->
+  symbol:string ->
+  unit ->
+  [ `Ok of response | Error.t ] Pipe.Reader.t Deferred.t

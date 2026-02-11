@@ -689,6 +689,51 @@ module Positions = struct
   include Rest.Make_no_arg (T)
 end
 
+(** {1 Order Book for Prediction Contracts} *)
+
+module Orderbook = struct
+  let command =
+    let open Command.Let_syntax in
+    ( "orderbook",
+      Command.async
+        ~summary:"Stream prediction market order book"
+        [%map_open
+          let config = Cfg.param
+          and symbol =
+            flag "-symbol" (required string)
+              ~doc:"STRING instrument symbol (e.g., GEMI-BTC100K-YES)"
+          and max_depth =
+            flag "--max-depth" (optional_with_default 12 int)
+              ~doc:"N maximum bid/ask levels to display (default: 12)"
+          in
+          fun () ->
+            let config = Cfg.or_default config in
+            Order_book.Book.pipe_for_instrument config
+              ~instrument_symbol:symbol ()
+            >>= Pipe.iter ~f:(function
+              | `Ok book ->
+                let module B = Order_book.Book in
+                let module PL = Order_book.Price_level in
+                printf "=== %s Prediction Order Book (Epoch: %d) ===\n"
+                  (B.symbol book) (B.epoch book);
+                let bid_levels = B.best_n_bids book ~n:max_depth () in
+                let ask_levels = B.best_n_asks book ~n:max_depth () in
+                printf "--- ASKS (lowest first) ---\n";
+                List.rev ask_levels |> List.iter ~f:(fun level ->
+                  printf "  %.4f  qty=%.2f\n"
+                    (PL.price level) (PL.volume level));
+                printf "--- BIDS (highest first) ---\n";
+                List.iter bid_levels ~f:(fun level ->
+                  printf "  %.4f  qty=%.2f\n"
+                    (PL.price level) (PL.volume level));
+                printf "Spread: %.4f\n\n" (B.spread book);
+                Deferred.unit
+              | #Market_data.Error.t as e ->
+                printf "Error: %s\n"
+                  (Sexp.to_string (Market_data.Error.sexp_of_t e));
+                Deferred.unit)] )
+end
+
 (** {1 CLI Command Group} *)
 
 let command : string * Command.t =
@@ -703,4 +748,5 @@ let command : string * Command.t =
       ; Active_orders.command
       ; Order_history.command
       ; Positions.command
+      ; Orderbook.command
       ] )

@@ -77,6 +77,27 @@ module Book = struct
       | `Ok book -> book
       | #Market_data.Error.t as e ->
         failwiths ~here:[%here] "Market data error" e Market_data.Error.sexp_of_t)
+
+  (** Create live order book pipe for an arbitrary instrument symbol string.
+      Used for prediction market instruments like GEMI-BTC100K-YES. *)
+  let pipe_for_instrument (module Cfg : Cfg.S) ~instrument_symbol () =
+    let book = create ~symbol:instrument_symbol in
+    Market_data.client_for_string_symbol (module Cfg) ~symbol:instrument_symbol ()
+    >>| fun pipe ->
+    Pipe.folding_map ~init:book pipe ~f:(fun book response ->
+      match response with
+      | `Ok response ->
+        let book = on_market_data book response in
+        (book, `Ok book)
+      | #Market_data.Error.t as e -> (book, e))
+
+  (** Create pipe for instrument symbol that raises on errors *)
+  let pipe_for_instrument_exn (module Cfg : Cfg.S) ~instrument_symbol () =
+    pipe_for_instrument (module Cfg) ~instrument_symbol ()
+    >>| Pipe.map ~f:(function
+      | `Ok book -> book
+      | #Market_data.Error.t as e ->
+        failwiths ~here:[%here] "Market data error" e Market_data.Error.sexp_of_t)
 end
 
 module Books = struct

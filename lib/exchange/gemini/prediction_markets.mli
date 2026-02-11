@@ -280,6 +280,12 @@ module Positions : sig
   val command : string * Command.t
 end
 
+(** {1 Order Book for Prediction Contracts} *)
+
+module Orderbook : sig
+  val command : string * Command.t
+end
+
 (** {1 CLI Command Group} *)
 
 val command : string * Command.t
