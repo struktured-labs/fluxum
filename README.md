@@ -1,447 +1,312 @@
 # Fluxum
 
-[![CI](https://github.com/struktured-labs/fluxum/actions/workflows/ci.yml/badge.svg)](https://github.com/struktured-labs/fluxum/actions/workflows/ci.yml)
-
-A high-performance, multi-exchange cryptocurrency trading library built with OCaml, Jane Street Core, and Async. Fluxum provides unified interfaces for market data streaming, order book management, and trading operations across 7 major cryptocurrency exchanges.
+A high-performance, multi-venue cryptocurrency trading library built with OCaml, Jane Street Core, and Async. Fluxum provides unified interfaces for market data streaming, order book management, and trading across 14 centralized exchanges, 20+ DeFi protocols, and Gemini prediction markets.
 
 ## Features
 
-- **7 Exchange Integrations**: Binance, Kraken, Gemini, MEXC, Hyperliquid, Coinbase, Bitrue
-- **Unified Order Book**: Common interface for order book management across all exchanges
-- **WebSocket Streaming**: Real-time market data (trades, order books, tickers, klines)
-- **REST APIs**: Complete REST support for trading, account management, and market data
-- **Consolidated Order Book**: Aggregate order books from multiple exchanges in real-time
-- **Arbitrage Detection**: Built-in tools for cross-exchange price monitoring
-- **Type Safety**: Full type safety with ppx_deriving for JSON serialization
-- **Async I/O**: Non-blocking operations using Jane Street's Async library
-- **CLI Interface**: Comprehensive command-line tools for all exchanges
+- **14 CEX Integrations**: Binance, Kraken, Gemini, OKX, Bybit, MEXC, Coinbase, Hyperliquid, dYdX, Bitstamp, Bitrue, Jupiter, 1inch, and more
+- **20+ DeFi Protocols**: Uniswap V3, Aerodrome, Camelot, Curve, Balancer, SushiSwap, PancakeSwap, Velodrome, Raydium, Orca, and others
+- **Prediction Markets**: Gemini Predictions API with full trading, order book streaming, and normalized types
+- **Unified Order Book**: Common `Order_book_base` functor across all exchanges
+- **Consolidated Order Book**: Aggregate books from multiple exchanges in real-time with arbitrage detection
+- **WebSocket Streaming**: Real-time market data with auto-reconnect and session management
+- **Ethereum Library**: ABI encoding, ERC-20, RLP, transaction building, JSON-RPC
+- **Normalized Types**: Exchange-agnostic `Types.Order`, `Types.Trade`, `Types.Balance`, etc. via `Exchange_intf.S`
+- **Rate Limiting**: Built-in rate limiter with retry logic
+- **CLI Interface**: Comprehensive command-line tools for every exchange and protocol
+- **1,500+ Unit Tests**: Full test suite across all adapters
 
-## Supported Exchanges
+## Supported Centralized Exchanges
 
-| Exchange | WebSocket | REST API | Order Book | Trading | Status |
-|----------|-----------|----------|------------|---------|--------|
-| **Binance** | ✅ | ✅ | ✅ | ✅ | Production |
-| **Kraken** | ✅ | ✅ | ✅ | ✅ | Production |
-| **Gemini** | ✅ | ✅ | ✅ | ✅ | Production |
-| **MEXC** | ✅ | ✅ | ✅ | ✅ | Production |
-| **Hyperliquid** | ✅ | ✅ | ✅ | ✅ | Production |
-| **Coinbase** | ✅ | ✅ | ✅ | ✅ | Production |
-| **Bitrue** | ✅ | ✅ | ✅ | ❌ | Market Data |
+| Exchange | WebSocket | REST | Order Book | Trading | Session |
+|----------|-----------|------|------------|---------|---------|
+| **Binance** | Y | Y | Y | Y | Y |
+| **Kraken** | Y | Y | Y | Y | Y |
+| **Gemini** | Y | Y | Y | Y | Y |
+| **OKX** | Y | Y | Y | Y | Y |
+| **Bybit** | Y | Y | Y | Y | Y |
+| **MEXC** | Y | Y | Y | Y | Y |
+| **Coinbase** | Y | Y | Y | Y | Y |
+| **Hyperliquid** | Y | Y | Y | Y | Y |
+| **dYdX v4** | Y | Y | Y | Y | Y |
+| **Bitstamp** | Y | Y | Y | Y | Y |
+| **Bitrue** | Y | Y | Y | - | Y |
+| **Jupiter** | - | Y | Y | - | Y |
+| **1inch** | - | Y | Y | - | Y |
+
+## Supported DeFi Protocols
+
+Pool-based liquidity integrations via the `Pool_intf.S` interface:
+
+| Protocol | Chain | Pool Data |
+|----------|-------|-----------|
+| **Uniswap V3** | Ethereum | Full (swap routing, order book, ledger) |
+| **Aerodrome** | Base | Pool adapter |
+| **Camelot** | Arbitrum | Pool adapter |
+| **Curve** | Ethereum | Pool adapter |
+| **Balancer** | Ethereum | Pool adapter |
+| **SushiSwap** | Multi-chain | Pool adapter |
+| **PancakeSwap** | BSC | Pool adapter |
+| **Velodrome** | Optimism | Pool adapter |
+| **Raydium** | Solana | Pool adapter |
+| **Orca** | Solana | Pool adapter |
+| **TraderJoe** | Avalanche | Pool adapter |
+| **SpookySwap** | Fantom | Pool adapter |
+| **QuickSwap** | Polygon | Pool adapter |
+| **Osmosis** | Cosmos | Pool adapter |
+| **GMX** | Arbitrum | Pool adapter |
+| **Thena** | BSC | Pool adapter |
+
+Plus: Gate.io, KuCoin, HTX, Poloniex, Bitfinex (pool adapters)
+
+## Gemini Prediction Markets
+
+Full support for Gemini's CFTC-regulated binary event contracts:
+
+```bash
+# List active prediction events
+dune exec fluxum -- gemini prediction-markets events
+
+# Get event details
+dune exec fluxum -- gemini prediction-markets event BTC100K
+
+# Stream live order book for a contract
+dune exec fluxum -- gemini prediction-markets orderbook -symbol GEMI-WOGOLD26-NOR
+
+# REST book snapshot
+dune exec fluxum -- gemini prediction-markets book-snapshot -symbol GEMI-WOGOLD26-NOR -limit 5
+
+# Place an order (requires API credentials)
+dune exec fluxum -- gemini prediction-markets order \
+  -symbol GEMI-BTC100K-YES -side buy -quantity 10 -price 0.65 -outcome yes
+
+# Query positions
+dune exec fluxum -- gemini prediction-markets positions
+```
 
 ## Installation
 
 ### Prerequisites
 
-- OCaml 5.2.0 or later
-- opam (OCaml package manager)
-- System dependencies: `libcurl4-openssl-dev`, `libssl-dev`, `pkg-config`
-
-### Install System Dependencies
+- OCaml 5.2.0+
+- opam
+- System: `libcurl4-openssl-dev`, `libssl-dev`, `pkg-config`
 
 ```bash
 # Ubuntu/Debian
-sudo apt-get update
 sudo apt-get install -y libcurl4-openssl-dev libssl-dev pkg-config
 
 # macOS
 brew install openssl pkg-config curl
 ```
 
-### Install OCaml Dependencies
+### Build
 
 ```bash
-# Clone the repository
-git clone https://github.com/struktured-labs/fluxum.git
+git clone git@github.com:struktured-labs/fluxum.git
 cd fluxum
-
-# Install dependencies
 opam pin add -y fluxum .
 opam install -y --deps-only fluxum
-
-# Build
 dune build
-
-# Run tests
 dune runtest
 ```
 
 ## Quick Start
 
-### 1. WebSocket Market Data Streaming
-
-Stream real-time order book data from any exchange:
+### Stream an Order Book (OCaml)
 
 ```ocaml
 open Core
 open Async
-open Fluxum
 
-(* Kraken BTC/USD order book *)
 let () =
   Command.async ~summary:"Stream Kraken BTC/USD order book"
     (let%map_open.Command () = return () in
      fun () ->
        let module Cfg = Kraken.Cfg in
        let%bind book_pipe =
-         Kraken.Order_book.Book.pipe
-           (module Cfg.Production)
-           ~symbol:"BTC/USD"
-           ()
+         Kraken.Order_book.Book.pipe (module Cfg.Production) ~symbol:"BTC/USD" ()
        in
        Pipe.iter_without_pushback book_pipe ~f:(fun book ->
-         let best_bid = Kraken.Order_book.Book.best_bid book in
-         let best_ask = Kraken.Order_book.Book.best_ask book in
-         printf "Bid: %.2f @ %.8f | Ask: %.2f @ %.8f | Spread: %.2f\n%!"
-           Exchange_common.Order_book_base.Price_level.(price best_bid)
-           Exchange_common.Order_book_base.Price_level.(volume best_bid)
-           Exchange_common.Order_book_base.Price_level.(price best_ask)
-           Exchange_common.Order_book_base.Price_level.(volume best_ask)
-           (Kraken.Order_book.Book.spread book)
-       ))
+         let module B = Kraken.Order_book.Book in
+         let module PL = Exchange_common.Order_book_base.Price_level in
+         printf "Bid: %.2f | Ask: %.2f | Spread: %.2f\n%!"
+           (PL.price (B.best_bid book))
+           (PL.price (B.best_ask book))
+           (B.spread book)))
   |> Command_unix.run
 ```
 
-### 2. Consolidated Multi-Exchange Order Book
-
-Aggregate order books from multiple exchanges:
+### CLI
 
 ```bash
-# Run the consolidated order book example
+# Top-level help
+dune exec fluxum -- --help
+
+# Kraken order book
+dune exec fluxum -- kraken orderbook
+
+# Binance ticker
+dune exec fluxum -- binance ticker-24hr BTCUSDT
+
+# Gemini balances (requires API credentials)
+dune exec fluxum -- gemini balances
+
+# Consolidated multi-exchange book
 dune exec examples/consolidated_orderbook.exe -- \
-  --exchanges gemini,kraken,binance \
-  --depth 5 \
-  --max-display 10
-```
+  --exchanges gemini,kraken,binance --depth 5
 
-This displays a unified order book merging real-time data from all selected exchanges:
+# DEX pool liquidity
+dune exec fluxum -- pool --help
 
-```
-=== BTC/USD Consolidated Order Book (Epoch: 1234) ===
-Updated: 2025-01-01 10:30:15.123456-05:00
-Sources: [Gemini] [Kraken] [Binance]
-
-Asks (Sell Orders):
-  GEM  0.00228000 @ 87400.74
-  KRK  0.00663500 @ 87399.90
-  BIN  0.03004212 @ 87399.35
-
---- Spread: $-0.63 (-0.0030%) ---
-
-Bids (Buy Orders):
-  KRK  3.74406283 @ 87399.00
-  BIN  1.71926711 @ 87398.90
-  GEM  0.85000000 @ 87398.50
-```
-
-### 3. REST API - Query Account Balance
-
-```ocaml
-open Core
-open Async
-open Fluxum
-
-let check_balance () =
-  let module Cfg = Binance.Cfg in
-  let api_key = Sys.getenv_exn "BINANCE_API_KEY" in
-  let api_secret = Sys.getenv_exn "BINANCE_API_SECRET" in
-
-  let%bind response =
-    Binance.V3.Account.call
-      ~cfg:(module Cfg.Production)
-      ~api_key
-      ~api_secret
-      ()
-  in
-  match response with
-  | Ok account ->
-      List.iter account.balances ~f:(fun balance ->
-        if Float.(balance.free > 0. || balance.locked > 0.) then
-          printf "%s: Free=%.8f Locked=%.8f\n"
-            balance.asset balance.free balance.locked
-      );
-      return ()
-  | Error err ->
-      eprintf "Error: %s\n" (Sexp.to_string_hum (Binance.Rest.Error.sexp_of_t err));
-      return ()
-```
-
-### 4. CLI Usage
-
-Fluxum includes a comprehensive CLI for all exchanges:
-
-```bash
-# Build the CLI
-dune build app/cli.exe
-
-# Query Binance ticker
-./fluxum.exe binance ticker-24hr --symbol BTCUSDT
-
-# Query Kraken OHLC data
-./fluxum.exe kraken ohlc --pair XBTUSDT --interval 60
-
-# Place a limit order on Gemini (requires API credentials)
-export GEMINI_API_KEY="your-key"
-export GEMINI_API_SECRET="your-secret"
-./fluxum.exe gemini new-order \
-  --symbol BTCUSD \
-  --amount 0.01 \
-  --price 50000 \
-  --side buy \
-  --type exchange-limit
-
-# Query MEXC exchange info
-./fluxum.exe mexc exchange-info
-
-# Get Hyperliquid metadata
-./fluxum.exe hyperliquid meta
+# Uniswap V3
+dune exec fluxum -- uniswapv3 --help
 ```
 
 ## Architecture
 
-### Unified Order Book (`Exchange_common.Order_book_base`)
+### Core Layer (`lib/`)
 
-All exchanges implement a common order book interface providing:
+| Module | Purpose |
+|--------|---------|
+| `types.ml` | Normalized types: `Venue`, `Side`, `Order`, `Trade`, `Balance`, `Book_update`, `Prediction_*` |
+| `exchange_intf.ml` | Module signature `S` that all exchange adapters implement |
+| `fluxum.ml` | `Fluxum.Make` functor: wraps native exchange ops and normalizes results |
+| `order_book_intf.ml` | Order book interface (sorted levels, VWAP, TUI rendering) |
+| `pool_intf.ml` | DeFi pool interface for liquidity/swap data |
+| `ledger_intf.ml` | P&L tracking (position, cost basis, unrealized/realized P&L) |
+| `session_intf.ml` | WebSocket session management with auto-reconnect |
+| `normalize_common.ml` | Safe float parsing (`Float_conv`), shared normalization helpers |
+| `consolidated_order_book.ml` | Multi-exchange aggregation with exchange attribution |
+| `consolidated_pools.ml` | Multi-protocol DeFi pool aggregation |
 
-- **Price Levels**: Bid/ask prices with volumes
-- **Best Bid/Ask**: O(1) access to top of book
-- **Mid Price & Spread**: Calculated automatically
-- **VWAP**: Volume-weighted average price for buy/sell operations
-- **Multi-Symbol Support**: Track multiple trading pairs simultaneously
+### Exchange Adapter Pattern
 
-```ocaml
-module Order_book_base.Make (Config : sig
-  type symbol
-  type metadata
-  val default_metadata : unit -> metadata
-  (* sexp serialization functions *)
-end) : sig
-  module Book : sig
-    type t
+Each exchange follows a consistent structure:
 
-    val create : symbol:Config.symbol -> t
-    val set : t -> side:[`Bid | `Ask] -> price:float -> size:float -> t
-    val best_bid : t -> Price_level.t
-    val best_ask : t -> Price_level.t
-    val mid_price : t -> float
-    val spread : t -> float
-    val vwap_buy : t -> volume:float -> float option
-    val vwap_sell : t -> volume:float -> float option
-  end
-
-  module Books : sig
-    type t
-    val empty : t
-    val set_book : t -> Book.t -> t
-    val book : t -> Config.symbol -> Book.t option
-  end
-end
+```
+<Exchange>/
+  cfg.ml            Configuration (production/testnet URLs)
+  rest.ml           REST client infrastructure + auth
+  ws.ml             WebSocket streaming
+  order_book.ml     Order book (implements Order_book_intf.S)
+  ledger.ml         P&L tracking (implements Ledger_intf.ENTRY)
+  session.ml        Session management with auto-reconnect
+  fluxum_adapter.ml Normalized adapter (implements Exchange_intf.S)
+  unified_adapter.ml Combines order_book + ledger + session
 ```
 
-### Exchange-Specific Implementations
+### Key Design Patterns
 
-Each exchange extends the base with exchange-specific features:
-
+**Functor composition:**
 ```ocaml
-(* Kraken Order Book *)
-module Kraken.Order_book : sig
-  type metadata = unit  (* No extra metadata needed *)
-  module Book_base = Exchange_common.Order_book_base.Make(...)
-  module Book : sig
-    include module type of Book_base.Book
-    val pipe : (module Kraken.Cfg.S) -> symbol:string -> unit -> Book.t Pipe.Reader.t Deferred.t
-  end
-end
-
-(* Binance Order Book *)
-module Binance.Order_book : sig
-  type metadata = { last_update_id: int64 }
-  module Book_base = Exchange_common.Order_book_base.Make(...)
-  (* ... *)
-end
+module E = Kraken.Fluxum_adapter
+module F = Fluxum.Make(E)(E.Builder)
+(* F.place_order returns normalized Types.Order.t *)
+(* F.Native.* provides access to exchange-specific types *)
 ```
 
-### WebSocket Streaming
+**Polymorphic variant errors:**
+```ocaml
+type error = [ `Http of int * string | `Json_parse of string | `Api_error of string ]
+val fetch : t -> [ `Ok of response | error ] Deferred.t
+```
 
-All exchanges support real-time WebSocket streaming:
+**Async streams with auto-reconnect:**
+```ocaml
+val pipe : (module Cfg.S) -> symbol:Symbol.t -> unit ->
+  [ `Ok of Book.t | Error.t ] Pipe.Reader.t Deferred.t
+```
 
-- **Order Book Depth**: Full order book snapshots and updates
-- **Trades**: Recent trades stream
-- **Ticker**: 24hr ticker statistics
-- **Klines/Candles**: OHLCV candlestick data
+### Ethereum Library (`lib/ethereum/`)
 
-### REST APIs
+Low-level Ethereum primitives for DeFi integrations:
 
-Complete REST API support for:
-
-- **Public Endpoints**: Market data, exchange info, order books, trades
-- **Account Endpoints**: Balances, account info
-- **Trading Endpoints**: Place orders, cancel orders, query orders, order history
+- **ABI**: Encode/decode Solidity function calls and events
+- **ERC-20**: Token interface (balanceOf, transfer, approve)
+- **RLP**: Recursive Length Prefix encoding
+- **Tx**: Transaction building and signing
+- **RPC**: JSON-RPC client for Ethereum nodes
 
 ## Examples
 
 The `examples/` directory contains working examples:
 
-- **`gemini_orderbook.ml`**: Gemini WebSocket order book streaming
-- **`kraken_orderbook.ml`**: Kraken order book with depth display
-- **`binance_orderbook.ml`**: Binance order book streaming
-- **`hyperliquid_orderbook.ml`**: Hyperliquid L2 order book
-- **`consolidated_orderbook.ml`**: Multi-exchange consolidated book
-- **`consolidated_orderbook_arb.ml`**: Cross-exchange arbitrage detection
-- **`kraken_market_data.ml`**: Kraken market data examples
+| Example | Description |
+|---------|-------------|
+| `gemini_orderbook.ml` | Gemini WebSocket order book |
+| `kraken_orderbook.ml` | Kraken order book with depth display |
+| `binance_orderbook.ml` | Binance order book streaming |
+| `hyperliquid_orderbook.ml` | Hyperliquid L2 order book |
+| `consolidated_orderbook.ml` | Multi-exchange consolidated book |
+| `consolidated_orderbook_arb.ml` | Cross-exchange arbitrage detection |
+| `consolidated_orderbook_enhanced.ml` | Enhanced consolidated view |
+| `kraken_market_data.ml` | Kraken market data examples |
+| `bitrue_orderbook.ml` | Bitrue order book |
+| `mexc_orderbook.ml` | MEXC order book |
+| `dydx_orderbook.ml` | dYdX v4 order book |
+| `backtest_example.ml` | Backtesting framework demo |
 
-Run any example with:
 ```bash
-dune exec examples/<example_name>.exe -- [OPTIONS]
+dune exec examples/<name>.exe -- [OPTIONS]
 ```
-
-See [examples/README.md](examples/README.md) for detailed documentation of each example.
-
-## API Documentation
-
-### Core Modules
-
-- **`Fluxum`**: Main library module with unified exchange interface
-- **`Exchange_common.Order_book_base`**: Common order book implementation
-- **`Consolidated_order_book`**: Multi-exchange aggregation
-- **`Order_book_incremental`**: Incremental order book updates
-
-### Exchange Modules
-
-Each exchange has a similar module structure:
-
-```
-<Exchange>/
-  ├── Cfg          - Configuration (production/testnet URLs, API settings)
-  ├── Common       - Common types (Side, Order_type, etc.)
-  ├── Signature    - Authentication and request signing
-  ├── Rest         - REST API client infrastructure
-  ├── Ws           - WebSocket streaming
-  ├── Order_book   - Order book implementation
-  └── V{n}         - Versioned API endpoints
-```
-
-### Exchange-Specific Documentation
-
-- [Binance](docs/exchanges/BINANCE.md) - Binance/Binance.US API
-- [Kraken](docs/exchanges/KRAKEN.md) - Kraken WebSocket and REST
-- [Gemini](docs/exchanges/GEMINI.md) - Gemini native API
-- [MEXC](docs/exchanges/MEXC.md) - MEXC Global
-- [Hyperliquid](docs/exchanges/HYPERLIQUID.md) - Hyperliquid DEX
-- [Coinbase](docs/exchanges/COINBASE.md) - Coinbase Advanced Trade
-- [Bitrue](docs/exchanges/BITRUE.md) - Bitrue WebSocket
 
 ## Testing
 
-Fluxum has comprehensive test coverage:
-
 ```bash
-# Run all unit tests
+# Run all tests
 dune runtest
 
-# Run specific test suite
-dune runtest lib/exchange/binance/test
-dune runtest lib/exchange/common/test
+# Run specific exchange tests
+dune build @lib/exchange/kraken/test/runtest
+dune build @lib/exchange/binance/test/runtest
+dune build @lib/exchange/common/test/runtest
 
-# Run integration tests (WebSocket - requires network)
+# Integration tests (requires network)
 timeout 30 dune exec examples/kraken_orderbook.exe
-timeout 30 dune exec examples/consolidated_orderbook.exe -- --exchanges gemini,kraken
 ```
 
-Test Statistics:
-- **196+ unit tests** across all exchanges
-- **44 tests** for common order book base
-- **30+ tests** for consolidated order book
-- **100% pass rate**
+1,500+ test assertions across all exchanges with 100% pass rate.
 
 ## Configuration
 
 ### Environment Variables
 
-Exchanges support configuration via environment variables:
-
 ```bash
-# Binance
-export BINANCE_API_KEY="your-api-key"
-export BINANCE_API_SECRET="your-api-secret"
+# Gemini
+export GEMINI_API_KEY="your-key"
+export GEMINI_API_SECRET="your-secret"
 
 # Kraken
-export KRAKEN_API_KEY="your-api-key"
-export KRAKEN_API_SECRET="your-api-secret"
+export KRAKEN_API_KEY="your-key"
+export KRAKEN_API_SECRET="your-secret"
 
-# Gemini
-export GEMINI_API_KEY="your-api-key"
-export GEMINI_API_SECRET="your-api-secret"
+# Binance
+export BINANCE_API_KEY="your-key"
+export BINANCE_API_SECRET="your-secret"
+
+# Ethereum RPC (for DeFi)
+export ETH_RPC_URL="https://mainnet.infura.io/v3/your-key"
 ```
 
-### Testnet Support
+## Built With
 
-Most exchanges support testnet environments:
-
-```ocaml
-(* Binance Testnet *)
-module Cfg = Binance.Cfg.Testnet
-
-(* Gemini Sandbox *)
-module Cfg = Gemini.Cfg.Sandbox
-```
-
-## Performance
-
-- **Non-blocking I/O**: All operations use Async for concurrency
-- **Zero-copy parsing**: Efficient JSON parsing with minimal allocations
-- **Connection pooling**: Persistent WebSocket connections
-- **Batch updates**: Order book updates processed in batches
-
-Benchmarks (single thread, commodity hardware):
-- WebSocket message processing: ~50,000 msgs/sec
-- Order book updates: ~100,000 updates/sec
-- REST API calls: ~1,000 requests/sec
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Development Setup
-
-```bash
-# Install development dependencies
-opam install -y --deps-only --with-test fluxum
-
-# Format code
-dune build @fmt --auto-promote
-
-# Run full test suite
-dune runtest
-
-# Generate documentation
-dune build @doc
-```
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-Built with:
-- [Jane Street Core](https://github.com/janestreet/core) - Industrial-strength functional programming
-- [Jane Street Async](https://github.com/janestreet/async) - Cooperative concurrency
-- [ppx_deriving_yojson](https://github.com/ocaml-ppx/ppx_deriving_yojson) - JSON serialization
-- [cohttp](https://github.com/mirage/ocaml-cohttp) - HTTP client/server
-- [digestif](https://github.com/mirage/digestif) - Cryptographic hashing
-
-## Support
-
-- **Documentation**: [docs/](docs/)
-- **Issues**: [GitHub Issues](https://github.com/struktured-labs/fluxum/issues)
-- **Examples**: [examples/](examples/)
+- [Jane Street Core](https://github.com/janestreet/core) / [Async](https://github.com/janestreet/async)
+- [ppx_deriving_yojson](https://github.com/ocaml-ppx/ppx_deriving_yojson)
+- [cohttp-async](https://github.com/mirage/ocaml-cohttp)
+- [digestif](https://github.com/mirage/digestif)
 
 ## Roadmap
 
-- [ ] Additional exchanges (Bybit, OKX, Huobi)
-- [ ] Futures and derivatives support
-- [ ] WebSocket reconnection strategies
-- [ ] Rate limiting middleware
+- [x] 14 CEX adapters with unified interface
+- [x] 20+ DeFi pool integrations
+- [x] Gemini prediction markets
+- [x] Uniswap V3 swap execution
+- [x] Ethereum ABI/RLP/transaction library
+- [x] WebSocket auto-reconnect sessions
+- [x] Rate limiting middleware
+- [x] Consolidated order books
+- [x] Backtesting framework
 - [ ] Order execution algorithms (TWAP, VWAP, Iceberg)
 - [ ] Portfolio management module
-- [ ] Backtesting framework
+- [ ] Cross-chain DEX aggregation

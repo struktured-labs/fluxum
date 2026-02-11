@@ -8,7 +8,6 @@ open! Common
 open V1
 
 module Price_level = Exchange_common.Order_book_base.Price_level
-module Bid_ask = Market_data.Side.Bid_ask
 
 module Book : sig
   type t [@@deriving sexp]

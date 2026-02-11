@@ -324,7 +324,6 @@ module Adapter = struct
         | `Ok (`Heartbeat _) -> None
         | `Ok (`Subscription_ack _) -> None
         | #Ws.Error.t -> None)
-      |> Deferred.map ~f:Fn.id
 
     let book_updates (t : t) =
       let (module Cfg) = t.cfg in
@@ -338,7 +337,6 @@ module Adapter = struct
             | `Update u -> Some u
             | `Heartbeat _ -> None)
         | #Ws.Error.t -> None )
-      |> Deferred.map ~f:Fn.id
   end
 
   module Normalize = struct
@@ -352,7 +350,7 @@ module Adapter = struct
         let open Result.Let_syntax in
         let%bind p = Fluxum.Normalize_common.Float_conv.price_of_string
           (Common.Decimal_string.to_string price) in
-        Ok (match List.exists options ~f:(fun o -> Poly.equal o `Maker_or_cancel) with
+        Ok (match List.exists options ~f:(function `Maker_or_cancel -> true | _ -> false) with
          | true -> Types.Order_kind.post_only p
          | false -> Types.Order_kind.limit p)
       | _ -> Ok Types.Order_kind.market
