@@ -695,3 +695,69 @@ module Cancel_all_orders = struct
   include T
   include Rest.Make (T)
 end
+
+(** User Data Stream - Manage listen keys for WebSocket user data streams
+    POST /api/v3/userDataStream - Create listen key
+    PUT /api/v3/userDataStream - Keepalive (extend validity)
+    DELETE /api/v3/userDataStream - Close listen key
+
+    Listen keys are valid for 60 minutes. Call keepalive every 30 minutes.
+    Use with wss://stream.binance.com:9443/ws/<listenKey> *)
+module User_data_stream = struct
+  module Create = struct
+    module T = struct
+      let name = "user-data-stream-create"
+      let endpoint = "userDataStream"
+      let http_method = `POST
+      let requires_auth = true
+
+      type request = unit [@@deriving sexp]
+      let request_to_params () = []
+
+      type response = { listenKey : string } [@@deriving sexp, of_yojson]
+    end
+
+    include T
+    include Rest.Make_no_arg (T)
+  end
+
+  module Keepalive = struct
+    module T = struct
+      let name = "user-data-stream-keepalive"
+      let endpoint = "userDataStream"
+      let http_method = `PUT
+      let requires_auth = true
+
+      type request = { listenKey : string } [@@deriving sexp]
+
+      let request_to_params { listenKey } = [ ("listenKey", listenKey) ]
+
+      type response = unit [@@deriving sexp]
+
+      let response_of_yojson _ = Ok ()
+    end
+
+    include T
+    include Rest.Make (T)
+  end
+
+  module Close = struct
+    module T = struct
+      let name = "user-data-stream-close"
+      let endpoint = "userDataStream"
+      let http_method = `DELETE
+      let requires_auth = true
+
+      type request = { listenKey : string } [@@deriving sexp]
+
+      let request_to_params { listenKey } = [ ("listenKey", listenKey) ]
+
+      type response = unit [@@deriving sexp]
+
+      let response_of_yojson _ = Ok ()
+    end
+
+    include T
+    include Rest.Make (T)
+  end
+end

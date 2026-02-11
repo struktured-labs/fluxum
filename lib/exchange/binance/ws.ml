@@ -23,6 +23,7 @@ module Stream = struct
     | MiniTicker of string  (* symbol@miniTicker *)
     | BookTicker of string  (* symbol@bookTicker *)
     | Kline of { symbol: string; interval: string }  (* symbol@kline_1m etc *)
+    | UserData of string  (* User data stream with listen key *)
   [@@deriving sexp]
 
   let to_stream_name = function
@@ -35,6 +36,10 @@ module Stream = struct
     | MiniTicker symbol -> sprintf "%s@miniTicker" (String.lowercase symbol)
     | BookTicker symbol -> sprintf "%s@bookTicker" (String.lowercase symbol)
     | Kline { symbol; interval } -> sprintf "%s@kline_%s" (String.lowercase symbol) interval
+    | UserData listen_key -> listen_key  (* User data stream uses listen key directly *)
+
+  (** User data stream endpoint (different from market data) *)
+  let user_data_endpoint = "wss://stream.binance.com:9443/ws"
 end
 
 (** WebSocket message types *)
@@ -97,12 +102,73 @@ module Message = struct
     best_ask_qty: string; [@key "A"]
   } [@@deriving yojson { strict = false }]
 
+  (** Execution report from user data stream - order updates and fills *)
+  type execution_report = {
+    event_type: string; [@key "e"]  (* "executionReport" *)
+    event_time: int64; [@key "E"]
+    symbol: string; [@key "s"]
+    client_order_id: string; [@key "c"]
+    side: string; [@key "S"]  (* "BUY" or "SELL" *)
+    order_type: string; [@key "o"]  (* "LIMIT", "MARKET", etc. *)
+    time_in_force: string; [@key "f"]  (* "GTC", "IOC", "FOK", "GTX" *)
+    quantity: string; [@key "q"]  (* Original quantity *)
+    price: string; [@key "p"]  (* Order price *)
+    stop_price: string; [@key "P"]  (* Stop price *)
+    iceberg_qty: string; [@key "F"]  (* Iceberg quantity *)
+    order_list_id: int64; [@key "g"]  (* OrderListId *)
+    orig_client_order_id: string; [@key "C"]  (* Original client order ID *)
+    execution_type: string; [@key "x"]  (* NEW, CANCELED, REPLACED, REJECTED, TRADE, EXPIRED *)
+    order_status: string; [@key "X"]  (* NEW, PARTIALLY_FILLED, FILLED, CANCELED, etc. *)
+    reject_reason: string; [@key "r"]  (* Rejection reason *)
+    order_id: int64; [@key "i"]  (* Order ID *)
+    last_executed_qty: string; [@key "l"]  (* Last executed quantity *)
+    cumulative_filled_qty: string; [@key "z"]  (* Cumulative filled quantity *)
+    last_executed_price: string; [@key "L"]  (* Last executed price *)
+    commission: string; [@key "n"]  (* Commission amount *)
+    commission_asset: string option; [@key "N"] [@default None]  (* Commission asset *)
+    trade_time: int64; [@key "T"]  (* Transaction time *)
+    trade_id: int64; [@key "t"]  (* Trade ID *)
+    is_on_book: bool; [@key "w"]  (* Is the order on the book? *)
+    is_maker: bool; [@key "m"]  (* Is this trade the maker side? *)
+    order_creation_time: int64; [@key "O"]  (* Order creation time *)
+    cumulative_quote_qty: string; [@key "Z"]  (* Cumulative quote asset transacted quantity *)
+    last_quote_qty: string; [@key "Y"]  (* Last quote asset transacted quantity *)
+    quote_order_qty: string; [@key "Q"]  (* Quote Order Qty *)
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Balance update within account update *)
+  type balance_update = {
+    asset: string; [@key "a"]
+    free: string; [@key "f"]
+    locked: string; [@key "l"]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Account update from user data stream - balance changes *)
+  type account_update = {
+    event_type: string; [@key "e"]  (* "outboundAccountPosition" *)
+    event_time: int64; [@key "E"]
+    last_update_time: int64; [@key "u"]
+    balances: balance_update list; [@key "B"]
+  } [@@deriving yojson { strict = false }, sexp]
+
+  (** Balance update event (different from account_update) *)
+  type balance_update_event = {
+    event_type: string; [@key "e"]  (* "balanceUpdate" *)
+    event_time: int64; [@key "E"]
+    asset: string; [@key "a"]
+    delta: string; [@key "d"]
+    clear_time: int64; [@key "T"]
+  } [@@deriving yojson { strict = false }, sexp]
+
   type t =
     | Trade of trade
     | Depth of depth
     | DepthUpdate of depth_update
     | Ticker of ticker
     | BookTicker of book_ticker
+    | ExecutionReport of execution_report
+    | AccountUpdate of account_update
+    | BalanceUpdate of balance_update_event
     | Unknown of string
 
   let sexp_of_t = function
@@ -111,6 +177,9 @@ module Message = struct
     | DepthUpdate _ -> Sexp.Atom "DepthUpdate"
     | Ticker _ -> Sexp.Atom "Ticker"
     | BookTicker _ -> Sexp.Atom "BookTicker"
+    | ExecutionReport r -> Sexp.List [Sexp.Atom "ExecutionReport"; sexp_of_execution_report r]
+    | AccountUpdate u -> Sexp.List [Sexp.Atom "AccountUpdate"; sexp_of_account_update u]
+    | BalanceUpdate b -> Sexp.List [Sexp.Atom "BalanceUpdate"; sexp_of_balance_update_event b]
     | Unknown msg -> Sexp.List [Sexp.Atom "Unknown"; Sexp.Atom msg]
 end
 
@@ -134,6 +203,18 @@ let parse_message (msg : string) : Message.t =
     | Some "bookTicker" ->
       (match Message.book_ticker_of_yojson json with
        | Ok book_ticker -> Message.BookTicker book_ticker
+       | Error _ -> Message.Unknown msg)
+    | Some "executionReport" ->
+      (match Message.execution_report_of_yojson json with
+       | Ok report -> Message.ExecutionReport report
+       | Error _ -> Message.Unknown msg)
+    | Some "outboundAccountPosition" ->
+      (match Message.account_update_of_yojson json with
+       | Ok update -> Message.AccountUpdate update
+       | Error _ -> Message.Unknown msg)
+    | Some "balanceUpdate" ->
+      (match Message.balance_update_event_of_yojson json with
+       | Ok update -> Message.BalanceUpdate update
        | Error _ -> Message.Unknown msg)
     | _ ->
       (* Could be a depth snapshot *)

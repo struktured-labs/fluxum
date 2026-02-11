@@ -42,7 +42,7 @@ module Operation = struct
   module type S = sig
     val name : string
     val endpoint : string
-    val http_method : [ `GET | `POST | `DELETE ]
+    val http_method : [ `GET | `POST | `PUT | `DELETE ]
     val requires_auth : bool
 
     type request [@@deriving sexp]
@@ -137,6 +137,7 @@ module Request (Operation : Operation.S) = struct
       (match Operation.http_method with
       | `GET -> "GET"
       | `POST -> "POST"
+      | `PUT -> "PUT"
       | `DELETE -> "DELETE")
       Operation.endpoint;
 
@@ -154,6 +155,14 @@ module Request (Operation : Operation.S) = struct
           Cohttp.Header.replace headers "Content-Type" "application/x-www-form-urlencoded"
         in
         Cohttp_async.Client.post ~headers ~body ?chunked:None ?interrupt:None ?ssl_config:None uri
+      | `PUT ->
+        (* For PUT, include params in query string (used by userDataStream keepalive) *)
+        let query_string = Signature.build_query_string params in
+        let body = Cohttp_async.Body.of_string query_string in
+        let headers =
+          Cohttp.Header.replace headers "Content-Type" "application/x-www-form-urlencoded"
+        in
+        Cohttp_async.Client.put ~headers ~body ?chunked:None ?interrupt:None ?ssl_config:None uri
       | `DELETE -> Cohttp_async.Client.delete ~headers ?chunked:None ?interrupt:None ?ssl_config:None uri
     in
 
