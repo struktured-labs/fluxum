@@ -853,9 +853,16 @@ module Adapter = struct
       | `Ok r -> Ok r
       | (#Rest.Error.post as e) -> Error e)
 
-  let prediction_active_orders (t : t) () =
+  let prediction_active_orders (t : t) ?limit ?offset ?symbol () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      Prediction_markets.Active_orders.post t.cfg t.nonce ()
+      Prediction_markets.Active_orders.get ?limit ?offset ?symbol t.cfg t.nonce ()
+      >>| function
+      | `Ok orders -> Ok (List.map orders ~f:Normalize.prediction_order)
+      | (#Rest.Error.post as e) -> Error e)
+
+  let prediction_order_history (t : t) ?limit ?offset ?symbol () =
+    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+      Prediction_markets.Order_history.get ?limit ?offset ?symbol t.cfg t.nonce ()
       >>| function
       | `Ok orders -> Ok (List.map orders ~f:Normalize.prediction_order)
       | (#Rest.Error.post as e) -> Error e)

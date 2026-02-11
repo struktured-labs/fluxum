@@ -241,7 +241,23 @@ module Cancel_order : sig
 end
 
 module Active_orders : sig
+  type request =
+    { limit : int option
+    ; offset : int option
+    ; symbol : string option
+    }
+  [@@deriving sexp]
+
   val post :
+    (module Cfg.S) ->
+    Nonce.reader ->
+    request ->
+    [ `Ok of Place_order.response list | Rest.Error.post ] Deferred.t
+
+  val get :
+    ?limit:int ->
+    ?offset:int ->
+    ?symbol:string ->
     (module Cfg.S) ->
     Nonce.reader ->
     unit ->
@@ -251,7 +267,23 @@ module Active_orders : sig
 end
 
 module Order_history : sig
+  type request =
+    { limit : int option
+    ; offset : int option
+    ; symbol : string option
+    }
+  [@@deriving sexp]
+
   val post :
+    (module Cfg.S) ->
+    Nonce.reader ->
+    request ->
+    [ `Ok of Place_order.response list | Rest.Error.post ] Deferred.t
+
+  val get :
+    ?limit:int ->
+    ?offset:int ->
+    ?symbol:string ->
     (module Cfg.S) ->
     Nonce.reader ->
     unit ->
@@ -281,6 +313,30 @@ module Positions : sig
 end
 
 (** {1 Order Book for Prediction Contracts} *)
+
+module Book_snapshot : sig
+  type level =
+    { price : Decimal_string.t
+    ; amount : Decimal_string.t
+    ; timestamp : string
+    }
+  [@@deriving sexp, of_yojson]
+
+  type t =
+    { bids : level list
+    ; asks : level list
+    }
+  [@@deriving sexp, of_yojson]
+
+  val get :
+    (module Cfg.S) ->
+    instrument_symbol:string ->
+    ?limit:int ->
+    unit ->
+    [ `Ok of t | Rest.Error.get ] Deferred.t
+
+  val command : string * Command.t
+end
 
 module Orderbook : sig
   val command : string * Command.t

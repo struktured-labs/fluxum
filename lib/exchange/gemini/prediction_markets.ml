@@ -642,13 +642,71 @@ module Active_orders = struct
     let name = "active-orders"
     let path = base_path @ [ "orders"; "active" ]
 
-    type request = unit [@@deriving sexp, to_yojson]
+    type request =
+      { limit : int option [@default None]
+      ; offset : int option [@default None]
+      ; symbol : string option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_yojson { limit; offset; symbol } =
+      let fields = List.filter_opt
+        [ Option.map limit ~f:(fun n -> ("limit", `Int n))
+        ; Option.map offset ~f:(fun n -> ("offset", `Int n))
+        ; Option.map symbol ~f:(fun s -> ("symbol", `String s))
+        ]
+      in
+      match fields with
+      | [] -> `Null
+      | _ -> `Assoc fields
+
+    let request_of_sexp = request_of_sexp
 
     type response = Place_order.response list [@@deriving sexp, of_yojson]
   end
 
   include T
-  include Rest.Make_no_arg (T)
+  include Rest.Post (T)
+
+  let get ?limit ?offset ?symbol cfg nonce () =
+    post cfg nonce { limit; offset; symbol }
+
+  let command =
+    let open Command.Let_syntax in
+    ( "active-orders",
+      Command.async
+        ~summary:"List active prediction market orders"
+        [%map_open
+          let config = Cfg.param
+          and limit =
+            flag "-limit" (optional int)
+              ~doc:"INT max orders to return (default: 50, max: 100)"
+          and offset =
+            flag "-offset" (optional int)
+              ~doc:"INT pagination offset"
+          and symbol =
+            flag "-symbol" (optional string)
+              ~doc:"STRING filter by instrument symbol"
+          in
+          fun () ->
+            let config = Cfg.or_default config in
+            Nonce.File.(pipe ~init:default_filename) () >>= fun nonce ->
+            get ?limit ?offset ?symbol config nonce () >>= function
+            | `Ok orders ->
+              List.iter orders ~f:(fun o ->
+                printf "%Ld  %s %s %s @ %s  qty=%s filled=%s  [%s]\n"
+                  o.order_id
+                  (Side.to_string o.side)
+                  (Outcome.to_string o.outcome)
+                  o.symbol
+                  o.price
+                  o.quantity
+                  o.filled_quantity
+                  o.status);
+              Deferred.unit
+            | #Rest.Error.post as err ->
+              failwiths ~here:[%here] "active orders failed"
+                err Rest.Error.sexp_of_post] )
 end
 
 module Order_history = struct
@@ -656,13 +714,71 @@ module Order_history = struct
     let name = "order-history"
     let path = base_path @ [ "orders"; "history" ]
 
-    type request = unit [@@deriving sexp, to_yojson]
+    type request =
+      { limit : int option [@default None]
+      ; offset : int option [@default None]
+      ; symbol : string option [@default None]
+      }
+    [@@deriving sexp]
+
+    let request_to_yojson { limit; offset; symbol } =
+      let fields = List.filter_opt
+        [ Option.map limit ~f:(fun n -> ("limit", `Int n))
+        ; Option.map offset ~f:(fun n -> ("offset", `Int n))
+        ; Option.map symbol ~f:(fun s -> ("symbol", `String s))
+        ]
+      in
+      match fields with
+      | [] -> `Null
+      | _ -> `Assoc fields
+
+    let request_of_sexp = request_of_sexp
 
     type response = Place_order.response list [@@deriving sexp, of_yojson]
   end
 
   include T
-  include Rest.Make_no_arg (T)
+  include Rest.Post (T)
+
+  let get ?limit ?offset ?symbol cfg nonce () =
+    post cfg nonce { limit; offset; symbol }
+
+  let command =
+    let open Command.Let_syntax in
+    ( "order-history",
+      Command.async
+        ~summary:"List prediction market order history"
+        [%map_open
+          let config = Cfg.param
+          and limit =
+            flag "-limit" (optional int)
+              ~doc:"INT max orders to return (default: 50, max: 100)"
+          and offset =
+            flag "-offset" (optional int)
+              ~doc:"INT pagination offset"
+          and symbol =
+            flag "-symbol" (optional string)
+              ~doc:"STRING filter by instrument symbol"
+          in
+          fun () ->
+            let config = Cfg.or_default config in
+            Nonce.File.(pipe ~init:default_filename) () >>= fun nonce ->
+            get ?limit ?offset ?symbol config nonce () >>= function
+            | `Ok orders ->
+              List.iter orders ~f:(fun o ->
+                printf "%Ld  %s %s %s @ %s  qty=%s filled=%s  [%s]\n"
+                  o.order_id
+                  (Side.to_string o.side)
+                  (Outcome.to_string o.outcome)
+                  o.symbol
+                  o.price
+                  o.quantity
+                  o.filled_quantity
+                  o.status);
+              Deferred.unit
+            | #Rest.Error.post as err ->
+              failwiths ~here:[%here] "order history failed"
+                err Rest.Error.sexp_of_post] )
 end
 
 module Positions = struct
@@ -690,6 +806,65 @@ module Positions = struct
 end
 
 (** {1 Order Book for Prediction Contracts} *)
+
+module Book_snapshot = struct
+  type level =
+    { price : Decimal_string.t
+    ; amount : Decimal_string.t
+    ; timestamp : string [@default ""]
+    }
+  [@@deriving sexp, of_yojson]
+
+  type t =
+    { bids : level list
+    ; asks : level list
+    }
+  [@@deriving sexp, of_yojson]
+
+  let get (module Cfg : Cfg.S) ~instrument_symbol ?limit () =
+    let path = sprintf "/v1/book/%s" instrument_symbol in
+    let query = match limit with
+      | Some n ->
+        [ ("limit_bids", [ Int.to_string n ])
+        ; ("limit_asks", [ Int.to_string n ])
+        ]
+      | None -> []
+    in
+    let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path ~query () in
+    http_get uri >>| function
+    | `Ok json -> parse_json_response json of_yojson
+    | #Rest.Error.get as e -> e
+
+  let command =
+    let open Command.Let_syntax in
+    ( "book-snapshot",
+      Command.async
+        ~summary:"Get prediction market order book snapshot (REST)"
+        [%map_open
+          let env = cfg_param_public
+          and symbol =
+            flag "-symbol" (required string)
+              ~doc:"STRING instrument symbol (e.g., GEMI-BTC100K-YES)"
+          and limit =
+            flag "-limit" (optional int)
+              ~doc:"INT max bid/ask levels to return"
+          in
+          fun () ->
+            let config = public_config_of_env env in
+            get config ~instrument_symbol:symbol ?limit () >>= function
+            | `Ok snap ->
+              printf "=== %s Book Snapshot ===\n" symbol;
+              printf "--- ASKS (%d levels) ---\n" (List.length snap.asks);
+              List.rev snap.asks |> List.iter ~f:(fun l ->
+                printf "  %s  qty=%s\n" l.price l.amount);
+              printf "--- BIDS (%d levels) ---\n" (List.length snap.bids);
+              List.iter snap.bids ~f:(fun l ->
+                printf "  %s  qty=%s\n" l.price l.amount);
+              Deferred.unit
+            | #Rest.Error.get as err ->
+              failwiths ~here:[%here] "book snapshot failed"
+                err Rest.Error.sexp_of_get] )
+end
 
 module Orderbook = struct
   let command =
@@ -749,4 +924,5 @@ let command : string * Command.t =
       ; Order_history.command
       ; Positions.command
       ; Orderbook.command
+      ; Book_snapshot.command
       ] )
