@@ -3,7 +3,10 @@
 (** Order side - BUY or SELL (Binance uses uppercase) *)
 module Side = struct
   module T = struct
-    type t = [ `BUY | `SELL ] [@@deriving sexp, enumerate, equal, compare]
+    type t =
+      [ `BUY
+      | `SELL ]
+    [@@deriving sexp, enumerate, equal, compare]
 
     let to_string = function
       | `BUY -> "BUY"
@@ -29,8 +32,7 @@ module Order_type = struct
       | `STOP_LOSS_LIMIT
       | `TAKE_PROFIT
       | `TAKE_PROFIT_LIMIT
-      | `LIMIT_MAKER
-      ]
+      | `LIMIT_MAKER ]
     [@@deriving sexp, enumerate, equal, compare]
 
     let to_string = function
@@ -61,10 +63,9 @@ end
 module Time_in_force = struct
   module T = struct
     type t =
-      [ `GTC  (** Good till canceled *)
-      | `IOC  (** Immediate or cancel *)
-      | `FOK  (** Fill or kill *)
-      ]
+      [ `GTC (** Good till canceled *)
+      | `IOC (** Immediate or cancel *)
+      | `FOK (** Fill or kill *) ]
     [@@deriving sexp, enumerate, equal, compare]
 
     let to_string = function
@@ -93,8 +94,7 @@ module Order_status = struct
       | `CANCELED
       | `PENDING_CANCEL
       | `REJECTED
-      | `EXPIRED
-      ]
+      | `EXPIRED ]
     [@@deriving sexp, enumerate, equal, compare]
 
     let to_string = function

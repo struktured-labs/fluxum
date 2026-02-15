@@ -50,28 +50,27 @@
     - Comprehensive test coverage (598-line test suite)
     - Asian market leader (good for regional arbitrage)
 
-    @see <https://mexcdevelop.github.io/apidocs/spot_v3_en/> MEXC Spot API v3 Documentation
-*)
+    @see <https://mexcdevelop.github.io/apidocs/spot_v3_en/>
+      MEXC Spot API v3 Documentation *)
 
 open Core
 open Async
-
 module Types = Fluxum.Types
 module Exchange_intf = Fluxum.Exchange_intf
 
 module Adapter = struct
   type t =
-    { cfg : (module Cfg.S)
-    ; symbols : string list
-    ; rate_limiter : Exchange_common.Rate_limiter.t
-    }
+    { cfg: (module Cfg.S)
+    ; symbols: string list
+    ; rate_limiter: Exchange_common.Rate_limiter.t }
 
   let create ~cfg ?(symbols = []) () =
     { cfg
     ; symbols
-    ; rate_limiter = Exchange_common.Rate_limiter.create
-        ~config:Exchange_common.Rate_limiter.Configs.mexc ()
-    }
+    ; rate_limiter=
+        Exchange_common.Rate_limiter.create
+          ~config:Exchange_common.Rate_limiter.Configs.mexc
+          () }
 
   module Venue = struct
     let t = Types.Venue.Mexc
@@ -82,7 +81,7 @@ module Adapter = struct
       type id = string
       type request = V1.New_order.request
       type response = V1.New_order.response
-      type status = V1.Open_orders.order  (* Same structure as Query_order.response *)
+      type status = V1.Open_orders.order (* Same structure as Query_order.response *)
     end
 
     module Trade = struct
@@ -107,7 +106,7 @@ module Adapter = struct
     end
 
     module Candle = struct
-      type t = unit  (* MEXC klines - TODO: implement *)
+      type t = unit (* MEXC klines - TODO: implement *)
     end
 
     module Symbol_info = struct
@@ -134,13 +133,15 @@ module Adapter = struct
   let _create ~cfg ?(symbols = []) () =
     { cfg
     ; symbols
-    ; rate_limiter = Exchange_common.Rate_limiter.create
-        ~config:Exchange_common.Rate_limiter.Configs.mexc ()
-    }
+    ; rate_limiter=
+        Exchange_common.Rate_limiter.create
+          ~config:Exchange_common.Rate_limiter.Configs.mexc
+          () }
 
   let place_order t (req : Native.Order.request) =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.New_order.request t.cfg req >>| function
+      V1.New_order.request t.cfg req
+      >>| function
       | `Ok resp -> Ok resp
       | #Rest.Error.t as e -> Error e)
 
@@ -151,17 +152,18 @@ module Adapter = struct
       Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
         V1.Cancel_order.request
           t.cfg
-          { symbol; orderId = Some order_id; origClientOrderId = None }
-        >>| (function
+          {symbol; orderId= Some order_id; origClientOrderId= None}
+        >>| function
         | `Ok _ -> Ok ()
-        | #Rest.Error.t as e -> Error e))
+        | #Rest.Error.t as e -> Error e)
     | [] ->
       Deferred.return
-        (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
+        (Error (`Api_error Rest.Error.{code= -1; msg= "No symbol configured"}))
 
   let balances t =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Account.request t.cfg () >>| function
+      V1.Account.request t.cfg ()
+      >>| function
       | `Ok resp -> Ok resp.balances
       | #Rest.Error.t as e -> Error e)
 
@@ -169,86 +171,96 @@ module Adapter = struct
     match t.symbols with
     | symbol :: _ ->
       Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-        V1.Query_order.request t.cfg
-          { symbol; orderId = Some order_id; origClientOrderId = None }
-        >>| (function
-          | `Ok resp ->
-            (* Convert Query_order.response to Open_orders.order (same structure) *)
-            let order : V1.Open_orders.order =
-              { symbol = resp.symbol
-              ; orderId = resp.orderId
-              ; orderListId = resp.orderListId
-              ; clientOrderId = resp.clientOrderId
-              ; price = resp.price
-              ; origQty = resp.origQty
-              ; executedQty = resp.executedQty
-              ; cummulativeQuoteQty = resp.cummulativeQuoteQty
-              ; status = resp.status
-              ; timeInForce = resp.timeInForce
-              ; type_ = resp.type_
-              ; side = resp.side
-              ; stopPrice = resp.stopPrice
-              ; time = resp.time
-              ; updateTime = resp.updateTime
-              ; isWorking = resp.isWorking
-              ; origQuoteOrderQty = resp.origQuoteOrderQty
-              }
-            in
+        V1.Query_order.request
+          t.cfg
+          {symbol; orderId= Some order_id; origClientOrderId= None}
+        >>| function
+        | `Ok resp ->
+          (* Convert Query_order.response to Open_orders.order (same structure) *)
+          let order : V1.Open_orders.order =
+            { symbol= resp.symbol
+            ; orderId= resp.orderId
+            ; orderListId= resp.orderListId
+            ; clientOrderId= resp.clientOrderId
+            ; price= resp.price
+            ; origQty= resp.origQty
+            ; executedQty= resp.executedQty
+            ; cummulativeQuoteQty= resp.cummulativeQuoteQty
+            ; status= resp.status
+            ; timeInForce= resp.timeInForce
+            ; type_= resp.type_
+            ; side= resp.side
+            ; stopPrice= resp.stopPrice
+            ; time= resp.time
+            ; updateTime= resp.updateTime
+            ; isWorking= resp.isWorking
+            ; origQuoteOrderQty= resp.origQuoteOrderQty }
+          in
             Ok order
-          | #Rest.Error.t as e -> Error e))
+        | #Rest.Error.t as e -> Error e)
     | [] ->
       Deferred.return
-        (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
+        (Error (`Api_error Rest.Error.{code= -1; msg= "No symbol configured"}))
 
   let get_open_orders t ?symbol () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      let symbol = match symbol with Some s -> s | None -> List.hd t.symbols |> Option.value ~default:"" in
-      V1.Open_orders.request t.cfg { symbol = Some symbol }
-      >>| function
-      | `Ok orders -> Ok orders
-      | #Rest.Error.t as e -> Error e)
+      let symbol =
+        match symbol with
+        | Some s -> s
+        | None -> List.hd t.symbols |> Option.value ~default:""
+      in
+        V1.Open_orders.request t.cfg {symbol= Some symbol}
+        >>| function
+        | `Ok orders -> Ok orders
+        | #Rest.Error.t as e -> Error e)
 
   let get_order_history t ?symbol ?limit () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      let symbol = match symbol with Some s -> s | None -> List.hd t.symbols |> Option.value ~default:"" in
-      V1.All_orders.request t.cfg
-        { symbol; orderId = None; startTime = None; endTime = None; limit }
-      >>| function
-      | `Ok orders -> Ok orders
-      | #Rest.Error.t as e -> Error e)
+      let symbol =
+        match symbol with
+        | Some s -> s
+        | None -> List.hd t.symbols |> Option.value ~default:""
+      in
+        V1.All_orders.request
+          t.cfg
+          {symbol; orderId= None; startTime= None; endTime= None; limit}
+        >>| function
+        | `Ok orders -> Ok orders
+        | #Rest.Error.t as e -> Error e)
 
   let get_my_trades t ~symbol ?limit () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.My_trades.request t.cfg
-        { symbol; orderId = None; startTime = None; endTime = None; fromId = None; limit }
+      V1.My_trades.request
+        t.cfg
+        {symbol; orderId= None; startTime= None; endTime= None; fromId= None; limit}
       >>| function
       | `Ok trades -> Ok trades
       | #Rest.Error.t as e -> Error e)
 
   let get_symbols t () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Exchange_info.request t.cfg { symbol = None }
+      V1.Exchange_info.request t.cfg {symbol= None}
       >>| function
       | `Ok info -> Ok info.symbols
       | #Rest.Error.t as e -> Error e)
 
   let get_ticker t ~symbol () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Ticker_24hr.request t.cfg { symbol = Some symbol }
+      V1.Ticker_24hr.request t.cfg {symbol= Some symbol}
       >>| function
       | `Ok ticker -> Ok ticker
       | #Rest.Error.t as e -> Error e)
 
   let get_order_book t ~symbol ?limit () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Depth.request t.cfg { symbol; limit }
+      V1.Depth.request t.cfg {symbol; limit}
       >>| function
       | `Ok depth -> Ok depth
       | #Rest.Error.t as e -> Error e)
 
   let get_recent_trades t ~symbol ?limit () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Recent_trades.request t.cfg { symbol; limit }
+      V1.Recent_trades.request t.cfg {symbol; limit}
       >>| function
       | `Ok trades -> Ok trades
       | #Rest.Error.t as e -> Error e)
@@ -260,22 +272,22 @@ module Adapter = struct
     match symbol with
     | Some sym ->
       Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-        V1.Cancel_all_orders.request t.cfg { symbol = sym }
-        >>| (function
-          | `Ok orders -> Ok (List.length orders)
-          | #Rest.Error.t as e -> Error e))
+        V1.Cancel_all_orders.request t.cfg {symbol= sym}
+        >>| function
+        | `Ok orders -> Ok (List.length orders)
+        | #Rest.Error.t as e -> Error e)
     | None ->
       (* Cancel for first configured symbol if none provided *)
-      match t.symbols with
-      | sym :: _ ->
-        Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-          V1.Cancel_all_orders.request t.cfg { symbol = sym }
-          >>| (function
-            | `Ok orders -> Ok (List.length orders)
-            | #Rest.Error.t as e -> Error e))
-      | [] ->
-        Deferred.return
-          (Error (`Api_error Rest.Error.{ code = -1; msg = "No symbol configured" }))
+      (match t.symbols with
+       | sym :: _ ->
+         Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+           V1.Cancel_all_orders.request t.cfg {symbol= sym}
+           >>| function
+           | `Ok orders -> Ok (List.length orders)
+           | #Rest.Error.t as e -> Error e)
+       | [] ->
+         Deferred.return
+           (Error (`Api_error Rest.Error.{code= -1; msg= "No symbol configured"})))
 
   (* ============================================================ *)
   (* Account Operations - Deposits and Withdrawals                *)
@@ -283,7 +295,7 @@ module Adapter = struct
 
   let get_deposit_address t ~currency ?network () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Deposit_address.request t.cfg { coin = currency; network }
+      V1.Deposit_address.request t.cfg {coin= currency; network}
       >>| function
       | `Ok resp -> Ok resp
       | #Rest.Error.t as e -> Error e)
@@ -298,32 +310,35 @@ module Adapter = struct
           | Types.Transfer_status.Failed -> 4
           | Types.Transfer_status.Cancelled -> 4)
       in
-      let startTime = Option.map start_time ~f:(fun t ->
-        Time_float_unix.to_span_since_epoch t
-        |> Time_float_unix.Span.to_ms
-        |> Int64.of_float)
+      let startTime =
+        Option.map start_time ~f:(fun t ->
+          Time_float_unix.to_span_since_epoch t
+          |> Time_float_unix.Span.to_ms
+          |> Int64.of_float)
       in
-      let endTime = Option.map end_time ~f:(fun t ->
-        Time_float_unix.to_span_since_epoch t
-        |> Time_float_unix.Span.to_ms
-        |> Int64.of_float)
+      let endTime =
+        Option.map end_time ~f:(fun t ->
+          Time_float_unix.to_span_since_epoch t
+          |> Time_float_unix.Span.to_ms
+          |> Int64.of_float)
       in
-      V1.Deposit_history.request t.cfg
-        { coin = currency; status = mexc_status; startTime; endTime; limit }
-      >>| function
-      | `Ok deposits -> Ok deposits
-      | #Rest.Error.t as e -> Error e)
+        V1.Deposit_history.request
+          t.cfg
+          {coin= currency; status= mexc_status; startTime; endTime; limit}
+        >>| function
+        | `Ok deposits -> Ok deposits
+        | #Rest.Error.t as e -> Error e)
 
   let withdraw t ~currency ~address ~amount ?network ?memo () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Withdraw.request t.cfg
-        { coin = currency
+      V1.Withdraw.request
+        t.cfg
+        { coin= currency
         ; address
-        ; amount = Float.to_string amount
+        ; amount= Float.to_string amount
         ; network
         ; memo
-        ; withdrawOrderId = None
-        }
+        ; withdrawOrderId= None }
       >>| function
       | `Ok resp -> Ok resp.id
       | #Rest.Error.t as e -> Error e)
@@ -338,30 +353,33 @@ module Adapter = struct
           | Types.Transfer_status.Failed -> "FAIL"
           | Types.Transfer_status.Cancelled -> "CANCEL")
       in
-      let startTime = Option.map start_time ~f:(fun t ->
-        Time_float_unix.to_span_since_epoch t
-        |> Time_float_unix.Span.to_ms
-        |> Int64.of_float)
+      let startTime =
+        Option.map start_time ~f:(fun t ->
+          Time_float_unix.to_span_since_epoch t
+          |> Time_float_unix.Span.to_ms
+          |> Int64.of_float)
       in
-      let endTime = Option.map end_time ~f:(fun t ->
-        Time_float_unix.to_span_since_epoch t
-        |> Time_float_unix.Span.to_ms
-        |> Int64.of_float)
+      let endTime =
+        Option.map end_time ~f:(fun t ->
+          Time_float_unix.to_span_since_epoch t
+          |> Time_float_unix.Span.to_ms
+          |> Int64.of_float)
       in
-      V1.Withdrawal_history.request t.cfg
-        { coin = currency; status = mexc_status; startTime; endTime; limit }
-      >>| function
-      | `Ok withdrawals -> Ok withdrawals
-      | #Rest.Error.t as e -> Error e)
+        V1.Withdrawal_history.request
+          t.cfg
+          {coin= currency; status= mexc_status; startTime; endTime; limit}
+        >>| function
+        | `Ok withdrawals -> Ok withdrawals
+        | #Rest.Error.t as e -> Error e)
 
   module Streams = struct
     let trades (_ : t) =
       let r, _w = Pipe.create () in
-      Deferred.return r
+        Deferred.return r
 
     let book_updates (_ : t) =
       let r, _w = Pipe.create () in
-      Deferred.return r
+        Deferred.return r
   end
 
   module Normalize = struct
@@ -370,115 +388,141 @@ module Adapter = struct
       let%bind side = Fluxum.Normalize_common.Side.of_string resp.side in
       let%bind kind =
         let%bind order_type = Fluxum.Normalize_common.Order_type.of_string resp.type_ in
-        match order_type with
-        | Types.Order_kind.Basic (Limit _) ->
-          let%map price = Fluxum.Normalize_common.Float_conv.price_of_string resp.price in
-          Types.Order_kind.limit price
-        | Types.Order_kind.Basic (Post_only _) ->
-          let%map price = Fluxum.Normalize_common.Float_conv.price_of_string resp.price in
-          Types.Order_kind.post_only price
-        | Types.Order_kind.Basic Market -> Ok Types.Order_kind.market
-        | _ -> Error (sprintf "Unsupported order kind: %s" resp.type_)
+          match order_type with
+          | Types.Order_kind.Basic (Limit _) ->
+            let%map price =
+              Fluxum.Normalize_common.Float_conv.price_of_string resp.price
+            in
+              Types.Order_kind.limit price
+          | Types.Order_kind.Basic (Post_only _) ->
+            let%map price =
+              Fluxum.Normalize_common.Float_conv.price_of_string resp.price
+            in
+              Types.Order_kind.post_only price
+          | Types.Order_kind.Basic Market -> Ok Types.Order_kind.market
+          | _ -> Error (sprintf "Unsupported order kind: %s" resp.type_)
       in
       let%bind status = Fluxum.Normalize_common.Order_status.of_string resp.status in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string resp.origQty in
-      let%bind filled = Fluxum.Normalize_common.Float_conv.qty_of_string resp.executedQty in
-      Ok ({ venue = Venue.t
-        ; id = resp.orderId
-        ; symbol = resp.symbol
-        ; side
-        ; kind
-        ; time_in_force = Types.Time_in_force.GTC
-        ; qty
-        ; filled
-        ; status
-        ; created_at =
-            (if Int64.(resp.transactTime > 0L)
-            then
-              Some
-                (Time_float_unix.of_span_since_epoch
-                   (Time_float_unix.Span.of_ms (Int64.to_float resp.transactTime)))
-            else None)
-        ; updated_at = None
-        } : Types.Order.t)
+      let%bind filled =
+        Fluxum.Normalize_common.Float_conv.qty_of_string resp.executedQty
+      in
+        Ok
+          ({ venue= Venue.t
+           ; id= resp.orderId
+           ; symbol= resp.symbol
+           ; side
+           ; kind
+           ; time_in_force= Types.Time_in_force.GTC
+           ; qty
+           ; filled
+           ; status
+           ; created_at=
+               (if Int64.(resp.transactTime > 0L)
+                then
+                  Some
+                    (Time_float_unix.of_span_since_epoch
+                       (Time_float_unix.Span.of_ms (Int64.to_float resp.transactTime)))
+                else None)
+           ; updated_at= None }
+           : Types.Order.t)
 
-    let order_status (status : Native.Order.status) : (Types.Order_status.t, string) Result.t =
+    let order_status (status : Native.Order.status)
+      : (Types.Order_status.t, string) Result.t
+      =
       let open Result.Let_syntax in
       let%bind status_t = Fluxum.Normalize_common.Order_status.of_string status.status in
-      Ok status_t
+        Ok status_t
 
-    let order_from_status (status : Native.Order.status) : (Types.Order.t, string) Result.t =
+    let order_from_status (status : Native.Order.status)
+      : (Types.Order.t, string) Result.t
+      =
       let open Result.Let_syntax in
       let%bind side = Fluxum.Normalize_common.Side.of_string status.side in
       let%bind kind =
         let%bind order_type = Fluxum.Normalize_common.Order_type.of_string status.type_ in
-        match order_type with
-        | Types.Order_kind.Basic (Limit _) ->
-          let%map price = Fluxum.Normalize_common.Float_conv.price_of_string status.price in
-          Types.Order_kind.limit price
-        | Types.Order_kind.Basic (Post_only _) ->
-          let%map price = Fluxum.Normalize_common.Float_conv.price_of_string status.price in
-          Types.Order_kind.post_only price
-        | Types.Order_kind.Basic Market -> Ok Types.Order_kind.market
-        | _ -> Error (sprintf "Unsupported order kind: %s" status.type_)
+          match order_type with
+          | Types.Order_kind.Basic (Limit _) ->
+            let%map price =
+              Fluxum.Normalize_common.Float_conv.price_of_string status.price
+            in
+              Types.Order_kind.limit price
+          | Types.Order_kind.Basic (Post_only _) ->
+            let%map price =
+              Fluxum.Normalize_common.Float_conv.price_of_string status.price
+            in
+              Types.Order_kind.post_only price
+          | Types.Order_kind.Basic Market -> Ok Types.Order_kind.market
+          | _ -> Error (sprintf "Unsupported order kind: %s" status.type_)
       in
-      let%bind order_status = Fluxum.Normalize_common.Order_status.of_string status.status in
+      let%bind order_status =
+        Fluxum.Normalize_common.Order_status.of_string status.status
+      in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string status.origQty in
-      let%bind filled = Fluxum.Normalize_common.Float_conv.qty_of_string status.executedQty in
-      Ok ({ venue = Venue.t
-        ; id = status.orderId
-        ; symbol = status.symbol
-        ; side
-        ; kind
-        ; time_in_force = Types.Time_in_force.GTC
-        ; qty
-        ; filled
-        ; status = order_status
-        ; created_at =
-            (if Int64.(status.time > 0L)
-            then
-              Some
-                (Time_float_unix.of_span_since_epoch
-                   (Time_float_unix.Span.of_ms (Int64.to_float status.time)))
-            else None)
-        ; updated_at =
-            (if Int64.(status.updateTime > 0L)
-            then
-              Some
-                (Time_float_unix.of_span_since_epoch
-                   (Time_float_unix.Span.of_ms (Int64.to_float status.updateTime)))
-            else None)
-        } : Types.Order.t)
+      let%bind filled =
+        Fluxum.Normalize_common.Float_conv.qty_of_string status.executedQty
+      in
+        Ok
+          ({ venue= Venue.t
+           ; id= status.orderId
+           ; symbol= status.symbol
+           ; side
+           ; kind
+           ; time_in_force= Types.Time_in_force.GTC
+           ; qty
+           ; filled
+           ; status= order_status
+           ; created_at=
+               (if Int64.(status.time > 0L)
+                then
+                  Some
+                    (Time_float_unix.of_span_since_epoch
+                       (Time_float_unix.Span.of_ms (Int64.to_float status.time)))
+                else None)
+           ; updated_at=
+               (if Int64.(status.updateTime > 0L)
+                then
+                  Some
+                    (Time_float_unix.of_span_since_epoch
+                       (Time_float_unix.Span.of_ms (Int64.to_float status.updateTime)))
+                else None) }
+           : Types.Order.t)
 
     let trade (t : Native.Trade.t) : (Types.Trade.t, string) Result.t =
       let open Result.Let_syntax in
-      let side = match t.isBuyer with true -> Types.Side.Buy | false -> Types.Side.Sell in
+      let side =
+        match t.isBuyer with
+        | true -> Types.Side.Buy
+        | false -> Types.Side.Sell
+      in
       let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string t.price in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string t.qty in
       let%bind commission = Fluxum.Normalize_common.Float_conv.of_string t.commission in
-      Ok ({ venue = Venue.t
-        ; symbol = t.symbol
-        ; side
-        ; price
-        ; qty
-        ; fee = Some commission
-        ; trade_id = Some (Int64.to_string t.id)
-        ; ts =
-            Some
-              (Time_float_unix.of_span_since_epoch
-                 (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
-        } : Types.Trade.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= t.symbol
+           ; side
+           ; price
+           ; qty
+           ; fee= Some commission
+           ; trade_id= Some (Int64.to_string t.id)
+           ; ts=
+               Some
+                 (Time_float_unix.of_span_since_epoch
+                    (Time_float_unix.Span.of_ms (Int64.to_float t.time))) }
+           : Types.Trade.t)
 
     let balance (b : Native.Balance.t) : (Types.Balance.t, string) Result.t =
       let open Result.Let_syntax in
       let%bind free = Fluxum.Normalize_common.Float_conv.of_string b.free in
       let%bind locked = Fluxum.Normalize_common.Float_conv.of_string b.locked in
-      Ok ({ venue = Venue.t
-        ; currency = b.asset
-        ; total = free +. locked
-        ; available = free
-        ; locked
-        } : Types.Balance.t)
+        Ok
+          ({ venue= Venue.t
+           ; currency= b.asset
+           ; total= free +. locked
+           ; available= free
+           ; locked }
+           : Types.Balance.t)
 
     let book_update (depth : Native.Book.update) : (Types.Book_update.t, string) Result.t =
       (* Return bid side update - caller should handle both sides *)
@@ -487,53 +531,72 @@ module Adapter = struct
         List.map depth.bids ~f:(fun (price, qty) ->
           let%bind price_f = Fluxum.Normalize_common.Float_conv.price_of_string price in
           let%bind qty_f = Fluxum.Normalize_common.Float_conv.qty_of_string qty in
-          Ok { Types.Book_update.price = price_f; qty = qty_f })
+            Ok {Types.Book_update.price= price_f; qty= qty_f})
         |> Fluxum.Normalize_common.Result_util.transpose
       in
-      Ok ({ venue = Venue.t
-      ; symbol = "" (* Symbol not included in depth response *)
-      ; side = Types.Book_update.Side.Bid
-      ; levels
-      ; ts = None
-      ; is_snapshot = true
-      } : Types.Book_update.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= "" (* Symbol not included in depth response *)
+           ; side= Types.Book_update.Side.Bid
+           ; levels
+           ; ts= None
+           ; is_snapshot= true }
+           : Types.Book_update.t)
 
     let symbol_info (s : Native.Symbol_info.t) : (Types.Symbol_info.t, string) Result.t =
-      Ok ({ venue = Venue.t
-      ; symbol = s.symbol
-      ; base_currency = s.baseAsset
-      ; quote_currency = s.quoteAsset
-      ; status = s.status
-      ; min_order_size = 0.0  (* MEXC doesn't provide this in exchange_info *)
-      ; tick_size = None
-      ; quote_increment = None
-      } : Types.Symbol_info.t)
+      Ok
+        ({ venue= Venue.t
+         ; symbol= s.symbol
+         ; base_currency= s.baseAsset
+         ; quote_currency= s.quoteAsset
+         ; status= s.status
+         ; min_order_size= 0.0 (* MEXC doesn't provide this in exchange_info *)
+         ; tick_size= None
+         ; quote_increment= None }
+         : Types.Symbol_info.t)
 
     let ticker (t : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       let open Result.Let_syntax in
-      let%bind last_price = Fluxum.Normalize_common.Float_conv.price_of_string t.lastPrice in
-      let%bind bid_price = Fluxum.Normalize_common.Float_conv.price_of_string t.bidPrice in
-      let%bind ask_price = Fluxum.Normalize_common.Float_conv.price_of_string t.askPrice in
-      let%bind high_24h = Fluxum.Normalize_common.Float_conv.price_of_string t.highPrice in
+      let%bind last_price =
+        Fluxum.Normalize_common.Float_conv.price_of_string t.lastPrice
+      in
+      let%bind bid_price =
+        Fluxum.Normalize_common.Float_conv.price_of_string t.bidPrice
+      in
+      let%bind ask_price =
+        Fluxum.Normalize_common.Float_conv.price_of_string t.askPrice
+      in
+      let%bind high_24h =
+        Fluxum.Normalize_common.Float_conv.price_of_string t.highPrice
+      in
       let%bind low_24h = Fluxum.Normalize_common.Float_conv.price_of_string t.lowPrice in
       let%bind volume_24h = Fluxum.Normalize_common.Float_conv.qty_of_string t.volume in
-      let%bind quote_volume = Fluxum.Normalize_common.Float_conv.of_string t.quoteVolume in
-      let%bind price_change = Fluxum.Normalize_common.Float_conv.of_string t.priceChange in
-      let%bind price_change_pct = Fluxum.Normalize_common.Float_conv.of_string t.priceChangePercent in
-      Ok ({ venue = Venue.t
-        ; symbol = t.symbol
-        ; last_price
-        ; bid_price
-        ; ask_price
-        ; high_24h
-        ; low_24h
-        ; volume_24h
-        ; quote_volume = Some quote_volume
-        ; price_change = Some price_change
-        ; price_change_pct = Some price_change_pct
-        ; ts = Some (Time_float_unix.of_span_since_epoch
-                      (Time_float_unix.Span.of_ms (Int64.to_float t.closeTime)))
-        } : Types.Ticker.t)
+      let%bind quote_volume =
+        Fluxum.Normalize_common.Float_conv.of_string t.quoteVolume
+      in
+      let%bind price_change =
+        Fluxum.Normalize_common.Float_conv.of_string t.priceChange
+      in
+      let%bind price_change_pct =
+        Fluxum.Normalize_common.Float_conv.of_string t.priceChangePercent
+      in
+        Ok
+          ({ venue= Venue.t
+           ; symbol= t.symbol
+           ; last_price
+           ; bid_price
+           ; ask_price
+           ; high_24h
+           ; low_24h
+           ; volume_24h
+           ; quote_volume= Some quote_volume
+           ; price_change= Some price_change
+           ; price_change_pct= Some price_change_pct
+           ; ts=
+               Some
+                 (Time_float_unix.of_span_since_epoch
+                    (Time_float_unix.Span.of_ms (Int64.to_float t.closeTime))) }
+           : Types.Ticker.t)
 
     let order_book (depth : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
       let open Result.Let_syntax in
@@ -541,77 +604,101 @@ module Adapter = struct
         List.map depth.bids ~f:(fun (price, qty) ->
           let%bind price_f = Fluxum.Normalize_common.Float_conv.price_of_string price in
           let%bind volume_f = Fluxum.Normalize_common.Float_conv.qty_of_string qty in
-          Ok { Types.Order_book.Price_level.price = price_f; volume = volume_f })
+            Ok {Types.Order_book.Price_level.price= price_f; volume= volume_f})
         |> Fluxum.Normalize_common.Result_util.transpose
       in
       let%bind asks =
         List.map depth.asks ~f:(fun (price, qty) ->
           let%bind price_f = Fluxum.Normalize_common.Float_conv.price_of_string price in
           let%bind volume_f = Fluxum.Normalize_common.Float_conv.qty_of_string qty in
-          Ok { Types.Order_book.Price_level.price = price_f; volume = volume_f })
+            Ok {Types.Order_book.Price_level.price= price_f; volume= volume_f})
         |> Fluxum.Normalize_common.Result_util.transpose
       in
-      Ok ({ venue = Venue.t
-        ; symbol = ""  (* Symbol not in depth response *)
-        ; bids
-        ; asks
-        ; ts = (match depth.timestamp with
-               | 0L -> None
-               | ts -> Some (Time_float_unix.of_span_since_epoch
-                              (Time_float_unix.Span.of_ms (Int64.to_float ts))))
-        ; epoch = Int64.to_int_trunc depth.lastUpdateId
-        } : Types.Order_book.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= "" (* Symbol not in depth response *)
+           ; bids
+           ; asks
+           ; ts=
+               (match depth.timestamp with
+                | 0L -> None
+                | ts ->
+                  Some
+                    (Time_float_unix.of_span_since_epoch
+                       (Time_float_unix.Span.of_ms (Int64.to_float ts))))
+           ; epoch= Int64.to_int_trunc depth.lastUpdateId }
+           : Types.Order_book.t)
 
-    let public_trade (t : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
+    let public_trade (t : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t
+      =
       let open Result.Let_syntax in
       let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string t.price in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string t.qty in
-      Ok ({ venue = Venue.t
-        ; symbol = ""  (* Symbol not in trade response *)
-        ; price
-        ; qty
-        ; side = Some (match t.isBuyerMaker with
-                      | true -> Types.Side.Sell  (* Buyer is maker = sell order filled *)
-                      | false -> Types.Side.Buy) (* Seller is maker = buy order filled *)
-        ; trade_id = Option.map t.id ~f:Int64.to_string
-        ; ts = Some (Time_float_unix.of_span_since_epoch
-                      (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
-        } : Types.Public_trade.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= "" (* Symbol not in trade response *)
+           ; price
+           ; qty
+           ; side=
+               Some
+                 (match t.isBuyerMaker with
+                  | true -> Types.Side.Sell (* Buyer is maker = sell order filled *)
+                  | false -> Types.Side.Buy)
+               (* Seller is maker = buy order filled *)
+           ; trade_id= Option.map t.id ~f:Int64.to_string
+           ; ts=
+               Some
+                 (Time_float_unix.of_span_since_epoch
+                    (Time_float_unix.Span.of_ms (Int64.to_float t.time))) }
+           : Types.Public_trade.t)
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "MEXC candle normalization not yet implemented"
 
-    let deposit_address (d : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
-      Ok ({ venue = Venue.t
-          ; currency = d.coin
-          ; address = d.address
-          ; tag = (match d.tag with "" -> None | s -> Some s)
-          ; network = Some d.network
-          } : Types.Deposit_address.t)
+    let deposit_address (d : Native.Deposit_address.t)
+      : (Types.Deposit_address.t, string) Result.t
+      =
+      Ok
+        ({ venue= Venue.t
+         ; currency= d.coin
+         ; address= d.address
+         ; tag=
+             (match d.tag with
+              | "" -> None
+              | s -> Some s)
+         ; network= Some d.network }
+         : Types.Deposit_address.t)
 
     let deposit (d : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
       let open Result.Let_syntax in
       let%bind amount = Fluxum.Normalize_common.Float_conv.of_string d.amount in
       let status =
         match d.status with
-        | 1 | 2 -> Types.Transfer_status.Processing  (* small/large deposit, processing *)
+        | 1 | 2 -> Types.Transfer_status.Processing (* small/large deposit, processing *)
         | 3 -> Types.Transfer_status.Pending
         | 4 -> Types.Transfer_status.Cancelled
         | 5 -> Types.Transfer_status.Completed
         | _ -> Types.Transfer_status.Pending
       in
-      let created_at = Some (Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Int64.to_float d.insertTime))) in
-      Ok ({ venue = Venue.t
-          ; id = d.id
-          ; currency = d.coin
-          ; amount
-          ; status
-          ; address = Some d.address
-          ; tx_id = (match d.txId with "" -> None | s -> Some s)
-          ; created_at
-          ; updated_at = None
-          } : Types.Deposit.t)
+      let created_at =
+        Some
+          (Time_float_unix.of_span_since_epoch
+             (Time_float_unix.Span.of_ms (Int64.to_float d.insertTime)))
+      in
+        Ok
+          ({ venue= Venue.t
+           ; id= d.id
+           ; currency= d.coin
+           ; amount
+           ; status
+           ; address= Some d.address
+           ; tx_id=
+               (match d.txId with
+                | "" -> None
+                | s -> Some s)
+           ; created_at
+           ; updated_at= None }
+           : Types.Deposit.t)
 
     let withdrawal (w : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
       let open Result.Let_syntax in
@@ -620,36 +707,46 @@ module Adapter = struct
       let status =
         match w.status with
         | "APPLY" | "AUDITING" | "WAIT" -> Types.Transfer_status.Pending
-        | "PROCESSING" | "WAIT_PACKAGING" | "WAIT_CONFIRM" -> Types.Transfer_status.Processing
+        | "PROCESSING" | "WAIT_PACKAGING" | "WAIT_CONFIRM" ->
+          Types.Transfer_status.Processing
         | "SUCCESS" -> Types.Transfer_status.Completed
         | "CANCEL" -> Types.Transfer_status.Cancelled
         | "FAIL" -> Types.Transfer_status.Failed
         | _ -> Types.Transfer_status.Pending
       in
-      let created_at = Some (Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Int64.to_float w.applyTime))) in
-      Ok ({ venue = Venue.t
-          ; id = w.id
-          ; currency = w.coin
-          ; amount
-          ; fee = Some fee
-          ; status
-          ; address = w.address
-          ; tag = (match w.memo with "" -> None | s -> Some s)
-          ; tx_id = (match w.txId with "" -> None | s -> Some s)
-          ; created_at
-          ; updated_at = None
-          } : Types.Withdrawal.t)
+      let created_at =
+        Some
+          (Time_float_unix.of_span_since_epoch
+             (Time_float_unix.Span.of_ms (Int64.to_float w.applyTime)))
+      in
+        Ok
+          ({ venue= Venue.t
+           ; id= w.id
+           ; currency= w.coin
+           ; amount
+           ; fee= Some fee
+           ; status
+           ; address= w.address
+           ; tag=
+               (match w.memo with
+                | "" -> None
+                | s -> Some s)
+           ; tx_id=
+               (match w.txId with
+                | "" -> None
+                | s -> Some s)
+           ; created_at
+           ; updated_at= None }
+           : Types.Withdrawal.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with
-      | `Api_error { code; msg } ->
+      | `Api_error {code; msg} ->
         Types.Error.Exchange_specific
-          { venue = Venue.t; code = Int.to_string code; message = msg }
+          {venue= Venue.t; code= Int.to_string code; message= msg}
       | `Unauthorized _ -> Types.Error.Auth_failed
       | `Too_many_requests _ -> Types.Error.Rate_limited
-      | `Json_parse_error { message; _ } ->
-        Types.Error.Transport (Failure message)
+      | `Json_parse_error {message; _} -> Types.Error.Transport (Failure message)
       | `Bad_request msg -> Types.Error.Transport (Failure msg)
       | `Not_found -> Types.Error.Transport (Failure "Not found")
       | `Service_unavailable msg -> Types.Error.Transport (Failure msg)
@@ -659,11 +756,12 @@ end
 
 (** Helper to create order request from normalized types *)
 let make_order_request
-    ~symbol
-    ~(side : Types.Side.t)
-    ~(kind : Types.Order_kind.t)
-    ~(qty : Types.Qty.t)
-  : V1.New_order.request =
+      ~symbol
+      ~(side : Types.Side.t)
+      ~(kind : Types.Order_kind.t)
+      ~(qty : Types.Qty.t)
+  : V1.New_order.request
+  =
   let mexc_side : Common.Side.t =
     match side with
     | Types.Side.Buy -> `BUY
@@ -671,25 +769,24 @@ let make_order_request
   in
   let order_type, price =
     match kind with
-    | Types.Order_kind.Basic Market -> (`MARKET : Common.Order_type.t), None
+    | Types.Order_kind.Basic Market -> ((`MARKET : Common.Order_type.t), None)
     | Types.Order_kind.Basic (Limit p) ->
-      (`LIMIT : Common.Order_type.t), Some (Float.to_string p)
+      ((`LIMIT : Common.Order_type.t), Some (Float.to_string p))
     | Types.Order_kind.Basic (Post_only p) ->
-      (`LIMIT_MAKER : Common.Order_type.t), Some (Float.to_string p)
+      ((`LIMIT_MAKER : Common.Order_type.t), Some (Float.to_string p))
     | Types.Order_kind.Conditional _ ->
       (* MEXC doesn't support conditional orders via this endpoint *)
-      (`MARKET : Common.Order_type.t), None
+      ((`MARKET : Common.Order_type.t), None)
   in
-  V1.New_order.
-    { symbol
-    ; side = mexc_side
-    ; order_type
-    ; quantity = Some (Float.to_string qty)
-    ; quoteOrderQty = None
-    ; price
-    ; newClientOrderId = None
-    ; timeInForce =
-        (match kind with
-        | Types.Order_kind.Basic Market -> None
-        | _ -> Some (`GTC : Common.Time_in_force.t))
-    }
+    V1.New_order.
+      { symbol
+      ; side= mexc_side
+      ; order_type
+      ; quantity= Some (Float.to_string qty)
+      ; quoteOrderQty= None
+      ; price
+      ; newClientOrderId= None
+      ; timeInForce=
+          (match kind with
+           | Types.Order_kind.Basic Market -> None
+           | _ -> Some (`GTC : Common.Time_in_force.t)) }

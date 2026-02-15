@@ -14,7 +14,8 @@ module Unified_adapter = Unified_adapter
 
 (** Main Bybit command group *)
 let command : Command.t =
-  Command.group ~summary:"Bybit Exchange Commands"
+  Command.group
+    ~summary:"Bybit Exchange Commands"
     [ Ledger.command
     ; V5.Market_tickers.command
     ; V5.Instruments_info.command
@@ -24,5 +25,4 @@ let command : Command.t =
     ; V5.Create_order.command
     ; V5.Cancel_order.command
     ; V5.Order_realtime.command
-    ; V5.Execution_list.command
-    ]
+    ; V5.Execution_list.command ]

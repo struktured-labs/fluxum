@@ -5,68 +5,56 @@ module Result = Fluxum.Json.Result
 
 module Int_number = struct
   module T = struct
-    type t = (int64[@encoding `number])
-    [@@deriving sexp, yojson, equal, compare]
+    type t = (int64[@encoding `number]) [@@deriving sexp, yojson, equal, compare]
 
     include (Csvfields.Csv.Atom (Int64) : Csvfields.Csv.Csvable with type t := t)
 
     let to_string = Int64.to_string
-
     let of_string = Int64.of_string
   end
 
   include T
-  module Option =
-    Csv_support.Optional.Make (Csv_support.Optional.Default_args (T))
+  module Option = Csv_support.Optional.Make (Csv_support.Optional.Default_args (T))
 end
 
 module Int_string = struct
   module T = struct
-    type t = (int64[@encoding `string])
-    [@@deriving sexp, yojson, equal, compare]
+    type t = (int64[@encoding `string]) [@@deriving sexp, yojson, equal, compare]
 
     let to_string = Int64.to_string
-
     let of_string = Int64.of_string
 
     include (Csvfields.Csv.Atom (Int64) : Csvfields.Csv.Csvable with type t := t)
   end
 
   include T
-  module Option =
-    Csv_support.Optional.Make (Csv_support.Optional.Default_args (T))
+  module Option = Csv_support.Optional.Make (Csv_support.Optional.Default_args (T))
 end
 
 module Decimal_number = struct
   module T = struct
-    type t = (float[@encoding `number])
-    [@@deriving sexp, yojson, equal, compare]
+    type t = (float[@encoding `number]) [@@deriving sexp, yojson, equal, compare]
 
     include (Float : module type of Float with type t := t)
-
     include (Csvfields.Csv.Atom (Float) : Csvfields.Csv.Csvable with type t := t)
   end
 
   include T
-  module Option =
-    Csv_support.Optional.Make (Csv_support.Optional.Default_args (T))
+  module Option = Csv_support.Optional.Make (Csv_support.Optional.Default_args (T))
 end
 
 module Decimal_string = struct
   module T = struct
     type t = string [@@deriving sexp, yojson, equal, compare]
 
-    include (
-      Csvfields.Csv.Atom (String) : Csvfields.Csv.Csvable with type t := t)
+    include (Csvfields.Csv.Atom (String) : Csvfields.Csv.Csvable with type t := t)
 
     let of_string t = t
-
     let to_string t = t
   end
 
   include T
-  module Option =
-    Csv_support.Optional.Make (Csv_support.Optional.Default_args (T))
+  module Option = Csv_support.Optional.Make (Csv_support.Optional.Default_args (T))
 end
 
 (** Normalized definition of a price. *)
@@ -74,7 +62,6 @@ module Price = struct
   include Decimal_number
 
   let of_float : float -> t = Fn.id
-
   let to_float : t -> float = Fn.id
 end
 
@@ -83,16 +70,13 @@ module Client_order_id = struct
     type t = string [@@deriving sexp, yojson, equal, compare]
 
     let of_string = Fn.id
-
     let to_string = Fn.id
 
-    include (
-      Csvfields.Csv.Atom (String) : Csvfields.Csv.Csvable with type t := t)
+    include (Csvfields.Csv.Atom (String) : Csvfields.Csv.Csvable with type t := t)
   end
 
   include T
-  module Option =
-    Csv_support.Optional.Make (Csv_support.Optional.Default_args (T))
+  module Option = Csv_support.Optional.Make (Csv_support.Optional.Default_args (T))
 end
 
 (** Represents an order side. *)
@@ -101,8 +85,7 @@ module Side = struct
     (** The type of an order side - [`Buy] or [`Sell]. *)
     type t =
       [ `Buy
-      | `Sell
-      ]
+      | `Sell ]
     [@@deriving sexp, enumerate, equal, compare, enumerate]
 
     let to_string = function
@@ -118,26 +101,23 @@ module Side = struct
 
   module TT = struct
     include T
-
     include (Fluxum.Json.Make (T) : Fluxum.Json.S with type t := t)
   end
 
   include TT
-  module Option =
-    Csv_support.Optional.Make (Csv_support.Optional.Default_args (TT))
+  module Option = Csv_support.Optional.Make (Csv_support.Optional.Default_args (TT))
 end
 
 (** Represents an exchange type. Only gemini is currently supported *)
 module Exchange = struct
   module T = struct
     (** The exchange type - gemini only, currently. *)
-    type t = [ `Gemini ] [@@deriving sexp, enumerate, equal, compare]
+    type t = [`Gemini] [@@deriving sexp, enumerate, equal, compare]
 
     let to_string `Gemini = "gemini"
   end
 
   include T
-
   include (Json.Make (T) : Json.S with type t := t)
 end
 
@@ -161,32 +141,31 @@ module Timestamp = struct
     let to_yojson t = to_string t |> fun s -> `String s
 
     let of_yojson_with_span span_fn json =
-      ( match json with
-      | `String s -> `Ok (Float.of_string s)
-      | `Int i -> `Ok (Float.of_int i)
-      | `Int64 i -> `Ok (Float.of_int64 i)
-      | #Yojson.Safe.t as json -> `Error json )
+      (match json with
+       | `String s -> `Ok (Float.of_string s)
+       | `Int i -> `Ok (Float.of_int i)
+       | `Int64 i -> `Ok (Float.of_int64 i)
+       | #Yojson.Safe.t as json -> `Error json)
       |> function
       | `Error json ->
         Result.Error
-          (sprintf "expected float as json but got %S"
-             (Yojson.Safe.pretty_to_string json) )
+          (sprintf
+             "expected float as json but got %S"
+             (Yojson.Safe.pretty_to_string json))
       | `Ok f ->
-        span_fn f |> Time_float_unix.of_span_since_epoch |> fun ok ->
-        Result.Ok ok
+        span_fn f |> Time_float_unix.of_span_since_epoch |> fun ok -> Result.Ok ok
 
-    let of_yojson (ms : Yojson.Safe.t) =
-      of_yojson_with_span Time_float_unix.Span.of_ms ms
+    let of_yojson (ms : Yojson.Safe.t) = of_yojson_with_span Time_float_unix.Span.of_ms ms
 
     let of_string s =
-      of_yojson (`String s) |> function
+      of_yojson (`String s)
+      |> function
       | Result.Error e -> failwith e
       | Result.Ok x -> x
   end
 
   module T = struct
     include T0
-
     include (Csvfields.Csv.Atom (T0) : Csvfields.Csv.Csvable with type t := t)
   end
 
@@ -194,7 +173,6 @@ module Timestamp = struct
     include T
 
     let of_yojson = of_yojson
-
     let to_yojson (ms : t) = to_yojson ms
   end
 
@@ -326,14 +304,12 @@ module Currency = struct
       | `Wif
       | `Wld
       | `Wlfi
-      | `Yfi
-      ]
+      | `Yfi ]
     [@@deriving sexp, enumerate, equal, compare]
   end
 
   module Enum = Json.Enum (T)
   include Enum
-
   include (Json.Make (Enum) : Json.S with type t := t)
 end
 
@@ -346,26 +322,26 @@ module Symbol = struct
     (** The type of a symbol pair. See the [Symbol] module for details. *)
     type t =
       [ (* Major pairs *)
-      | `Btcusd
+          `Btcusd
       | `Ethusd
       | `Ethbtc
-      (* ZEC cross pairs *)
-      | `Zecusd
+      | (* ZEC cross pairs *)
+          `Zecusd
       | `Zecbtc
       | `Zeceth
       | `Zecbch
       | `Zecltc
-      (* LTC cross pairs *)
-      | `Ltcusd
+      | (* LTC cross pairs *)
+          `Ltcusd
       | `Ltcbtc
       | `Ltceth
       | `Ltcbch
-      (* BCH cross pairs *)
-      | `Bchusd
+      | (* BCH cross pairs *)
+          `Bchusd
       | `Bchbtc
       | `Bcheth
-      (* Alt USD pairs *)
-      | `Twozusd
+      | (* Alt USD pairs *)
+          `Twozusd
       | `Aaveusd
       | `Aliusd
       | `Ampusd
@@ -462,8 +438,7 @@ module Symbol = struct
       | `Xrpusd
       | `Xtzusd
       | `Yfiusd
-      | `Zbcusd
-      ]
+      | `Zbcusd ]
     [@@deriving sexp, enumerate, equal, compare]
   end
 
@@ -478,29 +453,32 @@ module Symbol = struct
       String.prefix s (String.length s - 3) |> Currency.Enum_or_string.of_string
     in
     let sell = String.suffix s 3 |> Currency.Enum_or_string.of_string in
-    (buy, sell)
+      (buy, sell)
 
-  let enum_or_string_to_currency_pair :
-      [< t ] -> Currency.Enum_or_string.t * Currency.Enum_or_string.t = function
+  let enum_or_string_to_currency_pair
+    : [< t] -> Currency.Enum_or_string.t * Currency.Enum_or_string.t
+    = function
     | #t as c -> to_string c |> currency_pair_of_string
 
-  let to_currency_pair : [< t ] -> (Currency.t * Currency.t) option = function
+  let to_currency_pair : [< t] -> (Currency.t * Currency.t) option = function
     | #t as c ->
-      to_string c |> currency_pair_of_string |> fun (buy, sell) ->
+      to_string c
+      |> currency_pair_of_string
+      |> fun (buy, sell) ->
       Option.both
         (Currency.Enum_or_string.to_enum buy)
         (Currency.Enum_or_string.to_enum sell)
 
   let of_currency_pair : Currency.t -> Currency.t -> t option =
-   fun buy sell ->
+    fun buy sell ->
     List.find all ~f:(fun symbol ->
-        Option.value_map (to_currency_pair symbol) ~default:false
-          ~f:(fun (buy', sell') ->
-            Currency.(equal buy buy' && equal sell sell') ) )
+      Option.value_map (to_currency_pair symbol) ~default:false ~f:(fun (buy', sell') ->
+        Currency.(equal buy buy' && equal sell sell')))
 
-  let to_currency : [< t ] -> Side.t -> Currency.Enum_or_string.t =
-   fun t side ->
-    enum_or_string_to_currency_pair t |> fun (buy, sell) ->
+  let to_currency : [< t] -> Side.t -> Currency.Enum_or_string.t =
+    fun t side ->
+    enum_or_string_to_currency_pair t
+    |> fun (buy, sell) ->
     match side with
     | `Buy -> buy
     | `Sell -> sell
@@ -509,11 +487,11 @@ module Symbol = struct
 
   let enum_or_string_to_currency enum_or_string ~side =
     match enum_or_string with
-    | Enum_or_string.String s -> (
+    | Enum_or_string.String s ->
       let buy, sell = currency_pair_of_string s in
-      match side with
-      | `Buy -> buy
-      | `Sell -> sell )
+        (match side with
+         | `Buy -> buy
+         | `Sell -> sell)
     | Enum_or_string.Enum e -> to_currency e side
 end
 
@@ -526,8 +504,7 @@ module Order_type = struct
       | `Stop_limit
       | `Unspecified
       | `Market_sell
-      | `Market_buy
-      ]
+      | `Market_buy ]
     [@@deriving sexp, enumerate, equal, compare]
 
     let to_string = function
@@ -539,30 +516,28 @@ module Order_type = struct
   end
 
   include T
-
   include (Json.Make (T) : Json.S with type t := t)
 end
 
- module Order_execution_option = struct
-    module T = struct
-      type t =
-        [ `Maker_or_cancel
-        | `Immediate_or_cancel
-        | `Fill_or_kill
-        ]
-      [@@deriving sexp, yojson, enumerate, compare, equal]
+module Order_execution_option = struct
+  module T = struct
+    type t =
+      [ `Maker_or_cancel
+      | `Immediate_or_cancel
+      | `Fill_or_kill ]
+    [@@deriving sexp, yojson, enumerate, compare, equal]
 
-      let to_string = function
-        | `Maker_or_cancel -> "maker-or-cancel"
-        | `Immediate_or_cancel -> "immediate-or-cancel"
-        | `Fill_or_kill -> "fill-or-kill"
-    end
-
-    include T
-    include (Fluxum.Json.Make (T) : Fluxum.Json.S with type t := t)
+    let to_string = function
+      | `Maker_or_cancel -> "maker-or-cancel"
+      | `Immediate_or_cancel -> "immediate-or-cancel"
+      | `Fill_or_kill -> "fill-or-kill"
   end
 
-  module Order_execution_option_list = Csv_support.List.Make_default(Order_execution_option)
+  include T
+  include (Fluxum.Json.Make (T) : Fluxum.Json.S with type t := t)
+end
+
+module Order_execution_option_list = Csv_support.List.Make_default (Order_execution_option)
 
 module Reject_reason = struct
   module T = struct
@@ -572,8 +547,7 @@ module Reject_reason = struct
       | `Self_cross_prevented
       | `Immediate_or_cancel_would_post
       | `Maker_or_cancel_would_take
-      | `Requested
-      ]
+      | `Requested ]
     [@@deriving sexp, yojson, enumerate, compare, equal]
 
     let to_string = function
@@ -588,6 +562,6 @@ module Reject_reason = struct
   include T
   include (Json.Make (T) : Json.S with type t := t)
 end
-  
+
 (** The protocol version. *)
 let v1 = "v1"

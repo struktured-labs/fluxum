@@ -3,35 +3,34 @@ let home_dir () =
   match Unix.getenv "HOME" with
   | Some h -> h
   | None ->
-    match Unix.getenv "XDG_CONFIG_HOME" with
-    | Some h -> h
-    | None -> "/tmp"
+    (match Unix.getenv "XDG_CONFIG_HOME" with
+     | Some h -> h
+     | None -> "/tmp")
 
 let create_config_dir () =
   let dirname = sprintf "%s/%s" (home_dir ()) ".gemini" in
-  try_with ~extract_exn:true (fun () -> Unix.mkdir ?p:None ?perm:None dirname)
-  >>= function
-  | Result.Ok () -> Deferred.unit
-  | Result.Error (Unix.Unix_error (Unix.Error.EEXIST, _, _)) -> Deferred.unit
-  | Result.Error e ->
-    Log.Global.error "failed to create gemini config directory\n        at %S."
-      dirname;
-    raise e
+    try_with ~extract_exn:true (fun () -> Unix.mkdir ?p:None ?perm:None dirname)
+    >>= function
+    | Result.Ok () -> Deferred.unit
+    | Result.Error (Unix.Unix_error (Unix.Error.EEXIST, _, _)) -> Deferred.unit
+    | Result.Error e ->
+      Log.Global.error "failed to create gemini config directory\n        at %S." dirname;
+      raise e
 
 let param ?default ~name ~env () =
   let name = sprintf "GEMINI_%s_%s" (String.uppercase env) name in
-  match Unix.getenv name with
-  | Some param -> param
-  | None -> (
-    match default with
-    | None -> failwithf "Environment variable \"%s\" must be specified" name ()
-    | Some default -> default )
+    match Unix.getenv name with
+    | Some param -> param
+    | None ->
+      (match default with
+       | None -> failwithf "Environment variable \"%s\" must be specified" name ()
+       | Some default -> default)
 
 let host ~env =
   let env = String.lowercase env in
-  match env with
-  | "production" -> sprintf "api.gemini.com"
-  | _ -> sprintf "api.%s.gemini.com" env
+    match env with
+    | "production" -> sprintf "api.gemini.com"
+    | _ -> sprintf "api.%s.gemini.com" env
 
 let version_1 = "v1"
 
@@ -42,16 +41,12 @@ let version_1 = "v1"
     instantiated. *)
 module type S = sig
   val version : string
-
   val api_host : string
-
   val api_key : string
-
   val api_secret : string
 end
 
 let api_key ?default = param ?default ~name:"API_KEY"
-
 let api_secret ?default = param ?default ~name:"API_SECRET"
 
 (** Makes a configuration module given a desired Gemini environment. It then
@@ -61,15 +56,12 @@ let api_secret ?default = param ?default ~name:"API_SECRET"
 let make env =
   let module M = struct
     let env = env
-
     let version = version_1
-
     let api_host = host ~env
-
     let api_key = api_key ~env ()
-
     let api_secret = api_secret ~env ()
-  end in
+  end
+  in
   (module M : S)
 
 (** Creates a configuration module for the sandbox environment. Will query the
@@ -98,19 +90,20 @@ let of_string s =
   | "sandbox" ->
     let module Cfg : S = Sandbox () in
     (module Cfg : S)
-  | unsupported_env ->
-    failwithf "environment %s not supported" unsupported_env ()
+  | unsupported_env -> failwithf "environment %s not supported" unsupported_env ()
 
 let arg_type = Command.Arg_type.create of_string
 
 let param =
   Command.Param.(
-    flag "-cfg" (optional arg_type)
+    flag
+      "-cfg"
+      (optional arg_type)
       ~doc:
         (sprintf
-           "STRING the configuration the client will connect with (eg. sandbox \
-            or production. defaults to sandbox). Use GEMINI_ENV to override \
-            the default value." ) )
+           "STRING the configuration the client will connect with (eg. sandbox or \
+            production. defaults to sandbox). Use GEMINI_ENV to override the default \
+            value."))
 
 (** Ensures a configuration chosen given an optional configuration module,
     usually provided from the command line. If the module is provided, it
@@ -118,8 +111,8 @@ let param =
     module, defaulting to sandbox if no environment variables exist. *)
 let or_default param =
   match param with
-  | None -> (
-    match Unix.getenv "GEMINI_ENV" with
-    | Some env -> of_string env
-    | None -> (module Sandbox ()) )
+  | None ->
+    (match Unix.getenv "GEMINI_ENV" with
+     | Some env -> of_string env
+     | None -> (module Sandbox ()))
   | Some param -> param

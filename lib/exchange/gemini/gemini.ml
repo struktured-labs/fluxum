@@ -18,19 +18,19 @@ module Prediction_markets = Prediction_markets
 open V1
 
 let command : Command.t =
-  Command.group ~summary:"Gemini Command System"
-    [ Heartbeat.command;
-      Order.command;
-      Orders.command;
-      Mytrades.command;
-      Tradevolume.command;
-      Balances.command;
-      Market_data.command;
-      Order_events.command;
-      Notional_volume.command;
-      Order_book.command;
-      Ledger.command;
-      Symbols.command;
-      Symbol_details.command;
-      Prediction_markets.command
-    ]
+  Command.group
+    ~summary:"Gemini Command System"
+    [ Heartbeat.command
+    ; Order.command
+    ; Orders.command
+    ; Mytrades.command
+    ; Tradevolume.command
+    ; Balances.command
+    ; Market_data.command
+    ; Order_events.command
+    ; Notional_volume.command
+    ; Order_book.command
+    ; Ledger.command
+    ; Symbols.command
+    ; Symbol_details.command
+    ; Prediction_markets.command ]

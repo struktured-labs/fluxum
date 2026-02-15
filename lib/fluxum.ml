@@ -1,6 +1,5 @@
 open Core
 open Async
-
 module Types = Types
 module Exchange_intf = Exchange_intf
 module Json = Json
@@ -67,7 +66,7 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) = struc
   (* Helper to map list of Results to Result of list *)
   let result_list_transpose (results : ('a, 'e) Result.t list) : ('a list, 'e) Result.t =
     List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
-      match res, acc with
+      match (res, acc) with
       | Ok v, Ok vs -> Ok (v :: vs)
       | Error e, _ -> Error e
       | _, Error e -> Error e)
@@ -83,19 +82,18 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) = struc
 
   let place_order_norm t ~symbol ~side ~kind ~qty =
     let req = Builder.make_order_request ~symbol ~side ~kind ~qty in
-    place_order t req
+      place_order t req
 
-  let cancel_order t id =
-    E.cancel_order t id >>| Result.map_error ~f:map_error
+  let cancel_order t id = E.cancel_order t id >>| Result.map_error ~f:map_error
 
   let balances t =
     E.balances t
     >>| function
     | Ok balances ->
       let normalized = List.map balances ~f:E.Normalize.balance in
-      (match result_list_transpose normalized with
-       | Ok bals -> Ok bals
-       | Error msg -> Error (Types.Error.Normalization_error msg))
+        (match result_list_transpose normalized with
+         | Ok bals -> Ok bals
+         | Error msg -> Error (Types.Error.Normalization_error msg))
     | Error e -> Error (map_error e)
 
   let get_order_status t id =
@@ -108,9 +106,9 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) = struc
     >>| function
     | Ok orders ->
       let normalized = List.map orders ~f:E.Normalize.order_from_status in
-      (match result_list_transpose normalized with
-       | Ok ords -> Ok ords
-       | Error msg -> Error (Types.Error.Normalization_error msg))
+        (match result_list_transpose normalized with
+         | Ok ords -> Ok ords
+         | Error msg -> Error (Types.Error.Normalization_error msg))
     | Error e -> Error (map_error e)
 
   let get_order_history t ?symbol ?limit () =
@@ -118,9 +116,9 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) = struc
     >>| function
     | Ok orders ->
       let normalized = List.map orders ~f:E.Normalize.order_from_status in
-      (match result_list_transpose normalized with
-       | Ok ords -> Ok ords
-       | Error msg -> Error (Types.Error.Normalization_error msg))
+        (match result_list_transpose normalized with
+         | Ok ords -> Ok ords
+         | Error msg -> Error (Types.Error.Normalization_error msg))
     | Error e -> Error (map_error e)
 
   let get_my_trades t ~symbol ?limit () =
@@ -128,9 +126,9 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) = struc
     >>| function
     | Ok trades ->
       let normalized = List.map trades ~f:E.Normalize.trade in
-      (match result_list_transpose normalized with
-       | Ok trds -> Ok trds
-       | Error msg -> Error (Types.Error.Normalization_error msg))
+        (match result_list_transpose normalized with
+         | Ok trds -> Ok trds
+         | Error msg -> Error (Types.Error.Normalization_error msg))
     | Error e -> Error (map_error e)
 
   let get_symbols t =
@@ -140,12 +138,12 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) = struc
 
   module Streams = struct
     let trades t =
-      E.Streams.trades t >>| Pipe.filter_map ~f:(fun trade ->
+      E.Streams.trades t
+      >>| Pipe.filter_map ~f:(fun trade ->
         match E.Normalize.trade trade with
         | Ok t -> Some t
         | Error _ -> None)
 
-    let book_updates t =
-      E.Streams.book_updates t >>| Pipe.map ~f:E.Normalize.book_update
+    let book_updates t = E.Streams.book_updates t >>| Pipe.map ~f:E.Normalize.book_update
   end
 end

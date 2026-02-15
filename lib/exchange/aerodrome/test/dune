@@ -2,5 +2,6 @@
  (name run_tests)
  (modules run_tests)
  (libraries core aerodrome)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core))

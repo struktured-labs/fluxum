@@ -1,9 +1,6 @@
 (library
  (name backtest)
  (public_name fluxum.backtest)
- (libraries
-  core
-  async
-  core_unix
-  yojson)
- (preprocess (pps ppx_jane ppx_deriving_yojson)))
+ (libraries core async core_unix yojson)
+ (preprocess
+  (pps ppx_jane ppx_deriving_yojson)))

@@ -6,8 +6,7 @@
     - {!Abi}: Solidity ABI encoding for function calls
     - {!Rlp}: Recursive Length Prefix encoding
     - {!Tx}: EIP-1559 transaction builder and signer
-    - {!Erc20}: ERC-20 token operations
-*)
+    - {!Erc20}: ERC-20 token operations *)
 
 module Rpc = Rpc
 module Abi = Abi

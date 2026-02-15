@@ -36,9 +36,9 @@ let order_type_to_string = function
 
 (** Time in force *)
 type time_in_force =
-  | GTT  (** Good-Til-Time *)
-  | FOK  (** Fill-or-Kill *)
-  | IOC  (** Immediate-or-Cancel *)
+  | GTT (** Good-Til-Time *)
+  | FOK (** Fill-or-Kill *)
+  | IOC (** Immediate-or-Cancel *)
 [@@deriving sexp, yojson]
 
 let time_in_force_to_string = function
@@ -68,7 +68,8 @@ let order_status_of_string = function
 let order_status_of_string_exn s =
   match order_status_of_string s with
   | Ok v -> v
-  | Error (`Unknown_order_status s) -> raise_s [%message "Unknown order status" (s : string)]
+  | Error (`Unknown_order_status s) ->
+    raise_s [%message "Unknown order status" (s : string)]
 
 (** Position status *)
 type position_status =

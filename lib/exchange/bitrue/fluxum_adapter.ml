@@ -42,28 +42,26 @@
     - Response formats fully compatible
     - Signature method identical
 
-    @see <https://www.bitrue.com/api-docs> Bitrue API Documentation
-*)
+    @see <https://www.bitrue.com/api-docs> Bitrue API Documentation *)
 
 open Core
 open Async
-
 module Types = Fluxum.Types
 module Exchange_intf = Fluxum.Exchange_intf
 
 module Adapter = struct
   type t =
-    { cfg : (module Cfg.S)
-    ; symbols : string list
-    ; rate_limiter : Exchange_common.Rate_limiter.t
-    }
+    { cfg: (module Cfg.S)
+    ; symbols: string list
+    ; rate_limiter: Exchange_common.Rate_limiter.t }
 
   let create ~cfg ?(symbols = []) () =
     { cfg
     ; symbols
-    ; rate_limiter = Exchange_common.Rate_limiter.create
-        ~config:Exchange_common.Rate_limiter.Configs.bitrue ()
-    }
+    ; rate_limiter=
+        Exchange_common.Rate_limiter.create
+          ~config:Exchange_common.Rate_limiter.Configs.bitrue
+          () }
 
   module Venue = struct
     let t = Types.Venue.Bitrue
@@ -99,7 +97,7 @@ module Adapter = struct
     end
 
     module Candle = struct
-      type t = unit  (* Bitrue klines - TODO: implement *)
+      type t = unit (* Bitrue klines - TODO: implement *)
     end
 
     module Symbol_info = struct
@@ -112,39 +110,43 @@ module Adapter = struct
 
     (** Account operations - deposits/withdrawals (stub types) *)
     module Deposit_address = struct
-      type t = unit  (* TODO: Implement when Bitrue API supports *)
+      type t = unit (* TODO: Implement when Bitrue API supports *)
     end
 
     module Deposit = struct
-      type t = unit  (* TODO: Implement when Bitrue API supports *)
+      type t = unit (* TODO: Implement when Bitrue API supports *)
     end
 
     module Withdrawal = struct
-      type t = unit  (* TODO: Implement when Bitrue API supports *)
+      type t = unit (* TODO: Implement when Bitrue API supports *)
     end
   end
 
   let place_order t (req : Native.Order.request) =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      Rest.new_order t.cfg req >>| function
+      Rest.new_order t.cfg req
+      >>| function
       | Ok response -> Ok response
       | Error e -> Error e)
 
   let cancel_order t ~symbol ~order_id =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      Rest.cancel_order t.cfg ~symbol ~order_id >>| function
-      | Ok _response -> Ok ()  (* Cancel response has orderId, we just return success *)
+      Rest.cancel_order t.cfg ~symbol ~order_id
+      >>| function
+      | Ok _response -> Ok () (* Cancel response has orderId, we just return success *)
       | Error e -> Error e)
 
   let balances t =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      Rest.account t.cfg >>| function
+      Rest.account t.cfg
+      >>| function
       | Ok resp -> Ok resp.balances
       | Error e -> Error e)
 
   let get_order_status t ~symbol ~order_id =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      Rest.query_order t.cfg ~symbol ~order_id >>| function
+      Rest.query_order t.cfg ~symbol ~order_id
+      >>| function
       | Ok status -> Ok status
       | Error e -> Error e)
 
@@ -152,9 +154,10 @@ module Adapter = struct
     match symbol with
     | Some symbol ->
       Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-        Rest.open_orders t.cfg ~symbol >>| (function
+        Rest.open_orders t.cfg ~symbol
+        >>| function
         | Ok orders -> Ok orders
-        | Error e -> Error e))
+        | Error e -> Error e)
     | None ->
       (* Bitrue requires symbol for open orders - return empty if not provided *)
       Deferred.return (Ok [])
@@ -169,29 +172,33 @@ module Adapter = struct
 
   let get_symbols t () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      Rest.exchange_info t.cfg >>| function
+      Rest.exchange_info t.cfg
+      >>| function
       | Ok info -> Ok info.symbols
       | Error e -> Error e)
 
   let get_ticker t ~symbol () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      Rest.ticker_24hr t.cfg ~symbol >>| function
+      Rest.ticker_24hr t.cfg ~symbol
+      >>| function
       | Ok ticker -> Ok ticker
       | Error e -> Error e)
 
   let get_order_book t ~symbol ?limit () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       let limit = Option.value limit ~default:100 in
-      Rest.depth t.cfg ~symbol ~limit () >>| function
-      | Ok book -> Ok book
-      | Error e -> Error e)
+        Rest.depth t.cfg ~symbol ~limit ()
+        >>| function
+        | Ok book -> Ok book
+        | Error e -> Error e)
 
   let get_recent_trades t ~symbol ?limit () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       let limit = Option.value limit ~default:500 in
-      Rest.trades t.cfg ~symbol ~limit () >>| function
-      | Ok trades -> Ok trades
-      | Error e -> Error e)
+        Rest.trades t.cfg ~symbol ~limit ()
+        >>| function
+        | Ok trades -> Ok trades
+        | Error e -> Error e)
 
   let cancel_all_orders _t ?symbol:_ () =
     (* Bitrue API doesn't have a cancel-all endpoint *)
@@ -217,11 +224,11 @@ module Adapter = struct
   module Streams = struct
     let trades (_ : t) =
       let r, _w = Pipe.create () in
-      Deferred.return r
+        Deferred.return r
 
     let book_updates (_ : t) =
       let r, _w = Pipe.create () in
-      Deferred.return r
+        Deferred.return r
   end
 
   module Normalize = struct
@@ -241,25 +248,33 @@ module Adapter = struct
         | Types.Order_kind.Basic Market -> Ok Types.Order_kind.market
         | Types.Order_kind.Conditional _ -> Ok (Types.Order_kind.limit price)
       in
-      let created_at = Some (Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Int64.to_float resp.transactTime))) in
-      Ok ({ venue = Venue.t
-          ; id = resp.orderId
-          ; symbol = resp.symbol
-          ; side
-          ; kind
-          ; time_in_force = Types.Time_in_force.GTC
-          ; qty
-          ; filled
-          ; status
-          ; created_at
-          ; updated_at = None
-          } : Types.Order.t)
+      let created_at =
+        Some
+          (Time_float_unix.of_span_since_epoch
+             (Time_float_unix.Span.of_ms (Int64.to_float resp.transactTime)))
+      in
+        Ok
+          ({ venue= Venue.t
+           ; id= resp.orderId
+           ; symbol= resp.symbol
+           ; side
+           ; kind
+           ; time_in_force= Types.Time_in_force.GTC
+           ; qty
+           ; filled
+           ; status
+           ; created_at
+           ; updated_at= None }
+           : Types.Order.t)
 
-    let order_status (status_resp : Native.Order.status) : (Types.Order_status.t, string) Result.t =
+    let order_status (status_resp : Native.Order.status)
+      : (Types.Order_status.t, string) Result.t
+      =
       Order_status.of_string status_resp.status
 
-    let order_from_status (status_resp : Native.Order.status) : (Types.Order.t, string) Result.t =
+    let order_from_status (status_resp : Native.Order.status)
+      : (Types.Order.t, string) Result.t
+      =
       let open Result.Let_syntax in
       let%bind price = Float_conv.price_of_string status_resp.price in
       let%bind qty = Float_conv.qty_of_string status_resp.origQty in
@@ -273,82 +288,96 @@ module Adapter = struct
         | Types.Order_kind.Basic Market -> Ok Types.Order_kind.market
         | Types.Order_kind.Conditional _ -> Ok (Types.Order_kind.limit price)
       in
-      let created_at = Some (Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Int64.to_float status_resp.time))) in
-      let updated_at = Some (Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Int64.to_float status_resp.updateTime))) in
-      Ok ({ venue = Venue.t
-          ; id = status_resp.orderId
-          ; symbol = status_resp.symbol
-          ; side
-          ; kind
-          ; time_in_force = Types.Time_in_force.GTC
-          ; qty
-          ; filled
-          ; status
-          ; created_at
-          ; updated_at
-          } : Types.Order.t)
+      let created_at =
+        Some
+          (Time_float_unix.of_span_since_epoch
+             (Time_float_unix.Span.of_ms (Int64.to_float status_resp.time)))
+      in
+      let updated_at =
+        Some
+          (Time_float_unix.of_span_since_epoch
+             (Time_float_unix.Span.of_ms (Int64.to_float status_resp.updateTime)))
+      in
+        Ok
+          ({ venue= Venue.t
+           ; id= status_resp.orderId
+           ; symbol= status_resp.symbol
+           ; side
+           ; kind
+           ; time_in_force= Types.Time_in_force.GTC
+           ; qty
+           ; filled
+           ; status
+           ; created_at
+           ; updated_at }
+           : Types.Order.t)
 
     let trade (t : Native.Trade.t) : (Types.Trade.t, string) Result.t =
       let open Result.Let_syntax in
       let%bind price = Float_conv.price_of_string t.price in
       let%bind qty = Float_conv.qty_of_string t.qty in
-      let side = match t.isBuyerMaker with
+      let side =
+        match t.isBuyerMaker with
         | true -> Types.Side.Sell
         | false -> Types.Side.Buy
       in
-      let ts = Some (Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Int64.to_float t.time))) in
-      Ok ({ venue = Venue.t
-          ; symbol = ""
-          ; side
-          ; price
-          ; qty
-          ; fee = None
-          ; trade_id = Some (Int64.to_string t.id)
-          ; ts
-          } : Types.Trade.t)
+      let ts =
+        Some
+          (Time_float_unix.of_span_since_epoch
+             (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
+      in
+        Ok
+          ({ venue= Venue.t
+           ; symbol= ""
+           ; side
+           ; price
+           ; qty
+           ; fee= None
+           ; trade_id= Some (Int64.to_string t.id)
+           ; ts }
+           : Types.Trade.t)
 
     let balance (b : Native.Balance.t) : (Types.Balance.t, string) Result.t =
       let open Result.Let_syntax in
       let%bind free = Float_conv.qty_of_string b.free in
       let%bind locked = Float_conv.qty_of_string b.locked in
-      Ok ({ venue = Venue.t
-          ; currency = b.asset
-          ; total = free +. locked
-          ; available = free
-          ; locked
-          } : Types.Balance.t)
+        Ok
+          ({ venue= Venue.t
+           ; currency= b.asset
+           ; total= free +. locked
+           ; available= free
+           ; locked }
+           : Types.Balance.t)
 
     let book_update (book : Native.Book.update) : (Types.Book_update.t, string) Result.t =
       let open Result.Let_syntax in
       let%bind levels =
-        Result_util.transpose (
-          List.map book.bids ~f:(fun (price, qty) ->
-            let%bind price = Float_conv.price_of_string price in
-            let%bind qty = Float_conv.qty_of_string qty in
-            Ok ({ Types.Book_update.price; qty } : Types.Book_update.level))
-        )
+        Result_util.transpose
+          (List.map book.bids ~f:(fun (price, qty) ->
+             let%bind price = Float_conv.price_of_string price in
+             let%bind qty = Float_conv.qty_of_string qty in
+               Ok ({Types.Book_update.price; qty} : Types.Book_update.level)))
       in
-      Ok ({ venue = Venue.t
-          ; symbol = ""
-          ; side = Types.Book_update.Side.Bid
-          ; levels
-          ; ts = None
-          ; is_snapshot = true
-          } : Types.Book_update.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= ""
+           ; side= Types.Book_update.Side.Bid
+           ; levels
+           ; ts= None
+           ; is_snapshot= true }
+           : Types.Book_update.t)
 
     let symbol_info (s : Native.Symbol_info.t) : (Types.Symbol_info.t, string) Result.t =
-      Ok ({ venue = Venue.t
-          ; symbol = s.symbol
-          ; base_currency = s.baseAsset
-          ; quote_currency = s.quoteAsset
-          ; status = s.status
-          ; min_order_size = 0.0
-          ; tick_size = None
-          ; quote_increment = None
-          } : Types.Symbol_info.t)
+      Ok
+        ({ venue= Venue.t
+         ; symbol= s.symbol
+         ; base_currency= s.baseAsset
+         ; quote_currency= s.quoteAsset
+         ; status= s.status
+         ; min_order_size= 0.0
+         ; tick_size= None
+         ; quote_increment= None }
+         : Types.Symbol_info.t)
 
     let ticker (t : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       let open Result.Let_syntax in
@@ -369,72 +398,88 @@ module Adapter = struct
       let%bind quote_volume = Float_conv.qty_of_string t.quoteVolume in
       let%bind price_change = Float_conv.of_string t.priceChange in
       let%bind price_change_pct = Float_conv.of_string t.priceChangePercent in
-      let ts = Some (Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Int64.to_float t.closeTime))) in
-      Ok ({ venue = Venue.t
-          ; symbol = t.symbol
-          ; last_price
-          ; bid_price
-          ; ask_price
-          ; high_24h
-          ; low_24h
-          ; volume_24h
-          ; quote_volume = Some quote_volume
-          ; price_change = Some price_change
-          ; price_change_pct = Some price_change_pct
-          ; ts
-          } : Types.Ticker.t)
+      let ts =
+        Some
+          (Time_float_unix.of_span_since_epoch
+             (Time_float_unix.Span.of_ms (Int64.to_float t.closeTime)))
+      in
+        Ok
+          ({ venue= Venue.t
+           ; symbol= t.symbol
+           ; last_price
+           ; bid_price
+           ; ask_price
+           ; high_24h
+           ; low_24h
+           ; volume_24h
+           ; quote_volume= Some quote_volume
+           ; price_change= Some price_change
+           ; price_change_pct= Some price_change_pct
+           ; ts }
+           : Types.Ticker.t)
 
     let order_book (book : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
       let open Result.Let_syntax in
       let%bind bids =
-        Result_util.transpose (
-          List.map book.bids ~f:(fun (price, qty) ->
-            let%bind price = Float_conv.price_of_string price in
-            let%bind volume = Float_conv.qty_of_string qty in
-            Ok ({ Types.Order_book.Price_level.price; volume } : Types.Order_book.Price_level.t))
-        )
+        Result_util.transpose
+          (List.map book.bids ~f:(fun (price, qty) ->
+             let%bind price = Float_conv.price_of_string price in
+             let%bind volume = Float_conv.qty_of_string qty in
+               Ok
+                 ({Types.Order_book.Price_level.price; volume}
+                  : Types.Order_book.Price_level.t)))
       in
       let%bind asks =
-        Result_util.transpose (
-          List.map book.asks ~f:(fun (price, qty) ->
-            let%bind price = Float_conv.price_of_string price in
-            let%bind volume = Float_conv.qty_of_string qty in
-            Ok ({ Types.Order_book.Price_level.price; volume } : Types.Order_book.Price_level.t))
-        )
+        Result_util.transpose
+          (List.map book.asks ~f:(fun (price, qty) ->
+             let%bind price = Float_conv.price_of_string price in
+             let%bind volume = Float_conv.qty_of_string qty in
+               Ok
+                 ({Types.Order_book.Price_level.price; volume}
+                  : Types.Order_book.Price_level.t)))
       in
-      Ok ({ venue = Venue.t
-          ; symbol = ""
-          ; bids
-          ; asks
-          ; ts = None
-          ; epoch = Int64.to_int_trunc book.lastUpdateId
-          } : Types.Order_book.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= ""
+           ; bids
+           ; asks
+           ; ts= None
+           ; epoch= Int64.to_int_trunc book.lastUpdateId }
+           : Types.Order_book.t)
 
-    let public_trade (t : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
+    let public_trade (t : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t
+      =
       let open Result.Let_syntax in
       let%bind price = Float_conv.price_of_string t.price in
       let%bind qty = Float_conv.qty_of_string t.qty in
-      let side = Some (match t.isBuyerMaker with
-        | true -> Types.Side.Sell
-        | false -> Types.Side.Buy)
+      let side =
+        Some
+          (match t.isBuyerMaker with
+           | true -> Types.Side.Sell
+           | false -> Types.Side.Buy)
       in
-      let ts = Some (Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Int64.to_float t.time))) in
-      Ok ({ venue = Venue.t
-          ; symbol = ""
-          ; price
-          ; qty
-          ; side
-          ; trade_id = Some (Int64.to_string t.id)
-          ; ts
-          } : Types.Public_trade.t)
+      let ts =
+        Some
+          (Time_float_unix.of_span_since_epoch
+             (Time_float_unix.Span.of_ms (Int64.to_float t.time)))
+      in
+        Ok
+          ({ venue= Venue.t
+           ; symbol= ""
+           ; price
+           ; qty
+           ; side
+           ; trade_id= Some (Int64.to_string t.id)
+           ; ts }
+           : Types.Public_trade.t)
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "Bitrue candle normalization not yet implemented"
 
     (** Account operations normalization (stubs) *)
-    let deposit_address (_ : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+    let deposit_address (_ : Native.Deposit_address.t)
+      : (Types.Deposit_address.t, string) Result.t
+      =
       Error "Bitrue deposit_address normalization not yet implemented"
 
     let deposit (_ : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
@@ -447,11 +492,9 @@ module Adapter = struct
       match e with
       | `Http (code, msg) ->
         Types.Error.Exchange_specific
-          { venue = Venue.t; code = Int.to_string code; message = msg }
-      | `Json_parse msg ->
-        Types.Error.Transport (Failure msg)
+          {venue= Venue.t; code= Int.to_string code; message= msg}
+      | `Json_parse msg -> Types.Error.Transport (Failure msg)
       | `Api_error msg ->
-        Types.Error.Exchange_specific
-          { venue = Venue.t; code = "API"; message = msg }
+        Types.Error.Exchange_specific {venue= Venue.t; code= "API"; message= msg}
   end
 end

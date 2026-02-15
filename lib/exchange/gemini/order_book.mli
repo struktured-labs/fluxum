@@ -6,7 +6,6 @@
 
 open! Common
 open V1
-
 module Price_level = Exchange_common.Order_book_base.Price_level
 
 module Book : sig
@@ -25,14 +24,14 @@ module Book : sig
 
   (** {1 Updates} *)
 
-  val set :
-    ?timestamp:float ->
-    ?metadata:unit ->
-    t ->
-    side:[`Bid | `Ask] ->
-    price:float ->
-    size:float ->
-    t
+  val set
+    :  ?timestamp:float
+    -> ?metadata:unit
+    -> t
+    -> side:[`Bid | `Ask]
+    -> price:float
+    -> size:float
+    -> t
 
   val on_market_data : t -> Market_data.response -> t
 
@@ -63,31 +62,27 @@ module Book : sig
   (** {1 WebSocket Pipes} *)
 
   (** Stream order book for a standard spot symbol via WebSocket. *)
-  val pipe :
-    (module Cfg.S) ->
-    symbol:Symbol.t ->
-    unit ->
-    [ `Ok of t | Market_data.Error.t ] Pipe.Reader.t Deferred.t
+  val pipe
+    :  (module Cfg.S)
+    -> symbol:Symbol.t
+    -> unit
+    -> [`Ok of t | Market_data.Error.t] Pipe.Reader.t Deferred.t
 
-  val pipe_exn :
-    (module Cfg.S) ->
-    symbol:Symbol.t ->
-    unit ->
-    t Pipe.Reader.t Deferred.t
+  val pipe_exn : (module Cfg.S) -> symbol:Symbol.t -> unit -> t Pipe.Reader.t Deferred.t
 
   (** Stream order book for an arbitrary instrument symbol string.
       Used for prediction market contracts like GEMI-BTC100K-YES. *)
-  val pipe_for_instrument :
-    (module Cfg.S) ->
-    instrument_symbol:string ->
-    unit ->
-    [ `Ok of t | Market_data.Error.t ] Pipe.Reader.t Deferred.t
+  val pipe_for_instrument
+    :  (module Cfg.S)
+    -> instrument_symbol:string
+    -> unit
+    -> [`Ok of t | Market_data.Error.t] Pipe.Reader.t Deferred.t
 
-  val pipe_for_instrument_exn :
-    (module Cfg.S) ->
-    instrument_symbol:string ->
-    unit ->
-    t Pipe.Reader.t Deferred.t
+  val pipe_for_instrument_exn
+    :  (module Cfg.S)
+    -> instrument_symbol:string
+    -> unit
+    -> t Pipe.Reader.t Deferred.t
 end
 
 module Books : sig
@@ -99,20 +94,19 @@ module Books : sig
   val book : t -> string -> book option
   val book_exn : t -> string -> book
   val set_book : t -> book -> t
-
   val on_market_data : t -> Symbol.t -> Market_data.response -> t
 
-  val pipe :
-    (module Cfg.S) ->
-    ?symbols:Symbol.t list ->
-    unit ->
-    [ `Ok of Book.t | Market_data.Error.t ] Pipe.Reader.t Symbol.Map.t Deferred.t
+  val pipe
+    :  (module Cfg.S)
+    -> ?symbols:Symbol.t list
+    -> unit
+    -> [`Ok of Book.t | Market_data.Error.t] Pipe.Reader.t Symbol.Map.t Deferred.t
 
-  val pipe_exn :
-    (module Cfg.S) ->
-    ?symbols:Symbol.t list ->
-    unit ->
-    Book.t Pipe.Reader.t Symbol.Map.t Deferred.t
+  val pipe_exn
+    :  (module Cfg.S)
+    -> ?symbols:Symbol.t list
+    -> unit
+    -> Book.t Pipe.Reader.t Symbol.Map.t Deferred.t
 end
 
 val command : string * Command.t

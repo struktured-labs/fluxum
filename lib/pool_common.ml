@@ -1,11 +1,9 @@
 (** Shared utilities for DEX pool adapters
 
     This module provides safe normalization helpers that use Result.t
-    for all conversions, eliminating unsafe Float.of_string calls.
-*)
+    for all conversions, eliminating unsafe Float.of_string calls. *)
 
 open Core
-
 module Float_conv = Fluxum.Normalize_common.Float_conv
 
 (** {1 Safe Integer Conversions} *)
@@ -14,8 +12,7 @@ module Int_conv = struct
   (** Convert string to int with Result.t error handling.
 
       @param s Input string
-      @return Int or Error with descriptive message
-  *)
+      @return Int or Error with descriptive message *)
   let of_string (s : string) : (int, string) Result.t =
     match Int.of_string_opt s with
     | Some i -> Ok i
@@ -27,8 +24,7 @@ module Int_conv = struct
 
       @param s Input string
       @param default Default value if parsing fails
-      @return Parsed int or default
-  *)
+      @return Parsed int or default *)
   let of_string_with_default (s : string) ~default : int =
     Option.value (Int.of_string_opt s) ~default
 
@@ -37,16 +33,13 @@ module Int_conv = struct
       Token decimals default to 18 (ERC-20 standard) if parsing fails.
 
       @param s Decimals as string
-      @return Decimals as int (defaults to 18)
-  *)
-  let decimals_of_string (s : string) : int =
-    of_string_with_default s ~default:18
+      @return Decimals as int (defaults to 18) *)
+  let decimals_of_string (s : string) : int = of_string_with_default s ~default:18
 
   (** Parse fee in basis points.
 
       @param s Fee as string (e.g., "30" for 0.3%)
-      @return Fee in basis points or Error
-  *)
+      @return Fee in basis points or Error *)
   let fee_bps_of_string (s : string) : (int, string) Result.t =
     match Int.of_string_opt s with
     | Some i when i >= 0 && i <= 10000 -> Ok i
@@ -72,60 +65,54 @@ module Constant_product = struct
       @param reserve0_str Reserve0 as string
       @param reserve1_str Reserve1 as string
       @param fee_bps Fee in basis points (e.g., 30 for 0.3%)
-      @param tvl_usd Total value locked in USD (optional, default 0)
-  *)
+      @param tvl_usd Total value locked in USD (optional, default 0) *)
   let normalize_pool
-      ~venue
-      ~pool_id
-      ~token0_addr
-      ~token0_symbol
-      ~token0_decimals
-      ~token1_addr
-      ~token1_symbol
-      ~token1_decimals
-      ~reserve0_str
-      ~reserve1_str
-      ~fee_bps
-      ?(tvl_usd = 0.0)
-      ()
-    : (Pool_intf.Pool.t, string) Result.t =
+        ~venue
+        ~pool_id
+        ~token0_addr
+        ~token0_symbol
+        ~token0_decimals
+        ~token1_addr
+        ~token1_symbol
+        ~token1_decimals
+        ~reserve0_str
+        ~reserve1_str
+        ~fee_bps
+        ?(tvl_usd = 0.0)
+        ()
+    : (Pool_intf.Pool.t, string) Result.t
+    =
     let open Result.Let_syntax in
     let%bind reserve0 = Float_conv.qty_of_string reserve0_str in
     let%bind reserve1 = Float_conv.qty_of_string reserve1_str in
-
-    let spot_price = match Float.(reserve0 > 0.0) with
+    let spot_price =
+      match Float.(reserve0 > 0.0) with
       | true -> reserve1 /. reserve0
       | false -> 0.0
     in
-    let spot_price_inv = match Float.(reserve1 > 0.0) with
+    let spot_price_inv =
+      match Float.(reserve1 > 0.0) with
       | true -> reserve0 /. reserve1
       | false -> 0.0
     in
-
-    Ok {
-      Pool_intf.Pool.
-      id = pool_id;
-      venue = venue;
-      pool_type = Pool_intf.Pool_type.Constant_product;
-      token0 = {
-        Pool_intf.Token.
-        address = token0_addr;
-        symbol = token0_symbol;
-        decimals = token0_decimals;
-      };
-      token1 = {
-        Pool_intf.Token.
-        address = token1_addr;
-        symbol = token1_symbol;
-        decimals = token1_decimals;
-      };
-      reserve0;
-      reserve1;
-      tvl_usd;
-      fee_bps;
-      spot_price;
-      spot_price_inv;
-    }
+      Ok
+        { Pool_intf.Pool.id= pool_id
+        ; venue
+        ; pool_type= Pool_intf.Pool_type.Constant_product
+        ; token0=
+            { Pool_intf.Token.address= token0_addr
+            ; symbol= token0_symbol
+            ; decimals= token0_decimals }
+        ; token1=
+            { Pool_intf.Token.address= token1_addr
+            ; symbol= token1_symbol
+            ; decimals= token1_decimals }
+        ; reserve0
+        ; reserve1
+        ; tvl_usd
+        ; fee_bps
+        ; spot_price
+        ; spot_price_inv }
 
   (** Get spot price for token pair from reserves.
 
@@ -135,37 +122,43 @@ module Constant_product = struct
       @param token1_id Token1 address or symbol
       @param token_in Input token address or symbol
       @param token_out Output token address or symbol
-      @return Spot price or Error if tokens don't match
-  *)
+      @return Spot price or Error if tokens don't match *)
   let spot_price_from_reserves
-      ~reserve0
-      ~reserve1
-      ~token0_id
-      ~token1_id
-      ~token_in
-      ~token_out
-    : (float, string) Result.t =
+        ~reserve0
+        ~reserve1
+        ~token0_id
+        ~token1_id
+        ~token_in
+        ~token_out
+    : (float, string) Result.t
+    =
     match String.equal token_in token0_id with
-    | true when String.equal token_out token1_id ->
-      Ok (reserve1 /. reserve0)
+    | true when String.equal token_out token1_id -> Ok (reserve1 /. reserve0)
     | false when String.equal token_in token1_id && String.equal token_out token0_id ->
       Ok (reserve0 /. reserve1)
-    | _ -> Error (sprintf "Token pair (%s, %s) does not match pool (%s, %s)"
-                    token_in token_out token0_id token1_id)
+    | _ ->
+      Error
+        (sprintf
+           "Token pair (%s, %s) does not match pool (%s, %s)"
+           token_in
+           token_out
+           token0_id
+           token1_id)
 
   (** Parse reserves from strings and get spot price. *)
-  let spot_price
-      ~reserve0_str
-      ~reserve1_str
-      ~token0_id
-      ~token1_id
-      ~token_in
-      ~token_out
-    : (float, string) Result.t =
+  let spot_price ~reserve0_str ~reserve1_str ~token0_id ~token1_id ~token_in ~token_out
+    : (float, string) Result.t
+    =
     let open Result.Let_syntax in
     let%bind reserve0 = Float_conv.qty_of_string reserve0_str in
     let%bind reserve1 = Float_conv.qty_of_string reserve1_str in
-    spot_price_from_reserves ~reserve0 ~reserve1 ~token0_id ~token1_id ~token_in ~token_out
+      spot_price_from_reserves
+        ~reserve0
+        ~reserve1
+        ~token0_id
+        ~token1_id
+        ~token_in
+        ~token_out
 end
 
 (** {1 Concentrated Liquidity Pool Helpers} *)
@@ -181,16 +174,16 @@ module Concentrated = struct
       @param sqrt_price_x96 sqrtPriceX96 as string (Q64.96 format)
       @param decimals0 Token0 decimals
       @param decimals1 Token1 decimals
-      @return Price (token0 -> token1) or Error
-  *)
+      @return Price (token0 -> token1) or Error *)
   let price_from_sqrt_price_x96 ~sqrt_price_x96 ~decimals0 ~decimals1
-    : (float, string) Result.t =
+    : (float, string) Result.t
+    =
     let open Result.Let_syntax in
     let%bind sqrt_price_raw = Float_conv.of_string sqrt_price_x96 in
     let sqrt_price = sqrt_price_raw /. q96 in
     let raw_price = sqrt_price *. sqrt_price in
     let decimal_adjustment = Float.int_pow 10.0 (decimals1 - decimals0) in
-    Ok (raw_price *. decimal_adjustment)
+      Ok (raw_price *. decimal_adjustment)
 
   (** Parse liquidity string safely. *)
   let parse_liquidity liquidity_str : (float, string) Result.t =
@@ -203,8 +196,7 @@ module Stable = struct
   (** Parse virtual price string safely.
 
       @param virtual_price_str Virtual price as string
-      @return Virtual price or Error
-  *)
+      @return Virtual price or Error *)
   let parse_virtual_price virtual_price_str : (float, string) Result.t =
     Float_conv.price_of_string virtual_price_str
 
@@ -212,8 +204,7 @@ module Stable = struct
 
       @param amp_str Amplification coefficient as string (optional)
       @param default Default value if not provided
-      @return Amplification coefficient
-  *)
+      @return Amplification coefficient *)
   let parse_amplification ?amp_str ~default () : int =
     match amp_str with
     | Some s -> Int_conv.of_string_with_default s ~default
@@ -226,14 +217,13 @@ module Weighted = struct
   (** Parse token weight from string.
 
       @param weight_str Weight as string
-      @return Weight as float (0.0 to 1.0) or Error
-  *)
+      @return Weight as float (0.0 to 1.0) or Error *)
   let parse_weight weight_str : (float, string) Result.t =
     let open Result.Let_syntax in
     let%bind w = Float_conv.of_string weight_str in
-    match Float.(w >= 0.0 && w <= 1.0) with
-    | true -> Ok w
-    | false -> Error (sprintf "Weight must be between 0 and 1, got: %f" w)
+      match Float.(w >= 0.0 && w <= 1.0) with
+      | true -> Ok w
+      | false -> Error (sprintf "Weight must be between 0 and 1, got: %f" w)
 
   (** Parse balance from string. *)
   let parse_balance balance_str : (float, string) Result.t =
@@ -254,51 +244,38 @@ module Price_based = struct
       @param price_str Current price as string
       @param base_volume_str Base volume as string
       @param quote_volume_str Quote volume as string
-      @param fee_bps Fee in basis points
-  *)
+      @param fee_bps Fee in basis points *)
   let normalize_pool
-      ~venue
-      ~pool_id
-      ~base_symbol
-      ~quote_symbol
-      ~price_str
-      ~base_volume_str
-      ~quote_volume_str
-      ~fee_bps
-    : (Pool_intf.Pool.t, string) Result.t =
+        ~venue
+        ~pool_id
+        ~base_symbol
+        ~quote_symbol
+        ~price_str
+        ~base_volume_str
+        ~quote_volume_str
+        ~fee_bps
+    : (Pool_intf.Pool.t, string) Result.t
+    =
     let open Result.Let_syntax in
     let%bind price = Float_conv.price_of_string price_str in
     let%bind base_volume = Float_conv.qty_of_string base_volume_str in
     let%bind quote_volume = Float_conv.qty_of_string quote_volume_str in
-
     let spot_price = price in
-    let spot_price_inv = match Float.(price > 0.0) with
+    let spot_price_inv =
+      match Float.(price > 0.0) with
       | true -> 1.0 /. price
       | false -> 0.0
     in
-
-    Ok {
-      Pool_intf.Pool.
-      id = pool_id;
-      venue = venue;
-      pool_type = Pool_intf.Pool_type.Constant_product;
-      token0 = {
-        Pool_intf.Token.
-        address = pool_id;
-        symbol = base_symbol;
-        decimals = 18;
-      };
-      token1 = {
-        Pool_intf.Token.
-        address = pool_id;
-        symbol = quote_symbol;
-        decimals = 18;
-      };
-      reserve0 = base_volume;
-      reserve1 = quote_volume;
-      tvl_usd = base_volume +. quote_volume;
-      fee_bps;
-      spot_price;
-      spot_price_inv;
-    }
+      Ok
+        { Pool_intf.Pool.id= pool_id
+        ; venue
+        ; pool_type= Pool_intf.Pool_type.Constant_product
+        ; token0= {Pool_intf.Token.address= pool_id; symbol= base_symbol; decimals= 18}
+        ; token1= {Pool_intf.Token.address= pool_id; symbol= quote_symbol; decimals= 18}
+        ; reserve0= base_volume
+        ; reserve1= quote_volume
+        ; tvl_usd= base_volume +. quote_volume
+        ; fee_bps
+        ; spot_price
+        ; spot_price_inv }
 end

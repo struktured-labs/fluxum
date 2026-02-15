@@ -3,5 +3,6 @@
  (public_name fluxum.exchange_common)
  (modules crypto order_book_base auto_restart rate_limiter)
  (libraries core async core_unix digestif base64 uri)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core))

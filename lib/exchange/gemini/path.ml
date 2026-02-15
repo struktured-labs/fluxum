@@ -8,8 +8,9 @@ let to_string (path : t) = sprintf "/%s" (String.concat ~sep:"/" path)
 
 (** Summarize the path in a human readable format. *)
 let to_summary ~has_subnames (path : t) =
-  sprintf "Gemini %s Command%s"
+  sprintf
+    "Gemini %s Command%s"
     (String.concat ~sep:" " path)
-    ( match has_subnames with
-    | true -> "s"
-    | false -> "" )
+    (match has_subnames with
+     | true -> "s"
+     | false -> "")

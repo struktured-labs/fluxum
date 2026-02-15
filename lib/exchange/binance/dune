@@ -1,8 +1,33 @@
 (library
  (name binance)
  (public_name fluxum.binance)
- (modules cfg common signature rest v3 sapi ws order_book market_data ledger session fluxum_adapter unified_adapter binance)
- (libraries core async cohttp cohttp-async fluxum exchange_common yojson websocket_curl uri digestif)
- (preprocess (pps ppx_jane ppx_deriving_yojson))
+ (modules
+  cfg
+  common
+  signature
+  rest
+  v3
+  sapi
+  ws
+  order_book
+  market_data
+  ledger
+  session
+  fluxum_adapter
+  unified_adapter
+  binance)
+ (libraries
+  core
+  async
+  cohttp
+  cohttp-async
+  fluxum
+  exchange_common
+  yojson
+  websocket_curl
+  uri
+  digestif)
+ (preprocess
+  (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async)
  (library_flags -linkall))

@@ -1,14 +1,13 @@
 let param ?default ~name ~env () =
   let name = sprintf "BYBIT_%s_%s" (String.uppercase env) name in
-  match Unix.getenv name with
-  | Some param -> param
-  | None -> (
-    match default with
-    | None -> failwithf "Environment variable \"%s\" must be specified" name ()
-    | Some default -> default )
+    match Unix.getenv name with
+    | Some param -> param
+    | None ->
+      (match default with
+       | None -> failwithf "Environment variable \"%s\" must be specified" name ()
+       | Some default -> default)
 
 let api_key ?default = param ?default ~name:"API_KEY"
-
 let api_secret ?default = param ?default ~name:"API_SECRET"
 
 (** Bybit configuration module signature *)
@@ -24,7 +23,8 @@ let make env ~base_url =
     let api_key = api_key ~env ()
     let api_secret = api_secret ~env ()
     let base_url = base_url
-  end in
+  end
+  in
   (module M : S)
 
 (** Production configuration *)
@@ -46,15 +46,13 @@ let of_string s =
   | "testnet" ->
     let module Cfg : S = Testnet () in
     (module Cfg : S)
-  | unsupported_env ->
-    failwithf "bybit environment %s not supported" unsupported_env ()
+  | unsupported_env -> failwithf "bybit environment %s not supported" unsupported_env ()
 
 let arg_type = Command.Arg_type.create of_string
 
 let param =
   Command.Param.(
-    flag "-cfg" (optional arg_type)
-      ~doc:"STRING bybit environment (production|testnet)")
+    flag "-cfg" (optional arg_type) ~doc:"STRING bybit environment (production|testnet)")
 
 let or_default cfg =
   match cfg with

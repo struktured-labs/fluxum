@@ -8,8 +8,7 @@ module Side : sig
   module Bid_ask : sig
     type t =
       [ `Ask
-      | `Bid
-      ]
+      | `Bid ]
     [@@deriving sexp]
 
     include Json.S with type t := t
@@ -19,7 +18,7 @@ module Side : sig
 
   (** Represents an auction style side. *)
   module Auction : sig
-    type t = [ `Auction ] [@@deriving sexp]
+    type t = [`Auction] [@@deriving sexp]
 
     include Json.S with type t := t
   end
@@ -27,8 +26,7 @@ module Side : sig
   (** A most general type of side- one of [`Bid], [`Ask], or [`Auction]. *)
   type t =
     [ Bid_ask.t
-    | Auction.t
-    ]
+    | Auction.t ]
   [@@deriving sexp]
 
   include Json.S with type t := t
@@ -41,8 +39,7 @@ module Message_type : sig
   *)
   type t =
     [ `Heartbeat
-    | `Update
-    ]
+    | `Update ]
   [@@deriving sexp]
 
   include Json.S with type t := t
@@ -57,12 +54,10 @@ module Event_type : sig
     | `Change
     | `Auction
     | `Auction_open
-    | `Block_trade
-    ]
+    | `Block_trade ]
   [@@deriving sexp]
 
   include Json.S with type t := t
-
   include Comparable with type t := t
 end
 
@@ -76,8 +71,7 @@ module Reason : sig
     [ `Place
     | `Trade
     | `Cancel
-    | `Initial
-    ]
+    | `Initial ]
   [@@deriving sexp]
 
   include Json.S with type t := t
@@ -87,43 +81,39 @@ end
     change. *)
 module Change_event : sig
   type t =
-    { price : Decimal_string.t;
-      side : Side.Bid_ask.t;
-      reason : Reason.t;
-      remaining : Decimal_string.t;
-      delta : Decimal_string.t
-    }
+    { price: Decimal_string.t
+    ; side: Side.Bid_ask.t
+    ; reason: Reason.t
+    ; remaining: Decimal_string.t
+    ; delta: Decimal_string.t }
   [@@deriving sexp, of_yojson, csv, fields]
 end
 
 (** An trade event of an order. *)
 module Trade_event : sig
   type t =
-    { tid : Int_number.t;
-      price : Decimal_string.t;
-      amount : Decimal_string.t;
-      maker_side : Side.t
-    }
+    { tid: Int_number.t
+    ; price: Decimal_string.t
+    ; amount: Decimal_string.t
+    ; maker_side: Side.t }
   [@@deriving sexp, of_yojson, fields, csv]
 end
 
 (** A block trade event. *)
 module Block_trade_event : sig
   type t =
-    { price : Decimal_string.t;
-      amount : Decimal_string.t
-    }
+    { price: Decimal_string.t
+    ; amount: Decimal_string.t }
   [@@deriving sexp, of_yojson, fields, csv]
 end
 
 (** An auction open event. *)
 module Auction_open_event : sig
   type t =
-    { auction_open_ms : Timestamp.Ms.t;
-      auction_time_ms : Timestamp.Ms.t;
-      first_indicative_ms : Timestamp.Ms.t;
-      last_cancel_time_ms : Timestamp.Ms.t
-    }
+    { auction_open_ms: Timestamp.Ms.t
+    ; auction_time_ms: Timestamp.Ms.t
+    ; first_indicative_ms: Timestamp.Ms.t
+    ; last_cancel_time_ms: Timestamp.Ms.t }
   [@@deriving sexp, of_yojson, fields, csv]
 end
 
@@ -132,8 +122,7 @@ module Auction_result : sig
   (** the type of an auction result- one of [`Success] or [`Failure]. *)
   type t =
     [ `Success
-    | `Failure
-    ]
+    | `Failure ]
   [@@deriving sexp]
 
   include Json.S with type t := t
@@ -142,30 +131,28 @@ end
 (** An auction indicative price event. *)
 module Auction_indicative_price_event : sig
   type t =
-    { eid : Int_number.t;
-      result : Auction_result.t;
-      time_ms : Timestamp.Ms.t;
-      highest_bid_price : Decimal_string.t;
-      lowest_ask_price : Decimal_string.t;
-      collar_price : Decimal_string.t;
-      indicative_price : Decimal_string.t;
-      indicative_quantity : Decimal_string.t
-    }
+    { eid: Int_number.t
+    ; result: Auction_result.t
+    ; time_ms: Timestamp.Ms.t
+    ; highest_bid_price: Decimal_string.t
+    ; lowest_ask_price: Decimal_string.t
+    ; collar_price: Decimal_string.t
+    ; indicative_price: Decimal_string.t
+    ; indicative_quantity: Decimal_string.t }
   [@@deriving sexp, of_yojson, fields, csv]
 end
 
 (** An auction outcome event. *)
 module Auction_outcome_event : sig
   type t =
-    { eid : Int_number.t;
-      result : Auction_result.t;
-      time_ms : Timestamp.Ms.t;
-      highest_bid_price : Decimal_string.t;
-      lowest_ask_price : Decimal_string.t;
-      collar_price : Decimal_string.t;
-      auction_price : Decimal_string.t;
-      auction_quantity : Decimal_string.t
-    }
+    { eid: Int_number.t
+    ; result: Auction_result.t
+    ; time_ms: Timestamp.Ms.t
+    ; highest_bid_price: Decimal_string.t
+    ; lowest_ask_price: Decimal_string.t
+    ; collar_price: Decimal_string.t
+    ; auction_price: Decimal_string.t
+    ; auction_quantity: Decimal_string.t }
   [@@deriving sexp, of_yojson, fields, csv]
 end
 
@@ -175,8 +162,7 @@ module Auction_event_type : sig
   type t =
     [ `Auction_open
     | `Auction_indicative_price
-    | `Auction_outcome
-    ]
+    | `Auction_outcome ]
   [@@deriving sexp]
 
   include Json.S with type t := t
@@ -187,8 +173,7 @@ module Auction_event : sig
   type t =
     [ `Auction_indicative_price of Auction_indicative_price_event.t
     | `Auction_open of Auction_open_event.t
-    | `Auction_outcome of Auction_outcome_event.t
-    ]
+    | `Auction_outcome of Auction_outcome_event.t ]
   [@@deriving sexp, of_yojson]
 end
 
@@ -198,47 +183,43 @@ type event =
   | `Auction_open of Auction_open_event.t
   | `Change of Change_event.t
   | `Trade of Trade_event.t
-  | `Block_trade of Block_trade_event.t
-  ]
+  | `Block_trade of Block_trade_event.t ]
 [@@deriving sexp, of_yojson]
 
 (** The type of a market data update message. *)
 module Update : sig
   type t =
-    { event_id : Int_number.t;
-      events : event array;
-      timestamp : Timestamp.Sec.t option;
-      timestampms : Timestamp.Ms.t option
-    }
+    { event_id: Int_number.t
+    ; events: event array
+    ; timestamp: Timestamp.Sec.t option
+    ; timestampms: Timestamp.Ms.t option }
   [@@deriving sexp, of_yojson]
 end
 
 (** The type of a market data message- a heartbeat or update. *)
 type message =
   [ `Heartbeat of heartbeat
-  | `Update of Update.t
-  ]
+  | `Update of Update.t ]
 [@@deriving sexp]
 
 (** The type of a market data response. *)
 type response =
-  { socket_sequence : Int_number.t;
-    message : message
-  }
+  { socket_sequence: Int_number.t
+  ; message: message }
 [@@deriving sexp]
 
 include
   Ws.CHANNEL_CLIENT_NO_REQUEST
-    with module Event_type := Event_type
-    with type uri_args = Symbol.t
-    with type response := response
+  with module Event_type := Event_type
+  with type uri_args = Symbol.t
+  with type response := response
 
 val command : string * Command.t
 
 (** Connect to market data WebSocket for an arbitrary instrument symbol string.
     Useful for prediction market symbols like GEMI-BTC100K-YES. *)
-val client_for_string_symbol :
-  (module Cfg.S) ->
-  symbol:string ->
-  unit ->
-  [ `Ok of response | Error.t ] Pipe.Reader.t Deferred.t
+val client_for_string_symbol
+  :  (module Cfg.S)
+  -> symbol:string
+  -> unit
+  -> [`Ok of response | Error.t] Pipe.Reader.t Deferred.t

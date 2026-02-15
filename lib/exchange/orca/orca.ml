@@ -2,8 +2,7 @@
 
     Permissionless concentrated liquidity DEX on Solana.
 
-    @see <https://docs.orca.so/>
-*)
+    @see <https://docs.orca.so/> *)
 
 module Cfg = Cfg
 module Types = Types

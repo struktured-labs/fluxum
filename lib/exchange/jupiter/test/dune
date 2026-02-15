@@ -2,9 +2,11 @@
  (name run_tests)
  (modules run_tests)
  (libraries core jupiter fluxum)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core))
 
 (rule
  (alias runtest)
- (action (run ./run_tests.exe)))
+ (action
+  (run ./run_tests.exe)))

@@ -7,8 +7,7 @@
 
     The order book follows the unified Order_book_intf.S interface.
     The ledger follows the unified Ledger_intf.S interface with 28-field P&L tracking.
-    The session follows the unified Session_intf.S interface with auto-restart pipes.
-*)
+    The session follows the unified Session_intf.S interface with auto-restart pipes. *)
 
 (** Oneinch's Order Book implementation *)
 module Order_book = Order_book

@@ -1,4 +1,5 @@
 open Async
+
 [@@@warning "-67"]
 
 module Types = Types
@@ -68,14 +69,8 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) : sig
     -> qty:Types.Qty.t
     -> (Types.Order.t, Types.Error.t) Deferred.Result.t
 
-  val cancel_order
-    :  t
-    -> Native.Order.id
-    -> (unit, Types.Error.t) Deferred.Result.t
-
-  val balances
-    :  t
-    -> (Types.Balance.t list, Types.Error.t) Deferred.Result.t
+  val cancel_order : t -> Native.Order.id -> (unit, Types.Error.t) Deferred.Result.t
+  val balances : t -> (Types.Balance.t list, Types.Error.t) Deferred.Result.t
 
   module Streams : sig
     val trades : t -> Types.Trade.t Pipe.Reader.t Deferred.t

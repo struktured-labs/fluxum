@@ -22,8 +22,7 @@
     API Key:
     - Required for all endpoints
     - Get one at https://portal.1inch.dev
-    - Set via ONEINCH_API_KEY environment variable
-*)
+    - Set via ONEINCH_API_KEY environment variable *)
 
 module Cfg = Cfg
 module Rest = Rest
@@ -37,6 +36,4 @@ module Fluxum_adapter = Fluxum_adapter
 module Tokens = Rest.Tokens
 
 let command =
-  Core.Command.group ~summary:"1inch EVM DEX Aggregator Commands"
-    [ Ledger.command
-    ]
+  Core.Command.group ~summary:"1inch EVM DEX Aggregator Commands" [Ledger.command]

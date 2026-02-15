@@ -1,29 +1,20 @@
 (** Bitfinex Exchange Configuration
 
-    @see <https://docs.bitfinex.com/docs/introduction>
-*)
+    @see <https://docs.bitfinex.com/docs/introduction> *)
 
 open Core
 
-type t = {
-  rest_url : string;
-  api_key : string option;
-  api_secret : string option;
-} [@@deriving sexp]
+type t =
+  { rest_url: string
+  ; api_key: string option
+  ; api_secret: string option }
+[@@deriving sexp]
 
-let production = {
-  rest_url = "https://api.bitfinex.com";
-  api_key = None;
-  api_secret = None;
-}
-
+let production = {rest_url= "https://api.bitfinex.com"; api_key= None; api_secret= None}
 let mainnet = production
 
-let with_auth ~api_key ~api_secret cfg = {
-  cfg with
-  api_key = Some api_key;
-  api_secret = Some api_secret;
-}
+let with_auth ~api_key ~api_secret cfg =
+  {cfg with api_key= Some api_key; api_secret= Some api_secret}
 
 let api_key_exn t =
   match t.api_key with

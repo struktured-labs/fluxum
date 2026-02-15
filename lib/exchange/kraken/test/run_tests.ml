@@ -1,7 +1,6 @@
 (** Comprehensive test suite for Kraken unified adapter *)
 
 open Core
-
 module Ledger = Kraken.Ledger
 module Order_book = Kraken.Order_book
 module Fluxum_adapter = Kraken.Fluxum_adapter
@@ -9,6 +8,7 @@ module Types = Fluxum.Types
 
 (** Test result tracking *)
 let tests_run = ref 0
+
 let tests_passed = ref 0
 let tests_failed = ref 0
 
@@ -29,7 +29,8 @@ let assert_equal ~equal ~sexp_of_t expected actual msg =
   match equal expected actual with
   | false ->
     incr tests_failed;
-    printf "  ✗ FAIL: %s\n     Expected: %s\n     Got: %s\n"
+    printf
+      "  ✗ FAIL: %s\n     Expected: %s\n     Got: %s\n"
       msg
       (Sexp.to_string (sexp_of_t expected))
       (Sexp.to_string (sexp_of_t actual));
@@ -43,20 +44,24 @@ let assert_equal ~equal ~sexp_of_t expected actual msg =
 
 let test_ledger_entry_creation () =
   printf "\n=== Ledger: Entry Creation ===\n";
-
   let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
   let _ = assert_float_equal 0.0 entry.pnl "Empty entry has 0 pnl" in
   let _ = assert_float_equal 0.0 entry.position "Empty entry has 0 position" in
   let _ = assert_float_equal 0.0 entry.spot "Empty entry has 0 spot" in
   let _ = assert_float_equal 0.0 entry.notional "Empty entry has 0 notional" in
   let _ = assert_float_equal 0.0 entry.cost_basis "Empty entry has 0 cost_basis" in
-  let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
-    "BTC/USD" entry.symbol "Symbol is set correctly" in
-  ()
+  let _ =
+    assert_equal
+      ~equal:String.equal
+      ~sexp_of_t:String.sexp_of_t
+      "BTC/USD"
+      entry.symbol
+      "Symbol is set correctly"
+  in
+    ()
 
 let test_ledger_simple_trades () =
   printf "\n=== Ledger: Simple Trades ===\n";
-
   (* Buy 1 BTC at $50,000 *)
   let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
   let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:1.0 in
@@ -64,221 +69,238 @@ let test_ledger_simple_trades () =
   let _ = assert_float_equal (-50000.0) entry.notional "Buy 1 BTC: notional = -$50k" in
   let _ = assert_float_equal 50000.0 entry.cost_basis "Buy 1 BTC: cost_basis = $50k" in
   let _ = assert_float_equal 0.0 entry.pnl "Buy at entry: pnl = 0" in
-
   (* Sell 1 BTC at $55,000 - $5k profit *)
   let entry = Ledger.Entry.on_trade entry ~price:55000.0 ~side:Sell ~qty:1.0 in
   let _ = assert_float_equal 0.0 entry.position "After sell: position = 0" in
   let _ = assert_float_equal 5000.0 entry.notional "After sell: notional = $5k profit" in
   let _ = assert_float_equal 5000.0 entry.pnl "Profit: pnl = $5k" in
   let _ = assert_float_equal 0.0 entry.cost_basis "Flat position: cost_basis = 0" in
-  ()
+    ()
 
 let test_ledger_fees () =
   printf "\n=== Ledger: Fee Handling ===\n";
-
   let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
   (* Buy 1 BTC at $50k with $25 fee *)
-  let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:1.0 ~fee_usd:25.0 in
-  let _ = assert_float_equal (-50025.0) entry.notional "Fee reduces cash: notional = -$50,025" in
+  let entry =
+    Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:1.0 ~fee_usd:25.0
+  in
+  let _ =
+    assert_float_equal (-50025.0) entry.notional "Fee reduces cash: notional = -$50,025"
+  in
   let _ = assert_float_equal 50025.0 entry.cost_basis "Fee in cost basis: $50,025" in
-
   (* Sell at breakeven price should show loss due to fee *)
   let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Sell ~qty:1.0 in
   let _ = assert_float_equal (-25.0) entry.pnl "Fee creates loss: pnl = -$25" in
-  ()
+    ()
 
 let test_ledger_partial_fills () =
   printf "\n=== Ledger: Partial Position Close ===\n";
-
   let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
   (* Buy 4 BTC at $50k each *)
   let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:4.0 in
   let _ = assert_float_equal 4.0 entry.position "Buy 4 BTC: position = 4.0" in
   let _ = assert_float_equal 200000.0 entry.cost_basis "Buy 4 BTC: cost_basis = $200k" in
-
   (* Sell 1 BTC - reduces cost basis proportionally *)
   let entry = Ledger.Entry.on_trade entry ~price:55000.0 ~side:Sell ~qty:1.0 in
   let _ = assert_float_equal 3.0 entry.position "Sell 1/4: position = 3.0" in
   let _ = assert_float_equal 150000.0 entry.cost_basis "Sell 1/4: cost_basis = $150k" in
   let _ = assert_float_equal 50000.0 entry.running_price "Running price = $50k" in
-
   (* Sell another 1 BTC *)
   let entry = Ledger.Entry.on_trade entry ~price:52000.0 ~side:Sell ~qty:1.0 in
   let _ = assert_float_equal 2.0 entry.position "Sell another: position = 2.0" in
-  let _ = assert_float_equal 100000.0 entry.cost_basis "Sell 1/3 remaining: cost_basis = $100k" in
-  ()
+  let _ =
+    assert_float_equal 100000.0 entry.cost_basis "Sell 1/3 remaining: cost_basis = $100k"
+  in
+    ()
 
 let test_ledger_average_prices () =
   printf "\n=== Ledger: Average Price Calculations ===\n";
-
   let entry = Ledger.Entry.create ~symbol:"ETH/USD" () in
   (* Buy at different prices *)
   let entry = Ledger.Entry.on_trade entry ~price:3000.0 ~side:Buy ~qty:10.0 in
   let entry = Ledger.Entry.on_trade entry ~price:3200.0 ~side:Buy ~qty:5.0 in
   let entry = Ledger.Entry.on_trade entry ~price:2800.0 ~side:Buy ~qty:5.0 in
-
   (* Average = (10*3000 + 5*3200 + 5*2800) / 20 = 3000 *)
   let _ = assert_float_equal 3000.0 entry.avg_buy_price "Weighted avg buy = $3,000" in
   let _ = assert_float_equal 20.0 entry.total_buy_qty "Total buy qty = 20" in
-
   (* Sell some *)
   let entry = Ledger.Entry.on_trade entry ~price:3500.0 ~side:Sell ~qty:5.0 in
   let _ = assert_float_equal 3500.0 entry.avg_sell_price "Avg sell = $3,500" in
-
   (* Overall avg = (3000*20 + 3500*5) / 25 = 3100 *)
   let _ = assert_float_equal 3100.0 entry.avg_price "Overall avg = $3,100" in
-  ()
+    ()
 
 let test_ledger_spot_updates () =
   printf "\n=== Ledger: Spot Price Updates (Unrealized P&L) ===\n";
-
   let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
   let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:1.0 in
-
   (* Spot moves to $55k - unrealized profit *)
   let entry = Ledger.Entry.update_spot entry 55000.0 in
   let _ = assert_float_equal 55000.0 entry.spot "Spot updated to $55k" in
   let _ = assert_float_equal 55000.0 entry.pnl_spot "pnl_spot = $55k" in
   let _ = assert_float_equal 5000.0 entry.pnl "Unrealized profit = $5k" in
-
   (* Spot moves to $45k - unrealized loss *)
   let entry = Ledger.Entry.update_spot entry 45000.0 in
   let _ = assert_float_equal 45000.0 entry.spot "Spot updated to $45k" in
   let _ = assert_float_equal (-5000.0) entry.pnl "Unrealized loss = -$5k" in
-  ()
+    ()
 
 let test_ledger_cost_basis_accounting () =
   printf "\n=== Ledger: Cost Basis Accounting ===\n";
-
   let entry = Ledger.Entry.create ~symbol:"BTC/USD" () in
   (* Buy 3 BTC at $50k = $150k cost basis *)
   let entry = Ledger.Entry.on_trade entry ~price:50000.0 ~side:Buy ~qty:3.0 in
   let _ = assert_float_equal 150000.0 entry.cost_basis "Initial cost_basis = $150k" in
   let _ = assert_float_equal 3.0 entry.running_qty "Running qty = 3.0" in
   let _ = assert_float_equal 50000.0 entry.running_price "Running price = $50k" in
-
   (* Sell 1 BTC - reduces cost basis by 1/3 *)
   let entry = Ledger.Entry.on_trade entry ~price:55000.0 ~side:Sell ~qty:1.0 in
-  let _ = assert_float_equal 100000.0 entry.cost_basis "After sell 1/3: cost_basis = $100k" in
+  let _ =
+    assert_float_equal 100000.0 entry.cost_basis "After sell 1/3: cost_basis = $100k"
+  in
   let _ = assert_float_equal 2.0 entry.running_qty "Running qty = 2.0" in
-
   (* Sell 1 more - reduces by 1/2 of remaining *)
   let entry = Ledger.Entry.on_trade entry ~price:52000.0 ~side:Sell ~qty:1.0 in
-  let _ = assert_float_equal 50000.0 entry.cost_basis "After sell 1/2: cost_basis = $50k" in
-  ()
+  let _ =
+    assert_float_equal 50000.0 entry.cost_basis "After sell 1/2: cost_basis = $50k"
+  in
+    ()
 
 let test_ledger_multi_symbol () =
   printf "\n=== Ledger: Multi-Symbol Tracking ===\n";
-
   let ledger = Fluxum.Types.Symbol.Map.empty in
-
   (* Trade BTC *)
-  let ledger = Ledger.on_trade ledger ~symbol:"BTC/USD" ~price:50000.0 ~side:Buy ~qty:1.0 in
+  let ledger =
+    Ledger.on_trade ledger ~symbol:"BTC/USD" ~price:50000.0 ~side:Buy ~qty:1.0
+  in
   (* Trade ETH *)
-  let ledger = Ledger.on_trade ledger ~symbol:"ETH/USD" ~price:3000.0 ~side:Buy ~qty:10.0 in
-
+  let ledger =
+    Ledger.on_trade ledger ~symbol:"ETH/USD" ~price:3000.0 ~side:Buy ~qty:10.0
+  in
   (* Check BTC *)
   let btc = Map.find_exn ledger "BTC/USD" in
   let _ = assert_float_equal 1.0 btc.position "BTC position = 1.0" in
   let _ = assert_float_equal 50000.0 btc.cost_basis "BTC cost_basis = $50k" in
-
   (* Check ETH *)
   let eth = Map.find_exn ledger "ETH/USD" in
   let _ = assert_float_equal 10.0 eth.position "ETH position = 10.0" in
   let _ = assert_float_equal 30000.0 eth.cost_basis "ETH cost_basis = $30k" in
-
   (* Update spots *)
-  let spots = Fluxum.Types.Symbol.Map.empty
+  let spots =
+    Fluxum.Types.Symbol.Map.empty
     |> Map.set ~key:"BTC/USD" ~data:55000.0
     |> Map.set ~key:"ETH/USD" ~data:3500.0
   in
   let ledger = Ledger.update_spots ledger spots in
-
   let btc = Map.find_exn ledger "BTC/USD" in
   let _ = assert_float_equal 5000.0 btc.pnl "BTC unrealized profit = $5k" in
-
   let eth = Map.find_exn ledger "ETH/USD" in
   let _ = assert_float_equal 5000.0 eth.pnl "ETH unrealized profit = $5k" in
-  ()
+    ()
 
 (** ========== ORDER BOOK TESTS ========== *)
 
 let test_order_book_creation () =
   printf "\n=== Order Book: Creation ===\n";
-
-  let book = Order_book.Book.create ~symbol: "BTC/USD" in
-  let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
-    "BTC/USD" (Order_book.Book.symbol book) "Symbol is set" in
-  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
-    0 (Order_book.Book.epoch book) "Initial epoch = 0" in
-
+  let book = Order_book.Book.create ~symbol:"BTC/USD" in
+  let _ =
+    assert_equal
+      ~equal:String.equal
+      ~sexp_of_t:String.sexp_of_t
+      "BTC/USD"
+      (Order_book.Book.symbol book)
+      "Symbol is set"
+  in
+  let _ =
+    assert_equal
+      ~equal:Int.equal
+      ~sexp_of_t:Int.sexp_of_t
+      0
+      (Order_book.Book.epoch book)
+      "Initial epoch = 0"
+  in
   let best_bid = Order_book.Book.best_bid book in
   let _ = assert_float_equal 0.0 best_bid.price "Empty book: best_bid = 0" in
-
   let best_ask = Order_book.Book.best_ask book in
   let _ = assert_float_equal 0.0 best_ask.price "Empty book: best_ask = 0" in
-  ()
+    ()
 
 let test_order_book_bid_sorting () =
   printf "\n=== Order Book: Bid Sorting (Descending) ===\n";
-
-  let book = Order_book.Book.create ~symbol: "BTC/USD" in
+  let book = Order_book.Book.create ~symbol:"BTC/USD" in
   let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
   let book = Order_book.Book.set book ~side:`Bid ~price:51000.0 ~size:1.5 in
   let book = Order_book.Book.set book ~side:`Bid ~price:49000.0 ~size:2.0 in
-
   let best = Order_book.Book.best_bid book in
   let _ = assert_float_equal 51000.0 best.price "Best bid = highest ($51k)" in
-
   let top_3 = Order_book.Book.best_n_bids book ~n:3 () in
-  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
-    3 (List.length top_3) "Got 3 bids" in
+  let _ =
+    assert_equal
+      ~equal:Int.equal
+      ~sexp_of_t:Int.sexp_of_t
+      3
+      (List.length top_3)
+      "Got 3 bids"
+  in
   let _ = assert_float_equal 51000.0 (List.nth_exn top_3 0).price "1st bid = $51k" in
   let _ = assert_float_equal 50000.0 (List.nth_exn top_3 1).price "2nd bid = $50k" in
   let _ = assert_float_equal 49000.0 (List.nth_exn top_3 2).price "3rd bid = $49k" in
-  ()
+    ()
 
 let test_order_book_ask_sorting () =
   printf "\n=== Order Book: Ask Sorting (Ascending) ===\n";
-
-  let book = Order_book.Book.create ~symbol: "BTC/USD" in
+  let book = Order_book.Book.create ~symbol:"BTC/USD" in
   let book = Order_book.Book.set book ~side:`Ask ~price:52000.0 ~size:1.0 in
   let book = Order_book.Book.set book ~side:`Ask ~price:51000.0 ~size:1.5 in
   let book = Order_book.Book.set book ~side:`Ask ~price:53000.0 ~size:2.0 in
-
   let best = Order_book.Book.best_ask book in
   let _ = assert_float_equal 51000.0 best.price "Best ask = lowest ($51k)" in
-
   let top_3 = Order_book.Book.best_n_asks book ~n:3 () in
-  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
-    3 (List.length top_3) "Got 3 asks" in
+  let _ =
+    assert_equal
+      ~equal:Int.equal
+      ~sexp_of_t:Int.sexp_of_t
+      3
+      (List.length top_3)
+      "Got 3 asks"
+  in
   let _ = assert_float_equal 51000.0 (List.nth_exn top_3 0).price "1st ask = $51k" in
   let _ = assert_float_equal 52000.0 (List.nth_exn top_3 1).price "2nd ask = $52k" in
   let _ = assert_float_equal 53000.0 (List.nth_exn top_3 2).price "3rd ask = $53k" in
-  ()
+    ()
 
 let test_order_book_operations () =
   printf "\n=== Order Book: Set/Update/Remove Operations ===\n";
-
-  let book = Order_book.Book.create ~symbol: "BTC/USD" in
-
+  let book = Order_book.Book.create ~symbol:"BTC/USD" in
   (* Set creates new level *)
   let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.5 in
   let best_bid = Order_book.Book.best_bid book in
-  let _ = assert_float_equal 1.5 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Set creates level with size 1.5" in
-
+  let _ =
+    assert_float_equal
+      1.5
+      (Exchange_common.Order_book_base.Price_level.volume best_bid)
+      "Set creates level with size 1.5"
+  in
   (* Set with size=0 removes level *)
   let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:0.0 in
   let best = Order_book.Book.best_bid book in
-  let _ = assert_float_equal 0.0 (Exchange_common.Order_book_base.Price_level.price best) "Size=0 removes level" in
-
+  let _ =
+    assert_float_equal
+      0.0
+      (Exchange_common.Order_book_base.Price_level.price best)
+      "Size=0 removes level"
+  in
   (* Set replaces existing level *)
   let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
   let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.5 in
   let best_bid = Order_book.Book.best_bid book in
-  let _ = assert_float_equal 1.5 (Exchange_common.Order_book_base.Price_level.volume best_bid) "Set replaces: 1.5" in
-
-  ()
+  let _ =
+    assert_float_equal
+      1.5
+      (Exchange_common.Order_book_base.Price_level.volume best_bid)
+      "Set replaces: 1.5"
+  in
+    ()
 
 (* DISABLED: Uses old API (ask_market_price)
 let test_order_book_market_price () =
@@ -329,17 +351,17 @@ let test_order_book_bid_market_price () =
 *)
 
 (* DISABLED: Uses old API (mid_market_price)
-let test_order_book_mid_price () =
-  printf "\n=== Order Book: Mid-Market Price ===\n";
+   let test_order_book_mid_price () =
+   printf "\n=== Order Book: Mid-Market Price ===\n";
 
-  let book = Order_book.Book.create ~symbol: "BTC/USD" in
-  let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
-  let book = Order_book.Book.set book ~side:`Ask ~price:51000.0 ~size:1.0 in
+   let book = Order_book.Book.create ~symbol: "BTC/USD" in
+   let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
+   let book = Order_book.Book.set book ~side:`Ask ~price:51000.0 ~size:1.0 in
 
-  let result = Order_book.Book.mid_market_price book ~volume:0.5 in
-  (* Mid = (50000 + 51000) / 2 = 50500 *)
-  let _ = assert_float_equal 50500.0 result.price "Mid price = $50,500" in
-  ()
+   let result = Order_book.Book.mid_market_price book ~volume:0.5 in
+   (* Mid = (50000 + 51000) / 2 = 50500 *)
+   let _ = assert_float_equal 50500.0 result.price "Mid price = $50,500" in
+   ()
 *)
 
 (* DISABLED: Uses old API (quantity_from_notional)
@@ -362,329 +384,466 @@ let test_order_book_quantity_conversions () =
 
 let test_order_book_epoch () =
   printf "\n=== Order Book: Epoch Tracking ===\n";
-
-  let book = Order_book.Book.create ~symbol: "BTC/USD" in
-  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
-    0 (Order_book.Book.epoch book) "Initial epoch = 0" in
-
+  let book = Order_book.Book.create ~symbol:"BTC/USD" in
+  let _ =
+    assert_equal
+      ~equal:Int.equal
+      ~sexp_of_t:Int.sexp_of_t
+      0
+      (Order_book.Book.epoch book)
+      "Initial epoch = 0"
+  in
   let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:1.0 in
-  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
-    1 (Order_book.Book.epoch book) "After set: epoch = 1" in
-
+  let _ =
+    assert_equal
+      ~equal:Int.equal
+      ~sexp_of_t:Int.sexp_of_t
+      1
+      (Order_book.Book.epoch book)
+      "After set: epoch = 1"
+  in
   let book = Order_book.Book.set book ~side:`Bid ~price:50000.0 ~size:0.5 in
-  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
-    2 (Order_book.Book.epoch book) "After set again: epoch = 2" in
-  ()
+  let _ =
+    assert_equal
+      ~equal:Int.equal
+      ~sexp_of_t:Int.sexp_of_t
+      2
+      (Order_book.Book.epoch book)
+      "After set again: epoch = 2"
+  in
+    ()
 
 (* DISABLED: Uses old API (Books.set/update)
-let test_order_book_multi_symbol () =
-  printf "\n=== Order Book: Multi-Symbol Books ===\n";
+   let test_order_book_multi_symbol () =
+   printf "\n=== Order Book: Multi-Symbol Books ===\n";
 
-  let books = Order_book.Books.empty in
+   let books = Order_book.Books.empty in
 
-  (* Add BTC and ETH books *)
-  let books = Order_book.Books.set books ~symbol:"BTC/USD" ~side:`Bid ~price:50000.0 ~size:1.0 in
-  let books = Order_book.Books.set books ~symbol:"ETH/USD" ~side:`Bid ~price:3000.0 ~size:10.0 in
+   (* Add BTC and ETH books *)
+   let books = Order_book.Books.set books ~symbol:"BTC/USD" ~side:`Bid ~price:50000.0 ~size:1.0 in
+   let books = Order_book.Books.set books ~symbol:"ETH/USD" ~side:`Bid ~price:3000.0 ~size:10.0 in
 
-  let symbols = Order_book.Books.symbols books in
-  let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
-    2 (List.length symbols) "Books has 2 symbols" in
+   let symbols = Order_book.Books.symbols books in
+   let _ = assert_equal ~equal:Int.equal ~sexp_of_t:Int.sexp_of_t
+   2 (List.length symbols) "Books has 2 symbols" in
 
-  (* Check BTC book *)
-  let btc_book = Order_book.Books.book_exn books "BTC/USD" in
-  let best = Order_book.Book.best_bid btc_book in
-  let _ = assert_float_equal 50000.0 best.price "BTC best bid = $50k" in
+   (* Check BTC book *)
+   let btc_book = Order_book.Books.book_exn books "BTC/USD" in
+   let best = Order_book.Book.best_bid btc_book in
+   let _ = assert_float_equal 50000.0 best.price "BTC best bid = $50k" in
 
-  (* Check ETH book *)
-  let eth_book = Order_book.Books.book_exn books "ETH/USD" in
-  let best = Order_book.Book.best_bid eth_book in
-  let _ = assert_float_equal 3000.0 best.price "ETH best bid = $3k" in
+   (* Check ETH book *)
+   let eth_book = Order_book.Books.book_exn books "ETH/USD" in
+   let best = Order_book.Book.best_bid eth_book in
+   let _ = assert_float_equal 3000.0 best.price "ETH best bid = $3k" in
 
-  (* Update BTC book *)
-  let books = Order_book.Books.update books ~symbol:"BTC/USD" ~side:`Bid ~price:50000.0 ~size:0.5 in
-  let btc_book = Order_book.Books.book_exn books "BTC/USD" in
-  let best = Order_book.Book.best_bid btc_book in
-  let _ = assert_float_equal 1.5 best.volume "BTC bid volume = 1.5 after update" in
-  ()
+   (* Update BTC book *)
+   let books = Order_book.Books.update books ~symbol:"BTC/USD" ~side:`Bid ~price:50000.0 ~size:0.5 in
+   let btc_book = Order_book.Books.book_exn books "BTC/USD" in
+   let best = Order_book.Book.best_bid btc_book in
+   let _ = assert_float_equal 1.5 best.volume "BTC bid volume = 1.5 after update" in
+   ()
 *)
 
 (** ========== FLUXUM ADAPTER TESTS ========== *)
 
 let test_fluxum_adapter_side_conversion () =
   printf "\n=== Fluxum Adapter: Side Conversion ===\n";
-
   (* Test side conversion from string *)
   let buy = Fluxum_adapter.Adapter.Normalize.side_of_string "buy" in
-  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
-    Types.Side.Buy buy "side_of_string 'buy' = Buy" in
-
+  let _ =
+    assert_equal
+      ~equal:Types.Side.equal
+      ~sexp_of_t:Types.Side.sexp_of_t
+      Types.Side.Buy
+      buy
+      "side_of_string 'buy' = Buy"
+  in
   let sell = Fluxum_adapter.Adapter.Normalize.side_of_string "sell" in
-  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
-    Types.Side.Sell sell "side_of_string 'sell' = Sell" in
-
+  let _ =
+    assert_equal
+      ~equal:Types.Side.equal
+      ~sexp_of_t:Types.Side.sexp_of_t
+      Types.Side.Sell
+      sell
+      "side_of_string 'sell' = Sell"
+  in
   let buy_b = Fluxum_adapter.Adapter.Normalize.side_of_string "b" in
-  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
-    Types.Side.Buy buy_b "side_of_string 'b' = Buy" in
-
+  let _ =
+    assert_equal
+      ~equal:Types.Side.equal
+      ~sexp_of_t:Types.Side.sexp_of_t
+      Types.Side.Buy
+      buy_b
+      "side_of_string 'b' = Buy"
+  in
   let sell_s = Fluxum_adapter.Adapter.Normalize.side_of_string "s" in
-  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
-    Types.Side.Sell sell_s "side_of_string 's' = Sell" in
-
+  let _ =
+    assert_equal
+      ~equal:Types.Side.equal
+      ~sexp_of_t:Types.Side.sexp_of_t
+      Types.Side.Sell
+      sell_s
+      "side_of_string 's' = Sell"
+  in
   (* Test side conversion from Common.Side.t *)
   let buy_common = Fluxum_adapter.Adapter.Normalize.side_of_common `Buy in
-  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
-    Types.Side.Buy buy_common "side_of_common Buy = Buy" in
-
+  let _ =
+    assert_equal
+      ~equal:Types.Side.equal
+      ~sexp_of_t:Types.Side.sexp_of_t
+      Types.Side.Buy
+      buy_common
+      "side_of_common Buy = Buy"
+  in
   let sell_common = Fluxum_adapter.Adapter.Normalize.side_of_common `Sell in
-  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
-    Types.Side.Sell sell_common "side_of_common Sell = Sell" in
-  ()
+  let _ =
+    assert_equal
+      ~equal:Types.Side.equal
+      ~sexp_of_t:Types.Side.sexp_of_t
+      Types.Side.Sell
+      sell_common
+      "side_of_common Sell = Sell"
+  in
+    ()
 
 let order_status_equal a b = Types.Order_status.compare a b = 0
 
 let test_fluxum_adapter_status_conversion () =
   printf "\n=== Fluxum Adapter: Status Conversion ===\n";
-
   let new_status = Fluxum_adapter.Adapter.Normalize.status_of_string "open" in
-  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
-    Types.Order_status.New new_status "status_of_string 'open' = New" in
-
+  let _ =
+    assert_equal
+      ~equal:order_status_equal
+      ~sexp_of_t:Types.Order_status.sexp_of_t
+      Types.Order_status.New
+      new_status
+      "status_of_string 'open' = New"
+  in
   let pending = Fluxum_adapter.Adapter.Normalize.status_of_string "pending" in
-  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
-    Types.Order_status.New pending "status_of_string 'pending' = New" in
-
+  let _ =
+    assert_equal
+      ~equal:order_status_equal
+      ~sexp_of_t:Types.Order_status.sexp_of_t
+      Types.Order_status.New
+      pending
+      "status_of_string 'pending' = New"
+  in
   let closed = Fluxum_adapter.Adapter.Normalize.status_of_string "closed" in
-  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
-    Types.Order_status.Filled closed "status_of_string 'closed' = Filled" in
-
+  let _ =
+    assert_equal
+      ~equal:order_status_equal
+      ~sexp_of_t:Types.Order_status.sexp_of_t
+      Types.Order_status.Filled
+      closed
+      "status_of_string 'closed' = Filled"
+  in
   let canceled = Fluxum_adapter.Adapter.Normalize.status_of_string "canceled" in
-  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
-    Types.Order_status.Canceled canceled "status_of_string 'canceled' = Canceled" in
-
+  let _ =
+    assert_equal
+      ~equal:order_status_equal
+      ~sexp_of_t:Types.Order_status.sexp_of_t
+      Types.Order_status.Canceled
+      canceled
+      "status_of_string 'canceled' = Canceled"
+  in
   let expired = Fluxum_adapter.Adapter.Normalize.status_of_string "expired" in
-  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
-    Types.Order_status.Canceled expired "status_of_string 'expired' = Canceled" in
-  ()
+  let _ =
+    assert_equal
+      ~equal:order_status_equal
+      ~sexp_of_t:Types.Order_status.sexp_of_t
+      Types.Order_status.Canceled
+      expired
+      "status_of_string 'expired' = Canceled"
+  in
+    ()
 
 let test_fluxum_adapter_venue () =
   printf "\n=== Fluxum Adapter: Venue ===\n";
-
   let venue = Fluxum_adapter.Adapter.Venue.t in
-  let _ = assert_equal ~equal:Types.Venue.equal ~sexp_of_t:Types.Venue.sexp_of_t
-    Types.Venue.Kraken venue "Adapter venue = Kraken" in
-  ()
+  let _ =
+    assert_equal
+      ~equal:Types.Venue.equal
+      ~sexp_of_t:Types.Venue.sexp_of_t
+      Types.Venue.Kraken
+      venue
+      "Adapter venue = Kraken"
+  in
+    ()
 
 (** ========== NORMALIZE ERROR PATH TESTS (Phase 1) ========== *)
 
 let test_normalize_balance_error_paths () =
   printf "\n=== Normalize: Balance Error Paths ===\n";
-
   (* Test malformed balance - invalid float in amount *)
   let bad_balance = ("BTC", "not_a_number") in
-  (match Fluxum_adapter.Adapter.Normalize.balance bad_balance with
-   | Error _ ->
-     printf "  ✓ Rejected invalid balance amount\n";
-     incr tests_run; incr tests_passed
-   | Ok _ ->
-     printf "  ✗ FAIL: Should reject non-numeric balance\n";
-     incr tests_run; incr tests_failed);
-
-  (* Test valid balance - ensure it still works *)
-  let good_balance = ("ETH", "10.5") in
-  (match Fluxum_adapter.Adapter.Normalize.balance good_balance with
-   | Ok bal ->
-     let _ = assert_float_equal 10.5 bal.total "Valid balance parsed correctly" in
-     let _ = assert_equal ~equal:String.equal ~sexp_of_t:String.sexp_of_t
-       "ETH" bal.currency "Currency preserved" in ()
-   | Error msg ->
-     printf "  ✗ FAIL: Valid balance should succeed: %s\n" msg;
-     incr tests_run; incr tests_failed);
-
-  (* Test negative balance *)
-  let negative_balance = ("BTC", "-5.0") in
-  (match Fluxum_adapter.Adapter.Normalize.balance negative_balance with
-   | Ok bal ->
-     (* Kraken doesn't validate negative - parsed as-is *)
-     let _ = assert_float_equal (-5.0) bal.total "Negative balance parsed (no validation)" in ()
-   | Error _ ->
-     printf "  ✗ FAIL: Unexpected rejection of negative balance\n";
-     incr tests_run; incr tests_failed);
-
-  (* Test zero balance *)
-  let zero_balance = ("USD", "0.0") in
-  (match Fluxum_adapter.Adapter.Normalize.balance zero_balance with
-   | Ok bal ->
-     let _ = assert_float_equal 0.0 bal.total "Zero balance accepted" in ()
-   | Error msg ->
-     printf "  ✗ FAIL: Should accept zero balance: %s\n" msg;
-     incr tests_run; incr tests_failed);
-
-  (* Test high precision *)
-  let precision_balance = ("ETH", "123.456789012345") in
-  (match Fluxum_adapter.Adapter.Normalize.balance precision_balance with
-   | Ok bal ->
-     let _ = assert_float_equal 123.456789012345 bal.total "High precision balance" in ()
-   | Error msg ->
-     printf "  ✗ FAIL: Should handle high precision: %s\n" msg;
-     incr tests_run; incr tests_failed);
-
-  ()
+    (match Fluxum_adapter.Adapter.Normalize.balance bad_balance with
+     | Error _ ->
+       printf "  ✓ Rejected invalid balance amount\n";
+       incr tests_run;
+       incr tests_passed
+     | Ok _ ->
+       printf "  ✗ FAIL: Should reject non-numeric balance\n";
+       incr tests_run;
+       incr tests_failed);
+    (* Test valid balance - ensure it still works *)
+    let good_balance = ("ETH", "10.5") in
+      (match Fluxum_adapter.Adapter.Normalize.balance good_balance with
+       | Ok bal ->
+         let _ = assert_float_equal 10.5 bal.total "Valid balance parsed correctly" in
+         let _ =
+           assert_equal
+             ~equal:String.equal
+             ~sexp_of_t:String.sexp_of_t
+             "ETH"
+             bal.currency
+             "Currency preserved"
+         in
+           ()
+       | Error msg ->
+         printf "  ✗ FAIL: Valid balance should succeed: %s\n" msg;
+         incr tests_run;
+         incr tests_failed);
+      (* Test negative balance *)
+      let negative_balance = ("BTC", "-5.0") in
+        (match Fluxum_adapter.Adapter.Normalize.balance negative_balance with
+         | Ok bal ->
+           (* Kraken doesn't validate negative - parsed as-is *)
+           let _ =
+             assert_float_equal (-5.0) bal.total "Negative balance parsed (no validation)"
+           in
+             ()
+         | Error _ ->
+           printf "  ✗ FAIL: Unexpected rejection of negative balance\n";
+           incr tests_run;
+           incr tests_failed);
+        (* Test zero balance *)
+        let zero_balance = ("USD", "0.0") in
+          (match Fluxum_adapter.Adapter.Normalize.balance zero_balance with
+           | Ok bal ->
+             let _ = assert_float_equal 0.0 bal.total "Zero balance accepted" in
+               ()
+           | Error msg ->
+             printf "  ✗ FAIL: Should accept zero balance: %s\n" msg;
+             incr tests_run;
+             incr tests_failed);
+          (* Test high precision *)
+          let precision_balance = ("ETH", "123.456789012345") in
+            (match Fluxum_adapter.Adapter.Normalize.balance precision_balance with
+             | Ok bal ->
+               let _ =
+                 assert_float_equal 123.456789012345 bal.total "High precision balance"
+               in
+                 ()
+             | Error msg ->
+               printf "  ✗ FAIL: Should handle high precision: %s\n" msg;
+               incr tests_run;
+               incr tests_failed);
+            ()
 
 (** Test normalize functions with various error conditions *)
 let test_normalize_side_error_paths () =
   printf "\n=== Normalize: Side Error Paths ===\n";
-
   (* Valid sides *)
   let buy = Fluxum_adapter.Adapter.Normalize.side_of_string "buy" in
-  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
-    Types.Side.Buy buy "Side 'buy' → Buy" in
-
+  let _ =
+    assert_equal
+      ~equal:Types.Side.equal
+      ~sexp_of_t:Types.Side.sexp_of_t
+      Types.Side.Buy
+      buy
+      "Side 'buy' → Buy"
+  in
   let sell = Fluxum_adapter.Adapter.Normalize.side_of_string "sell" in
-  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
-    Types.Side.Sell sell "Side 'sell' → Sell" in
-
+  let _ =
+    assert_equal
+      ~equal:Types.Side.equal
+      ~sexp_of_t:Types.Side.sexp_of_t
+      Types.Side.Sell
+      sell
+      "Side 'sell' → Sell"
+  in
   (* Invalid side - uses default *)
   let invalid = Fluxum_adapter.Adapter.Normalize.side_of_string "invalid_side" in
-  printf "  ✓ Invalid side defaults to: %s\n"
-    (Sexp.to_string (Types.Side.sexp_of_t invalid));
-  incr tests_run; incr tests_passed;
-
-  (* Case insensitive *)
-  let buy_upper = Fluxum_adapter.Adapter.Normalize.side_of_string "BUY" in
-  let _ = assert_equal ~equal:Types.Side.equal ~sexp_of_t:Types.Side.sexp_of_t
-    Types.Side.Buy buy_upper "Side 'BUY' → Buy (case insensitive)" in
-
-  ()
+    printf
+      "  ✓ Invalid side defaults to: %s\n"
+      (Sexp.to_string (Types.Side.sexp_of_t invalid));
+    incr tests_run;
+    incr tests_passed;
+    (* Case insensitive *)
+    let buy_upper = Fluxum_adapter.Adapter.Normalize.side_of_string "BUY" in
+    let _ =
+      assert_equal
+        ~equal:Types.Side.equal
+        ~sexp_of_t:Types.Side.sexp_of_t
+        Types.Side.Buy
+        buy_upper
+        "Side 'BUY' → Buy (case insensitive)"
+    in
+      ()
 
 let test_normalize_status_error_paths () =
   printf "\n=== Normalize: Order Status Error Paths ===\n";
-
   (* Valid statuses *)
   let open_status = Fluxum_adapter.Adapter.Normalize.status_of_string "open" in
-  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
-    Types.Order_status.New open_status "Status 'open' → New" in
-
+  let _ =
+    assert_equal
+      ~equal:order_status_equal
+      ~sexp_of_t:Types.Order_status.sexp_of_t
+      Types.Order_status.New
+      open_status
+      "Status 'open' → New"
+  in
   let closed = Fluxum_adapter.Adapter.Normalize.status_of_string "closed" in
-  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
-    Types.Order_status.Filled closed "Status 'closed' → Filled" in
-
+  let _ =
+    assert_equal
+      ~equal:order_status_equal
+      ~sexp_of_t:Types.Order_status.sexp_of_t
+      Types.Order_status.Filled
+      closed
+      "Status 'closed' → Filled"
+  in
   (* Invalid status - uses default *)
   let invalid = Fluxum_adapter.Adapter.Normalize.status_of_string "invalid_status" in
-  printf "  ✓ Invalid status defaults to: %s\n"
-    (Sexp.to_string (Types.Order_status.sexp_of_t invalid));
-  incr tests_run; incr tests_passed;
-
-  (* Case variations *)
-  let canceled_var1 = Fluxum_adapter.Adapter.Normalize.status_of_string "canceled" in
-  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
-    Types.Order_status.Canceled canceled_var1 "Status 'canceled' → Canceled" in
-
-  let canceled_var2 = Fluxum_adapter.Adapter.Normalize.status_of_string "cancelled" in
-  let _ = assert_equal ~equal:order_status_equal ~sexp_of_t:Types.Order_status.sexp_of_t
-    Types.Order_status.Canceled canceled_var2 "Status 'cancelled' → Canceled" in
-
-  ()
+    printf
+      "  ✓ Invalid status defaults to: %s\n"
+      (Sexp.to_string (Types.Order_status.sexp_of_t invalid));
+    incr tests_run;
+    incr tests_passed;
+    (* Case variations *)
+    let canceled_var1 = Fluxum_adapter.Adapter.Normalize.status_of_string "canceled" in
+    let _ =
+      assert_equal
+        ~equal:order_status_equal
+        ~sexp_of_t:Types.Order_status.sexp_of_t
+        Types.Order_status.Canceled
+        canceled_var1
+        "Status 'canceled' → Canceled"
+    in
+    let canceled_var2 = Fluxum_adapter.Adapter.Normalize.status_of_string "cancelled" in
+    let _ =
+      assert_equal
+        ~equal:order_status_equal
+        ~sexp_of_t:Types.Order_status.sexp_of_t
+        Types.Order_status.Canceled
+        canceled_var2
+        "Status 'cancelled' → Canceled"
+    in
+      ()
 
 let test_normalize_float_conversion_errors () =
   printf "\n=== Normalize: Float Conversion Errors ===\n";
-
   (* Test valid float conversions *)
   (match Fluxum.Normalize_common.Float_conv.of_string "123.456" with
    | Ok f ->
-     let _ = assert_float_equal 123.456 f "Valid float string parsed" in ()
+     let _ = assert_float_equal 123.456 f "Valid float string parsed" in
+       ()
    | Error msg ->
      printf "  ✗ FAIL: Should parse valid float: %s\n" msg;
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   (* Test malformed float *)
   (match Fluxum.Normalize_common.Float_conv.of_string "not_a_float" with
    | Error _ ->
      printf "  ✓ Rejected malformed float string\n";
-     incr tests_run; incr tests_passed
+     incr tests_run;
+     incr tests_passed
    | Ok _ ->
      printf "  ✗ FAIL: Should reject malformed float\n";
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   (* Test infinity *)
   (match Fluxum.Normalize_common.Float_conv.of_string "inf" with
    | Error _ ->
      printf "  ✓ Rejected non-finite float (infinity)\n";
-     incr tests_run; incr tests_passed
+     incr tests_run;
+     incr tests_passed
    | Ok _ ->
      printf "  ✗ FAIL: Should reject non-finite float\n";
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   (* Test price validation (must be positive) *)
   (match Fluxum.Normalize_common.Float_conv.price_of_string "-100.0" with
    | Error _ ->
      printf "  ✓ Rejected negative price\n";
-     incr tests_run; incr tests_passed
+     incr tests_run;
+     incr tests_passed
    | Ok _ ->
      printf "  ✗ FAIL: Price should be positive\n";
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   (* Test valid price *)
   (match Fluxum.Normalize_common.Float_conv.price_of_string "50000.50" with
    | Ok p ->
-     let _ = assert_float_equal 50000.50 p "Valid price parsed" in ()
+     let _ = assert_float_equal 50000.50 p "Valid price parsed" in
+       ()
    | Error msg ->
      printf "  ✗ FAIL: Should parse valid price: %s\n" msg;
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   (* Test quantity validation (non-negative) *)
   (match Fluxum.Normalize_common.Float_conv.qty_of_string "-1.5" with
    | Error _ ->
      printf "  ✓ Rejected negative quantity\n";
-     incr tests_run; incr tests_passed
+     incr tests_run;
+     incr tests_passed
    | Ok _ ->
      printf "  ✗ FAIL: Quantity cannot be negative\n";
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   (* Test zero quantity (should be allowed) *)
   (match Fluxum.Normalize_common.Float_conv.qty_of_string "0.0" with
    | Ok q ->
-     let _ = assert_float_equal 0.0 q "Zero quantity allowed" in ()
+     let _ = assert_float_equal 0.0 q "Zero quantity allowed" in
+       ()
    | Error msg ->
      printf "  ✗ FAIL: Should allow zero quantity: %s\n" msg;
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   ()
 
 let test_normalize_edge_cases () =
   printf "\n=== Normalize: Edge Cases ===\n";
-
   (* Test very large numbers *)
   (match Fluxum.Normalize_common.Float_conv.of_string "999999999999.99" with
    | Ok f ->
-     let _ = assert_float_equal 999999999999.99 f "Very large number parsed" in ()
+     let _ = assert_float_equal 999999999999.99 f "Very large number parsed" in
+       ()
    | Error msg ->
      printf "  ✗ FAIL: Should handle large numbers: %s\n" msg;
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   (* Test very small numbers *)
   (match Fluxum.Normalize_common.Float_conv.of_string "0.000000001" with
    | Ok f ->
-     let _ = assert_float_equal 0.000000001 f ~tolerance:0.0000000001 "Very small number parsed" in ()
+     let _ =
+       assert_float_equal 0.000000001 f ~tolerance:0.0000000001 "Very small number parsed"
+     in
+       ()
    | Error msg ->
      printf "  ✗ FAIL: Should handle small numbers: %s\n" msg;
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   (* Test scientific notation *)
   (match Fluxum.Normalize_common.Float_conv.of_string "1.23e10" with
    | Ok f ->
-     let _ = assert_float_equal 12300000000.0 f "Scientific notation parsed" in ()
+     let _ = assert_float_equal 12300000000.0 f "Scientific notation parsed" in
+       ()
    | Error msg ->
      printf "  ✗ FAIL: Should handle scientific notation: %s\n" msg;
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   (* Test negative scientific notation *)
   (match Fluxum.Normalize_common.Float_conv.of_string "1.5e-8" with
    | Ok f ->
-     let _ = assert_float_equal 0.000000015 f ~tolerance:0.0000000001 "Negative exponent parsed" in ()
+     let _ =
+       assert_float_equal 0.000000015 f ~tolerance:0.0000000001 "Negative exponent parsed"
+     in
+       ()
    | Error msg ->
      printf "  ✗ FAIL: Should handle negative exponents: %s\n" msg;
-     incr tests_run; incr tests_failed);
-
+     incr tests_run;
+     incr tests_failed);
   ()
 
 (** ========== TEST RUNNER ========== *)
@@ -694,7 +853,6 @@ let () =
   printf "╔════════════════════════════════════════════════════════╗\n";
   printf "║  Kraken Unified Adapter - Comprehensive Test Suite    ║\n";
   printf "╚════════════════════════════════════════════════════════╝\n";
-
   (* Run all tests *)
   test_ledger_entry_creation ();
   test_ledger_simple_trades ();
@@ -704,7 +862,6 @@ let () =
   test_ledger_spot_updates ();
   test_ledger_cost_basis_accounting ();
   test_ledger_multi_symbol ();
-
   test_order_book_creation ();
   test_order_book_bid_sorting ();
   test_order_book_ask_sorting ();
@@ -715,20 +872,16 @@ let () =
   (* test_order_book_quantity_conversions (); *)
   test_order_book_epoch ();
   (* test_order_book_multi_symbol (); *)
-
   test_fluxum_adapter_side_conversion ();
   test_fluxum_adapter_status_conversion ();
   test_fluxum_adapter_venue ();
-
   (* Phase 1 normalize error path tests *)
   test_normalize_balance_error_paths ();
-
   (* Phase 2 Priority 2: Additional error path tests *)
   test_normalize_side_error_paths ();
   test_normalize_status_error_paths ();
   test_normalize_float_conversion_errors ();
   test_normalize_edge_cases ();
-
   (* Print summary *)
   printf "\n";
   printf "╔════════════════════════════════════════════════════════╗\n";
@@ -739,11 +892,10 @@ let () =
   printf "║  Failed: %3d tests  ✗                                  ║\n" !tests_failed;
   printf "╚════════════════════════════════════════════════════════╝\n";
   printf "\n";
-
-  (match !tests_failed > 0 with
-   | true ->
-     printf "❌ TEST SUITE FAILED\n\n";
-     exit 1
-   | false ->
-     printf "✅ ALL TESTS PASSED!\n\n";
-     exit 0)
+  match !tests_failed > 0 with
+  | true ->
+    printf "❌ TEST SUITE FAILED\n\n";
+    exit 1
+  | false ->
+    printf "✅ ALL TESTS PASSED!\n\n";
+    exit 0

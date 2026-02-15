@@ -5,8 +5,7 @@ module Side = struct
   module T = struct
     type t =
       [ `Buy
-      | `Sell
-      ]
+      | `Sell ]
     [@@deriving sexp, enumerate, equal, compare]
 
     let to_string = function
@@ -28,8 +27,7 @@ module Order_type = struct
       | `Take_profit
       | `Stop_loss_limit
       | `Take_profit_limit
-      | `Settle_position
-      ]
+      | `Settle_position ]
     [@@deriving sexp, enumerate, equal, compare]
 
     let to_string = function
@@ -54,8 +52,7 @@ module Order_status = struct
       | `Open
       | `Closed
       | `Canceled
-      | `Expired
-      ]
+      | `Expired ]
     [@@deriving sexp, enumerate, equal, compare]
 
     let to_string = function
@@ -74,10 +71,9 @@ end
 module Time_in_force = struct
   module T = struct
     type t =
-      [ `GTC  (** Good till canceled *)
-      | `IOC  (** Immediate or cancel *)
-      | `GTD  (** Good till date *)
-      ]
+      [ `GTC (** Good till canceled *)
+      | `IOC (** Immediate or cancel *)
+      | `GTD (** Good till date *) ]
     [@@deriving sexp, enumerate, equal, compare]
 
     let to_string = function

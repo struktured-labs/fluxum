@@ -44,8 +44,7 @@ let arg_type = Command.Arg_type.create of_string
 
 let param =
   Command.Param.(
-    flag "-cfg" (optional arg_type)
-      ~doc:"STRING Binance environment (production|testnet)")
+    flag "-cfg" (optional arg_type) ~doc:"STRING Binance environment (production|testnet)")
 
 let or_default cfg =
   match cfg with

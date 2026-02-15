@@ -10,8 +10,7 @@
     The ledger follows the unified Ledger_intf.S interface with 28-field P&L tracking.
     The session follows the unified Session_intf.S interface with auto-restart pipes.
 
-    This module provides convenient access to all three unified interfaces.
-*)
+    This module provides convenient access to all three unified interfaces. *)
 
 (** Binance's Order Book implementation *)
 module Order_book = Order_book

@@ -1,7 +1,6 @@
 (** Coinbase Advanced Trade API Module *)
 
 open Core
-
 module Cfg = Cfg
 module Rest = Rest
 module Ws = Ws
@@ -13,6 +12,4 @@ module Unified_adapter = Unified_adapter
 module Fluxum_adapter = Fluxum_adapter
 
 let command : Command.t =
-  Command.group ~summary:"Coinbase Advanced Trade Commands"
-    [ Ledger.command
-    ]
+  Command.group ~summary:"Coinbase Advanced Trade Commands" [Ledger.command]

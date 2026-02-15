@@ -1,8 +1,7 @@
 (** OKX Session - Implements unified Session_intf with auto-reconnecting streams
 
     Complete session management for OKX exchange with unified V5 API WebSocket support.
-    Supports market data, trades, depth updates, and order book tracking.
-*)
+    Supports market data, trades, depth updates, and order book tracking. *)
 
 open Core
 open Async
@@ -16,22 +15,22 @@ module Auto_restart = Exchange_common.Auto_restart
 module Events = struct
   (** Type aliases for OKX-specific types *)
   type balance = V5.Account_balance.T.balance_detail
+
   type trade = Ws.Message.trade_data
-  type market_event = string  (* Raw WebSocket message *)
+  type market_event = string (* Raw WebSocket message *)
   type book = Order_book.Book.t
   type ledger_entry = Ledger.Entry.t
-  type order_event = V5.Place_order.T.response  (* Order execution updates *)
+  type order_event = V5.Place_order.T.response (* Order execution updates *)
   type order_id = string
 
   type t =
-    { symbols : Fluxum.Types.Symbol.t list;
-      balance_pipe : balance Pipe.Reader.t;
-      trades : trade Pipe.Reader.t Fluxum.Types.Symbol.Map.t;
-      market_data : market_event Pipe.Reader.t Fluxum.Types.Symbol.Map.t;
-      order_books : (book, string) Result.t Pipe.Reader.t Fluxum.Types.Symbol.Map.t;
-      ledger : ledger_entry Pipe.Reader.t Fluxum.Types.Symbol.Map.t;
-      order_events_pipe : order_event Pipe.Reader.t;
-    }
+    { symbols: Fluxum.Types.Symbol.t list
+    ; balance_pipe: balance Pipe.Reader.t
+    ; trades: trade Pipe.Reader.t Fluxum.Types.Symbol.Map.t
+    ; market_data: market_event Pipe.Reader.t Fluxum.Types.Symbol.Map.t
+    ; order_books: (book, string) Result.t Pipe.Reader.t Fluxum.Types.Symbol.Map.t
+    ; ledger: ledger_entry Pipe.Reader.t Fluxum.Types.Symbol.Map.t
+    ; order_events_pipe: order_event Pipe.Reader.t }
 
   let symbols t = t.symbols
   let balance t = t.balance_pipe
@@ -43,245 +42,231 @@ module Events = struct
 
   (** Create session events *)
   let create
-      ~cfg:(module Cfg : Cfg.S)
-      ?(symbols : Fluxum.Types.Symbol.t list = [])
-      ?order_ids:_
-      ()
-    : t Deferred.t =
+        ~cfg:(module Cfg : Cfg.S)
+        ?(symbols : Fluxum.Types.Symbol.t list = [])
+        ?order_ids:_
+        ()
+    : t Deferred.t
+    =
     Log.Global.info "OKX Events.create: start symbols=%d" (List.length symbols);
-
     (* Balance pipe - REST polling every 5s *)
     let balance_pipe =
-      Auto_restart.pipe ~name:"okx_balance_poll" ~create_pipe:(fun () ->
-        let reader, writer = Pipe.create () in
-        let rec poll_loop () =
-          V5.Account_balance.request (module Cfg) { ccy = None } >>= function
-          | `Ok resp ->
-            let details = List.concat_map resp.data ~f:(fun acct -> acct.details) in
-            Deferred.List.iter ~how:`Sequential details ~f:(fun detail ->
-              Pipe.write writer detail)
-            >>= fun () ->
-            after (Time_float_unix.Span.of_sec 5.0) >>= poll_loop
-          | #Rest.Error.t as err ->
-            Log.Global.error "OKX balance poll failed: %s"
-              (Sexp.to_string (Rest.Error.sexp_of_t err));
-            after (Time_float_unix.Span.of_sec 10.0) >>= poll_loop
-        in
-        don't_wait_for (poll_loop ());
-        return reader
-      ) ()
+      Auto_restart.pipe
+        ~name:"okx_balance_poll"
+        ~create_pipe:(fun () ->
+          let reader, writer = Pipe.create () in
+          let rec poll_loop () =
+            V5.Account_balance.request (module Cfg) {ccy= None}
+            >>= function
+            | `Ok resp ->
+              let details = List.concat_map resp.data ~f:(fun acct -> acct.details) in
+                Deferred.List.iter ~how:`Sequential details ~f:(fun detail ->
+                  Pipe.write writer detail)
+                >>= fun () -> after (Time_float_unix.Span.of_sec 5.0) >>= poll_loop
+            | #Rest.Error.t as err ->
+              Log.Global.error
+                "OKX balance poll failed: %s"
+                (Sexp.to_string (Rest.Error.sexp_of_t err));
+              after (Time_float_unix.Span.of_sec 10.0) >>= poll_loop
+          in
+            don't_wait_for (poll_loop ());
+            return reader)
+        ()
     in
-
     (* Market data pipes - one per symbol with auto-restart *)
     let market_data =
-      Fluxum.Types.Symbol.Map.of_alist_exn (
-        List.map symbols ~f:(fun symbol ->
-          let name = sprintf "okx_market_data[%s]" symbol in
-          let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
-            Log.Global.info "Creating OKX WebSocket for %s" symbol;
-            let%bind ws_result = Ws.connect
-              ~streams:[{ channel = Ws.Stream.Tickers; instId = symbol }]
-              ()
-            in
-            match ws_result with
-            | Ok ws -> return (Ws.messages ws)
-            | Error err ->
-              Log.Global.error "OKX WS connection failed: %s" (Error.to_string_hum err);
-              let reader, _writer = Pipe.create () in
-              return reader
-          ) () in
-          (symbol, pipe)
-        )
-      )
+      Fluxum.Types.Symbol.Map.of_alist_exn
+        (List.map symbols ~f:(fun symbol ->
+           let name = sprintf "okx_market_data[%s]" symbol in
+           let pipe =
+             Auto_restart.pipe
+               ~name
+               ~create_pipe:(fun () ->
+                 Log.Global.info "Creating OKX WebSocket for %s" symbol;
+                 let%bind ws_result =
+                   Ws.connect ~streams:[{channel= Ws.Stream.Tickers; instId= symbol}] ()
+                 in
+                   match ws_result with
+                   | Ok ws -> return (Ws.messages ws)
+                   | Error err ->
+                     Log.Global.error
+                       "OKX WS connection failed: %s"
+                       (Error.to_string_hum err);
+                     let reader, _writer = Pipe.create () in
+                       return reader)
+               ()
+           in
+             (symbol, pipe)))
     in
-
     (* Order book pipes - one per symbol *)
     let%bind order_books =
       Deferred.List.map ~how:`Parallel symbols ~f:(fun symbol ->
         let%bind pipe = Order_book.Book.pipe ~symbol () in
-        return (symbol, pipe)
-      )
+          return (symbol, pipe))
       >>| Fluxum.Types.Symbol.Map.of_alist_exn
     in
-
     (* Trades pipes - one per symbol with auto-restart *)
     let trades =
-      Fluxum.Types.Symbol.Map.of_alist_exn (
-        List.map symbols ~f:(fun symbol ->
-          let name = sprintf "okx_trades[%s]" symbol in
-          let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
-            Log.Global.info "Creating OKX trade stream for %s" symbol;
-            let%bind ws_result = Ws.connect
-              ~streams:[{ channel = Ws.Stream.Trades; instId = symbol }]
-              ()
-            in
-            match ws_result with
-            | Ok ws ->
-              (* Filter for trade messages only *)
-              let trade_pipe = Pipe.filter_map (Ws.messages ws) ~f:(fun msg ->
-                match Ws.parse_message msg with
-                | Ws.Message.Trades trades -> List.hd trades  (* Safe: returns None if empty *)
-                | _ -> None
-              ) in
-              return trade_pipe
-            | Error err ->
-              Log.Global.error "OKX trade WS failed: %s" (Error.to_string_hum err);
-              let reader, _writer = Pipe.create () in
-              return reader
-          ) () in
-          (symbol, pipe)
-        )
-      )
+      Fluxum.Types.Symbol.Map.of_alist_exn
+        (List.map symbols ~f:(fun symbol ->
+           let name = sprintf "okx_trades[%s]" symbol in
+           let pipe =
+             Auto_restart.pipe
+               ~name
+               ~create_pipe:(fun () ->
+                 Log.Global.info "Creating OKX trade stream for %s" symbol;
+                 let%bind ws_result =
+                   Ws.connect ~streams:[{channel= Ws.Stream.Trades; instId= symbol}] ()
+                 in
+                   match ws_result with
+                   | Ok ws ->
+                     (* Filter for trade messages only *)
+                     let trade_pipe =
+                       Pipe.filter_map (Ws.messages ws) ~f:(fun msg ->
+                         match Ws.parse_message msg with
+                         | Ws.Message.Trades trades ->
+                           List.hd trades (* Safe: returns None if empty *)
+                         | _ -> None)
+                     in
+                       return trade_pipe
+                   | Error err ->
+                     Log.Global.error "OKX trade WS failed: %s" (Error.to_string_hum err);
+                     let reader, _writer = Pipe.create () in
+                       return reader)
+               ()
+           in
+             (symbol, pipe)))
     in
-
     (* Ledger pipes - one per symbol *)
     let ledger =
-      Fluxum.Types.Symbol.Map.of_alist_exn (
-        List.map symbols ~f:(fun symbol ->
-          let init = Ledger.Entry.create ~symbol () in
-
-          (* Get order book and trade pipes for this symbol *)
-          let book_pipe = match Map.find order_books symbol with
-            | Some pipe -> pipe
-            | None ->
-              let reader, _writer = Pipe.create () in
-              reader
-          in
-
-          let trade_pipe = match Map.find trades symbol with
-            | Some pipe -> pipe
-            | None ->
-              let reader, _writer = Pipe.create () in
-              reader
-          in
-
-          (* Create ledger entry pipe *)
-          let ledger_reader, ledger_writer = Pipe.create () in
-
-          (* Combine book and trade updates *)
-          let entry_ref = ref init in
-
-          don't_wait_for (
-            (* Update from book prices *)
-            Pipe.iter book_pipe ~f:(fun book_result ->
-              match book_result with
-              | Ok book ->
-                entry_ref := Ledger.Entry.on_market_data !entry_ref ~book;
-                Pipe.write ledger_writer !entry_ref
-              | Error err ->
-                Log.Global.error "OKX order book error for %s: %s" symbol err;
-                Deferred.unit
-            )
-          );
-
-          don't_wait_for (
-            (* Update from trades *)
-            Pipe.iter trade_pipe ~f:(fun trade ->
-              match (
-                let open Result.Let_syntax in
-                let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string trade.px in
-                let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string trade.sz in
-                let%bind side = Fluxum.Normalize_common.Side.of_string trade.side in
-                Ok (price, qty, side)
-              ) with
-              | Ok (price, qty, side) ->
-                entry_ref := Ledger.Entry.on_trade !entry_ref ~price ~side ~qty;
-                Pipe.write ledger_writer !entry_ref
-              | Error err ->
-                Log.Global.error "OKX trade parse error: %s" err;
-                Deferred.unit
-            )
-          );
-
-          (symbol, ledger_reader)
-        )
-      )
+      Fluxum.Types.Symbol.Map.of_alist_exn
+        (List.map symbols ~f:(fun symbol ->
+           let init = Ledger.Entry.create ~symbol () in
+           (* Get order book and trade pipes for this symbol *)
+           let book_pipe =
+             match Map.find order_books symbol with
+             | Some pipe -> pipe
+             | None ->
+               let reader, _writer = Pipe.create () in
+                 reader
+           in
+           let trade_pipe =
+             match Map.find trades symbol with
+             | Some pipe -> pipe
+             | None ->
+               let reader, _writer = Pipe.create () in
+                 reader
+           in
+           (* Create ledger entry pipe *)
+           let ledger_reader, ledger_writer = Pipe.create () in
+           (* Combine book and trade updates *)
+           let entry_ref = ref init in
+             don't_wait_for
+               ((* Update from book prices *)
+                Pipe.iter
+                  book_pipe
+                  ~f:(fun book_result ->
+                    match book_result with
+                    | Ok book ->
+                      entry_ref := Ledger.Entry.on_market_data !entry_ref ~book;
+                      Pipe.write ledger_writer !entry_ref
+                    | Error err ->
+                      Log.Global.error "OKX order book error for %s: %s" symbol err;
+                      Deferred.unit));
+             don't_wait_for
+               ((* Update from trades *)
+                Pipe.iter
+                  trade_pipe
+                  ~f:(fun trade ->
+                    match
+                      let open Result.Let_syntax in
+                      let%bind price =
+                        Fluxum.Normalize_common.Float_conv.price_of_string trade.px
+                      in
+                      let%bind qty =
+                        Fluxum.Normalize_common.Float_conv.qty_of_string trade.sz
+                      in
+                      let%bind side = Fluxum.Normalize_common.Side.of_string trade.side in
+                        Ok (price, qty, side)
+                    with
+                    | Ok (price, qty, side) ->
+                      entry_ref := Ledger.Entry.on_trade !entry_ref ~price ~side ~qty;
+                      Pipe.write ledger_writer !entry_ref
+                    | Error err ->
+                      Log.Global.error "OKX trade parse error: %s" err;
+                      Deferred.unit));
+             (symbol, ledger_reader)))
     in
-
     (* Order events pipe - private WebSocket with auto-restart *)
     let order_events_pipe =
-      Auto_restart.pipe ~name:"okx_order_events" ~create_pipe:(fun () ->
-        Private_ws.connect ~cfg:(module Cfg) () >>| function
-        | Ok msg_pipe ->
-          let order_reader, order_writer = Pipe.create () in
-          don't_wait_for (
-            Pipe.iter msg_pipe ~f:(fun msg ->
-              match msg with
-              | Ws.Private.Orders orders ->
-                Deferred.List.iter ~how:`Sequential orders ~f:(fun order ->
-                  (* Convert Ws.Private.order_data to V5.Place_order response *)
-                  let resp : V5.Place_order.T.response =
-                    { data =
-                      [{ ordId = order.ordId
-                       ; clOrdId = order.clOrdId
-                       ; sCode = "0"
-                       ; sMsg = ""
-                       }]
-                    }
-                  in
-                  Pipe.write order_writer resp)
-              | Ws.Private.Account _accts ->
-                Deferred.unit
-              | Ws.Private.LoginSuccess | Ws.Private.LoginError _ ->
-                Deferred.unit
-              | Ws.Private.Unknown _ ->
-                Deferred.unit)
-            >>| fun () -> Pipe.close order_writer);
-          order_reader
-        | Error _err ->
-          Log.Global.error "OKX private WS connection failed, order events unavailable";
-          let reader, _writer = Pipe.create () in
-          reader
-      ) ()
+      Auto_restart.pipe
+        ~name:"okx_order_events"
+        ~create_pipe:(fun () ->
+          Private_ws.connect ~cfg:(module Cfg) ()
+          >>| function
+          | Ok msg_pipe ->
+            let order_reader, order_writer = Pipe.create () in
+              don't_wait_for
+                (Pipe.iter msg_pipe ~f:(fun msg ->
+                   match msg with
+                   | Ws.Private.Orders orders ->
+                     Deferred.List.iter ~how:`Sequential orders ~f:(fun order ->
+                       (* Convert Ws.Private.order_data to V5.Place_order response *)
+                       let resp : V5.Place_order.T.response =
+                         { data=
+                             [ { ordId= order.ordId
+                               ; clOrdId= order.clOrdId
+                               ; sCode= "0"
+                               ; sMsg= "" } ] }
+                       in
+                         Pipe.write order_writer resp)
+                   | Ws.Private.Account _accts -> Deferred.unit
+                   | Ws.Private.LoginSuccess | Ws.Private.LoginError _ -> Deferred.unit
+                   | Ws.Private.Unknown _ -> Deferred.unit)
+                 >>| fun () -> Pipe.close order_writer);
+              order_reader
+          | Error _err ->
+            Log.Global.error "OKX private WS connection failed, order events unavailable";
+            let reader, _writer = Pipe.create () in
+              reader)
+        ()
     in
-
-    return {
-      symbols;
-      balance_pipe;
-      trades;
-      market_data;
-      order_books;
-      ledger;
-      order_events_pipe;
-    }
+      return
+        { symbols
+        ; balance_pipe
+        ; trades
+        ; market_data
+        ; order_books
+        ; ledger
+        ; order_events_pipe }
 end
 
 (** Session state management *)
 type t =
-  { events : Events.t;
-    mutable state : State.t;
-    state_changes_reader : State.t Pipe.Reader.t;
-    state_changes_writer : State.t Pipe.Writer.t;
-  }
+  { events: Events.t
+  ; mutable state: State.t
+  ; state_changes_reader: State.t Pipe.Reader.t
+  ; state_changes_writer: State.t Pipe.Writer.t }
 
 (** Create session *)
 let create
-    ~cfg:(module Cfg : Cfg.S)
-    ?(symbols : Fluxum.Types.Symbol.t list = [])
-    ?order_ids
-    ()
-  : t Deferred.t =
+      ~cfg:(module Cfg : Cfg.S)
+      ?(symbols : Fluxum.Types.Symbol.t list = [])
+      ?order_ids
+      ()
+  : t Deferred.t
+  =
   Log.Global.info "OKX Session.create: symbols=%d" (List.length symbols);
-
   (* Create state change pipe *)
   let state_changes_reader, state_changes_writer = Pipe.create () in
-
-  (* Start in Connecting state and emit *)
-  don't_wait_for (Pipe.write state_changes_writer State.Connecting);
-
-  (* Create events *)
-  let%bind events = Events.create ~cfg:(module Cfg) ~symbols ?order_ids () in
-
-  (* Update state to Ready *)
-  let state = State.Ready in
-  don't_wait_for (Pipe.write state_changes_writer state);
-
-  return {
-    events;
-    state;
-    state_changes_reader;
-    state_changes_writer;
-  }
+    (* Start in Connecting state and emit *)
+    don't_wait_for (Pipe.write state_changes_writer State.Connecting);
+    (* Create events *)
+    let%bind events = Events.create ~cfg:(module Cfg) ~symbols ?order_ids () in
+    (* Update state to Ready *)
+    let state = State.Ready in
+      don't_wait_for (Pipe.write state_changes_writer state);
+      return {events; state; state_changes_reader; state_changes_writer}
 
 (** Get events *)
 let events t = t.events

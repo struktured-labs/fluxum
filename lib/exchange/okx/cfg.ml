@@ -1,16 +1,14 @@
 let param ?default ~name ~env () =
   let name = sprintf "OKX_%s_%s" (String.uppercase env) name in
-  match Unix.getenv name with
-  | Some param -> param
-  | None -> (
-    match default with
-    | None -> failwithf "Environment variable \"%s\" must be specified" name ()
-    | Some default -> default )
+    match Unix.getenv name with
+    | Some param -> param
+    | None ->
+      (match default with
+       | None -> failwithf "Environment variable \"%s\" must be specified" name ()
+       | Some default -> default)
 
 let api_key ?default = param ?default ~name:"API_KEY"
-
 let api_secret ?default = param ?default ~name:"API_SECRET"
-
 let api_passphrase ?default = param ?default ~name:"API_PASSPHRASE"
 
 (** OKX configuration module signature *)
@@ -28,7 +26,8 @@ let make env ~base_url =
     let api_secret = api_secret ~env ()
     let api_passphrase = api_passphrase ~env ()
     let base_url = base_url
-  end in
+  end
+  in
   (module M : S)
 
 (** Production configuration *)
@@ -58,15 +57,13 @@ let of_string s =
   | "testnet" ->
     let module Cfg : S = Testnet () in
     (module Cfg : S)
-  | unsupported_env ->
-    failwithf "okx environment %s not supported" unsupported_env ()
+  | unsupported_env -> failwithf "okx environment %s not supported" unsupported_env ()
 
 let arg_type = Command.Arg_type.create of_string
 
 let param =
   Command.Param.(
-    flag "-cfg" (optional arg_type)
-      ~doc:"STRING okx environment (production|aws|testnet)")
+    flag "-cfg" (optional arg_type) ~doc:"STRING okx environment (production|aws|testnet)")
 
 let or_default cfg =
   match cfg with

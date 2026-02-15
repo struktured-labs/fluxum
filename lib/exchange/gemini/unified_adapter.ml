@@ -3,8 +3,7 @@
     Note: Gemini uses strongly-typed symbol enums (Common.Symbol.t) rather than strings,
     so this adapter exposes Gemini's implementations as-is rather than forcing exact
     interface compliance. The unified interfaces (Order_book_intf, Ledger_intf, Session_intf)
-    serve as design templates for new exchange implementations like Kraken.
-*)
+    serve as design templates for new exchange implementations like Kraken. *)
 
 (** Gemini's Order Book implementation *)
 module Order_book = Order_book

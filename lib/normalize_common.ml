@@ -1,8 +1,7 @@
 (** Shared normalization utilities for exchange adapters
 
     This module provides safe, fallible conversion functions to eliminate
-    unsafe Float.of_string and other crash-prone operations across exchange adapters.
-*)
+    unsafe Float.of_string and other crash-prone operations across exchange adapters. *)
 
 open Core
 
@@ -33,8 +32,7 @@ module Float_conv = struct
     | Error e -> Error e
 
   (** Convert string to amount (allows negative for balance differences) *)
-  let amount_of_string (s : string) : (float, string) Result.t =
-    of_string s
+  let amount_of_string (s : string) : (float, string) Result.t = of_string s
 end
 
 (** {1 Result Utilities} *)
@@ -43,18 +41,17 @@ module Result_util = struct
   (** Transpose list of Results into Result of list
 
       [Ok 1; Ok 2; Ok 3] → Ok [1; 2; 3]
-      [Ok 1; Error "e"; Ok 3] → Error "e" (first error wins)
-  *)
+      [Ok 1; Error "e"; Ok 3] → Error "e" (first error wins) *)
   let transpose (results : ('a, 'e) Result.t list) : ('a list, 'e) Result.t =
     List.fold_right results ~init:(Ok []) ~f:(fun res acc ->
-      match res, acc with
+      match (res, acc) with
       | Ok v, Ok vs -> Ok (v :: vs)
       | Error e, _ -> Error e
       | _, Error e -> Error e)
 
-  (** Map and transpose - apply function that returns Result, collect all successes or first error *)
-  let map_transpose ~f list =
-    List.map list ~f |> transpose
+  (** Map and transpose - apply function that returns Result, collect all successes or first error
+  *)
+  let map_transpose ~f list = List.map list ~f |> transpose
 end
 
 (** {1 Exchange Type Conversions} *)
@@ -66,8 +63,7 @@ module Side = struct
       - "buy", "b", "BID", "Buy", "BUY" → Types.Side.Buy
       - "sell", "s", "ASK", "Sell", "SELL" → Types.Side.Sell
 
-      Returns Error if side is unrecognized.
-  *)
+      Returns Error if side is unrecognized. *)
   let of_string (s : string) : (Types.Side.t, string) Result.t =
     match s with
     | "buy" | "Buy" | "BUY" | "b" | "B" | "bid" | "Bid" | "BID" -> Ok Types.Side.Buy
@@ -77,8 +73,7 @@ module Side = struct
   (** Version with default fallback (for backwards compatibility).
 
       Warning: Using defaults can mask data quality issues.
-      Prefer of_string which returns Result.t.
-  *)
+      Prefer of_string which returns Result.t. *)
   let of_string_exn ?(default = Types.Side.Buy) (s : string) : Types.Side.t =
     match of_string s with
     | Ok side -> side
@@ -95,22 +90,45 @@ module Order_status = struct
       - "canceled", "cancelled", "expired", "CANCELED", "CANCELLED" → Order_status.Canceled
       - "rejected", "REJECTED" → Order_status.Rejected
 
-      Returns Error if status is unrecognized.
-  *)
+      Returns Error if status is unrecognized. *)
   let of_string (s : string) : (Types.Order_status.t, string) Result.t =
     match s with
-    | "new" | "New" | "NEW" | "pending" | "Pending" | "PENDING"
-    | "open" | "Open" | "OPEN" | "accepted" | "Accepted" | "ACCEPTED" ->
-      Ok Types.Order_status.New
-    | "filled" | "Filled" | "FILLED" | "closed" | "Closed" | "CLOSED"
-    | "executed" | "Executed" | "EXECUTED" ->
-      Ok Types.Order_status.Filled
-    | "canceled" | "Canceled" | "CANCELED" | "cancelled" | "Cancelled" | "CANCELLED"
-    | "expired" | "Expired" | "EXPIRED" ->
-      Ok Types.Order_status.Canceled
-    | "partially_filled" | "Partially_filled" | "PARTIALLY_FILLED"
-    | "partial" | "Partial" | "PARTIAL" ->
-      Ok Types.Order_status.Partially_filled
+    | "new"
+    | "New"
+    | "NEW"
+    | "pending"
+    | "Pending"
+    | "PENDING"
+    | "open"
+    | "Open"
+    | "OPEN"
+    | "accepted"
+    | "Accepted"
+    | "ACCEPTED" -> Ok Types.Order_status.New
+    | "filled"
+    | "Filled"
+    | "FILLED"
+    | "closed"
+    | "Closed"
+    | "CLOSED"
+    | "executed"
+    | "Executed"
+    | "EXECUTED" -> Ok Types.Order_status.Filled
+    | "canceled"
+    | "Canceled"
+    | "CANCELED"
+    | "cancelled"
+    | "Cancelled"
+    | "CANCELLED"
+    | "expired"
+    | "Expired"
+    | "EXPIRED" -> Ok Types.Order_status.Canceled
+    | "partially_filled"
+    | "Partially_filled"
+    | "PARTIALLY_FILLED"
+    | "partial"
+    | "Partial"
+    | "PARTIAL" -> Ok Types.Order_status.Partially_filled
     | "rejected" | "Rejected" | "REJECTED" ->
       Ok (Types.Order_status.Rejected "Order rejected")
     | _ -> Error (sprintf "Unrecognized order status: %s" s)
@@ -118,9 +136,10 @@ module Order_status = struct
   (** Version with default fallback (for backwards compatibility).
 
       Warning: Using defaults can mask data quality issues.
-      Prefer of_string which returns Result.t.
-  *)
-  let of_string_exn ?(default = Types.Order_status.New) (s : string) : Types.Order_status.t =
+      Prefer of_string which returns Result.t. *)
+  let of_string_exn ?(default = Types.Order_status.New) (s : string)
+    : Types.Order_status.t
+    =
     match of_string s with
     | Ok status -> status
     | Error _ -> default
@@ -137,18 +156,23 @@ module Order_type = struct
       Note: This returns a placeholder price (0.0) for limit orders.
       Caller must fill in the actual price from the order data.
 
-      Returns Error if order type is unrecognized.
-  *)
+      Returns Error if order type is unrecognized. *)
   let of_string (s : string) : (Types.Order_kind.t, string) Result.t =
     match s with
     | "market" | "Market" | "MARKET" -> Ok Types.Order_kind.market
-    | "limit" | "Limit" | "LIMIT" -> Ok (Types.Order_kind.limit 0.0)  (* Price filled by caller *)
-    | "post_only" | "Post_only" | "POST_ONLY"
-    | "maker_only" | "Maker_only" | "MAKER_ONLY"
-    | "limit_maker" | "Limit_maker" | "LIMIT_MAKER" ->
-      Ok (Types.Order_kind.post_only 0.0)
+    | "limit" | "Limit" | "LIMIT" ->
+      Ok (Types.Order_kind.limit 0.0) (* Price filled by caller *)
+    | "post_only"
+    | "Post_only"
+    | "POST_ONLY"
+    | "maker_only"
+    | "Maker_only"
+    | "MAKER_ONLY"
+    | "limit_maker"
+    | "Limit_maker"
+    | "LIMIT_MAKER" -> Ok (Types.Order_kind.post_only 0.0)
     | "stop" | "Stop" | "STOP" | "stop_loss" | "STOP_LOSS" ->
-      Ok (Types.Order_kind.stop_market 0.0)  (* Trigger price filled by caller *)
+      Ok (Types.Order_kind.stop_market 0.0) (* Trigger price filled by caller *)
     | "stop_limit" | "Stop_limit" | "STOP_LIMIT" ->
       Ok (Types.Order_kind.stop_limit ~stop:0.0 ~limit:0.0)
     | "take_profit" | "Take_profit" | "TAKE_PROFIT" ->
@@ -160,9 +184,9 @@ module Order_type = struct
   (** Version with default fallback (for backwards compatibility).
 
       Warning: Using defaults can mask data quality issues.
-      Prefer of_string which returns Result.t.
-  *)
-  let of_string_exn ?(default = Types.Order_kind.market) (s : string) : Types.Order_kind.t =
+      Prefer of_string which returns Result.t. *)
+  let of_string_exn ?(default = Types.Order_kind.market) (s : string) : Types.Order_kind.t
+    =
     match of_string s with
     | Ok kind -> kind
     | Error _ -> default

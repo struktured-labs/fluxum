@@ -5,7 +5,9 @@ open Core
 module type S = sig
   val api_url : string
   val api_key : string option
-  val chain_id : int  (** EVM chain ID: 1=Ethereum, 56=BSC, 137=Polygon, 42161=Arbitrum *)
+
+  (** EVM chain ID: 1=Ethereum, 56=BSC, 137=Polygon, 42161=Arbitrum *)
+  val chain_id : int
 end
 
 (** Ethereum Mainnet *)
@@ -50,14 +52,13 @@ module Base = struct
   let chain_id = 8453
 end
 
-let or_default cfg_opt =
-  Option.value cfg_opt ~default:(module Ethereum : S)
+let or_default cfg_opt = Option.value cfg_opt ~default:(module Ethereum : S)
 
 (** Create config for any chain *)
 let of_chain_id chain_id =
   let api_key = Sys.getenv "ONEINCH_API_KEY" in
-  (module struct
-    let api_url = sprintf "https://api.1inch.dev/swap/v6.0/%d" chain_id
-    let api_key = api_key
-    let chain_id = chain_id
-  end : S)
+    (module struct
+      let api_url = sprintf "https://api.1inch.dev/swap/v6.0/%d" chain_id
+      let api_key = api_key
+      let chain_id = chain_id
+    end : S)

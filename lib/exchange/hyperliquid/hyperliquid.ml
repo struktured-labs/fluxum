@@ -4,11 +4,9 @@
     fully on-chain order book. This module provides REST and WebSocket
     API access.
 
-    @see <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api>
-*)
+    @see <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api> *)
 
 open Core
-
 module Cfg = Cfg
 module Rest = Rest
 module Ws = Ws
@@ -21,6 +19,4 @@ module Market_data = Market_data
 module Signing = Signing
 
 let command : Command.t =
-  Command.group ~summary:"Hyperliquid Exchange Commands"
-    [ Ledger.command
-    ]
+  Command.group ~summary:"Hyperliquid Exchange Commands" [Ledger.command]

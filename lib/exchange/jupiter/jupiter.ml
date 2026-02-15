@@ -15,8 +15,7 @@
     API Key:
     - Required for swap/v1 endpoints
     - Get one at https://dev.jup.ag
-    - Set via JUPITER_API_KEY environment variable
-*)
+    - Set via JUPITER_API_KEY environment variable *)
 
 module Cfg = Cfg
 module Rest = Rest
@@ -30,6 +29,4 @@ module Fluxum_adapter = Fluxum_adapter
 module Tokens = Rest.Tokens
 
 let command =
-  Core.Command.group ~summary:"Jupiter Solana DEX Aggregator Commands"
-    [ Ledger.command
-    ]
+  Core.Command.group ~summary:"Jupiter Solana DEX Aggregator Commands" [Ledger.command]

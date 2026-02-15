@@ -5,8 +5,7 @@
 
     This module provides REST API access for spot trading.
 
-    @see <https://www.kucoin.com/docs>
-*)
+    @see <https://www.kucoin.com/docs> *)
 
 module Cfg = Cfg
 module Types = Types

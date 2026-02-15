@@ -25,8 +25,7 @@
     - State tracking (Disconnected, Connecting, Connected, Ready, Reconnecting, Failed)
     - Multi-stream Events container (balance, trades, market_data, order_books, ledger, order_events)
     - State change notifications
-    - Automatic reconnection on WebSocket EOF/errors
-*)
+    - Automatic reconnection on WebSocket EOF/errors *)
 
 (** Kraken's Order Book implementation - COMPLETE *)
 module Order_book = Order_book

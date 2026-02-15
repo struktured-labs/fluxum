@@ -41,10 +41,10 @@
 
 (** Pool with venue attribution *)
 module Attributed_pool : sig
-  type t = {
-    venue : string;
-    pool : Pool_intf.Pool.t;
-  } [@@deriving sexp, compare, equal, fields]
+  type t =
+    { venue: string
+    ; pool: Pool_intf.Pool.t }
+  [@@deriving sexp, compare, equal, fields]
 
   val create : venue:string -> pool:Pool_intf.Pool.t -> t
 
@@ -57,11 +57,11 @@ end
 
 (** Quote with venue attribution *)
 module Attributed_quote : sig
-  type t = {
-    venue : string;
-    pool_id : string;
-    quote : Pool_intf.Quote.t;
-  } [@@deriving sexp, compare, equal, fields]
+  type t =
+    { venue: string
+    ; pool_id: string
+    ; quote: Pool_intf.Quote.t }
+  [@@deriving sexp, compare, equal, fields]
 
   val create : venue:string -> pool_id:string -> quote:Pool_intf.Quote.t -> t
 
@@ -74,15 +74,15 @@ end
 
 (** Aggregated liquidity metrics for a token pair *)
 module Pair_liquidity : sig
-  type t = {
-    token0 : string;
-    token1 : string;
-    total_tvl_usd : float;
-    num_pools : int;
-    best_spot_price : float;
-    best_venue : string;
-    weighted_avg_price : float;
-  } [@@deriving sexp, compare, equal, fields]
+  type t =
+    { token0: string
+    ; token1: string
+    ; total_tvl_usd: float
+    ; num_pools: int
+    ; best_spot_price: float
+    ; best_venue: string
+    ; weighted_avg_price: float }
+  [@@deriving sexp, compare, equal, fields]
 end
 
 (** {1 Consolidated Pools State} *)
@@ -126,8 +126,12 @@ val best_price : t -> token0:string -> token1:string -> Attributed_pool.t option
     @param token_in Input token symbol
     @param token_out Output token symbol
     @return List of quotes sorted by effective price (best first) *)
-val best_quotes : t -> amount:float -> token_in:string -> token_out:string ->
-  Attributed_quote.t list
+val best_quotes
+  :  t
+  -> amount:float
+  -> token_in:string
+  -> token_out:string
+  -> Attributed_quote.t list
 
 (** Get the single best quote for a trade.
 
@@ -137,8 +141,12 @@ val best_quotes : t -> amount:float -> token_in:string -> token_out:string ->
     @param token_in Input token symbol
     @param token_out Output token symbol
     @return Best quote, or None if no pools *)
-val best_quote : t -> amount:float -> token_in:string -> token_out:string ->
-  Attributed_quote.t option
+val best_quote
+  :  t
+  -> amount:float
+  -> token_in:string
+  -> token_out:string
+  -> Attributed_quote.t option
 
 (** {1 Liquidity Analysis} *)
 
@@ -171,8 +179,13 @@ val pair_liquidity : t -> token0:string -> token1:string -> Pair_liquidity.t opt
     @param token_out Output token symbol
     @param max_splits Maximum number of pools to split across
     @return List of (pool_id, amount, quote) tuples *)
-val split_route : t -> amount:float -> token_in:string -> token_out:string ->
-  max_splits:int -> (string * float * Attributed_quote.t) list
+val split_route
+  :  t
+  -> amount:float
+  -> token_in:string
+  -> token_out:string
+  -> max_splits:int
+  -> (string * float * Attributed_quote.t) list
 
 (** Arbitrage detection between pools for the same pair.
 
@@ -182,8 +195,12 @@ val split_route : t -> amount:float -> token_in:string -> token_out:string ->
     @param token1 Quote token symbol
     @param min_profit_bps Minimum spread in basis points
     @return List of (buy_pool, sell_pool, spread_bps) opportunities *)
-val find_arbitrage : t -> token0:string -> token1:string -> min_profit_bps:int ->
-  (Attributed_pool.t * Attributed_pool.t * float) list
+val find_arbitrage
+  :  t
+  -> token0:string
+  -> token1:string
+  -> min_profit_bps:int
+  -> (Attributed_pool.t * Attributed_pool.t * float) list
 
 (** {1 Introspection} *)
 

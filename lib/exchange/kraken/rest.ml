@@ -11,27 +11,22 @@ module Error = struct
     | `Service_unavailable of string
     | `Not_acceptable of string
     | `Unauthorized of string
-    | `Too_many_requests of string
-    ]
+    | `Too_many_requests of string ]
   [@@deriving sexp]
 
   type json_error =
-    { message : string;
-      body : string
-    }
+    { message: string
+    ; body: string }
   [@@deriving sexp]
 
-  type json = [ `Json_parse_error of json_error ] [@@deriving sexp]
-
-  type api_error = { errors : string list } [@@deriving sexp]
-
-  type response = [ `Api_error of api_error ] [@@deriving sexp]
+  type json = [`Json_parse_error of json_error] [@@deriving sexp]
+  type api_error = {errors: string list} [@@deriving sexp]
+  type response = [`Api_error of api_error] [@@deriving sexp]
 
   type post =
     [ http
     | json
-    | response
-    ]
+    | response ]
   [@@deriving sexp]
 end
 
@@ -56,7 +51,7 @@ module Response = struct
   (** Kraken response format: {"error": [...], "result": {...}} *)
   let parse json result_of_yojson =
     match json with
-    | `Assoc fields -> (
+    | `Assoc fields ->
       (* Extract error field *)
       let errors =
         List.Assoc.find fields ~equal:String.equal "error"
@@ -64,52 +59,47 @@ module Response = struct
           | `List lst ->
             Some
               (List.map lst ~f:(function
-                | `String s -> s
-                | j -> Yojson.Safe.to_string j))
+                 | `String s -> s
+                 | j -> Yojson.Safe.to_string j))
           | _ -> None)
         |> Option.value ~default:[]
       in
       (* Extract result field *)
       let result =
-        List.Assoc.find fields ~equal:String.equal "result"
-        |> Option.value ~default:`Null
+        List.Assoc.find fields ~equal:String.equal "result" |> Option.value ~default:`Null
       in
-      match errors with
-      | [] -> (
-        match result_of_yojson result with
-        | Result.Ok x -> `Ok x
-        | Result.Error e ->
-          `Json_parse_error
-            Error.{ message = e; body = Yojson.Safe.to_string result } )
-      | _ :: _ -> `Api_error Error.{ errors } )
+        (match errors with
+         | [] ->
+           (match result_of_yojson result with
+            | Result.Ok x -> `Ok x
+            | Result.Error e ->
+              `Json_parse_error Error.{message= e; body= Yojson.Safe.to_string result})
+         | _ :: _ -> `Api_error Error.{errors})
     | _ ->
       `Json_parse_error
-        Error.{ message = "Expected object"; body = Yojson.Safe.to_string json }
+        Error.{message= "Expected object"; body= Yojson.Safe.to_string json}
 end
 
 (** Generate nonce from current Unix timestamp in milliseconds *)
-let generate_nonce () =
-  Int.to_string (Int.of_float (Unix.gettimeofday () *. 1000.0))
+let generate_nonce () = Int.to_string (Int.of_float (Unix.gettimeofday () *. 1000.0))
 
 (** Build form-encoded POST data *)
 let build_post_data params =
-  String.concat ~sep:"&"
+  String.concat
+    ~sep:"&"
     (List.map params ~f:(fun (k, v) ->
-      sprintf "%s=%s" (Uri.pct_encode k) (Uri.pct_encode v)))
+       sprintf "%s=%s" (Uri.pct_encode k) (Uri.pct_encode v)))
 
 module Post (Operation : Operation.S) = struct
   let post (module Cfg : Cfg.S) (request : Operation.request) =
     (* Generate nonce *)
     let nonce = generate_nonce () in
-
     (* Build POST parameters *)
     let request_params = Operation.request_to_params request in
     let post_params = ("nonce", nonce) :: request_params in
     let post_data = build_post_data post_params in
-
     (* API path for signing *)
     let api_path = sprintf "/0/private/%s" Operation.endpoint in
-
     (* Generate signature *)
     let signature_result =
       Signature.kraken_signature
@@ -123,53 +113,47 @@ module Post (Operation : Operation.S) = struct
       | Ok s -> s
       | Error (`Msg msg) -> failwith msg
     in
-
     (* Build headers *)
     let headers =
       Cohttp.Header.of_list
         [ ("API-Key", Cfg.api_key)
         ; ("API-Sign", signature)
-        ; ("Content-Type", "application/x-www-form-urlencoded")
-        ]
+        ; ("Content-Type", "application/x-www-form-urlencoded") ]
     in
-
     (* Build URI *)
     let uri = Uri.make ~scheme:"https" ~host:"api.kraken.com" ~path:api_path () in
-
     (* Make request *)
     let body = Cohttp_async.Body.of_string post_data in
-
-    Log.Global.debug "Kraken API call: %s" Operation.endpoint;
-    Log.Global.debug "POST data: %s" post_data;
-
-    Cohttp_async.Client.post ~headers ~body uri >>= fun (response, body) ->
-    match Cohttp.Response.status response with
-    | `OK ->
-      Cohttp_async.Body.to_string body >>| fun s ->
-      Log.Global.debug "Response: %s" s;
-      (try
-        let json = Yojson.Safe.from_string s in
-        Response.parse json Operation.response_of_yojson
-      with e ->
-        `Json_parse_error
-          Error.{ message = Exn.to_string e; body = s })
-    | `Not_found ->
-      return `Not_found
-    | `Not_acceptable ->
-      Cohttp_async.Body.to_string body >>| fun b -> `Not_acceptable b
-    | `Bad_request ->
-      Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
-    | `Service_unavailable ->
-      Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
-    | `Unauthorized ->
-      Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
-    | `Too_many_requests ->
-      Cohttp_async.Body.to_string body >>| fun b -> `Too_many_requests b
-    | (code : Cohttp.Code.status_code) ->
-      Cohttp_async.Body.to_string body >>| fun b ->
-      failwiths ~here:[%here]
-        (sprintf "Unexpected Kraken API status code (body=%S)" b)
-        code Cohttp.Code.sexp_of_status_code
+      Log.Global.debug "Kraken API call: %s" Operation.endpoint;
+      Log.Global.debug "POST data: %s" post_data;
+      Cohttp_async.Client.post ~headers ~body uri
+      >>= fun (response, body) ->
+      match Cohttp.Response.status response with
+      | `OK ->
+        Cohttp_async.Body.to_string body
+        >>| fun s ->
+        Log.Global.debug "Response: %s" s;
+        (try
+           let json = Yojson.Safe.from_string s in
+             Response.parse json Operation.response_of_yojson
+         with
+         | e -> `Json_parse_error Error.{message= Exn.to_string e; body= s})
+      | `Not_found -> return `Not_found
+      | `Not_acceptable -> Cohttp_async.Body.to_string body >>| fun b -> `Not_acceptable b
+      | `Bad_request -> Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
+      | `Service_unavailable ->
+        Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
+      | `Unauthorized -> Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
+      | `Too_many_requests ->
+        Cohttp_async.Body.to_string body >>| fun b -> `Too_many_requests b
+      | (code : Cohttp.Code.status_code) ->
+        Cohttp_async.Body.to_string body
+        >>| fun b ->
+        failwiths
+          ~here:[%here]
+          (sprintf "Unexpected Kraken API status code (body=%S)" b)
+          code
+          Cohttp.Code.sexp_of_status_code
 end
 
 (** GET request for public (unauthenticated) endpoints *)
@@ -177,44 +161,40 @@ module Get (Operation : Operation.S) = struct
   let get (module Cfg : Cfg.S) (request : Operation.request) =
     (* Build query parameters *)
     let request_params = Operation.request_to_params request in
-
     (* API path for public endpoints *)
     let api_path = sprintf "/0/public/%s" Operation.endpoint in
-
     (* Build URI with query params *)
     let uri = Uri.make ~scheme:"https" ~host:"api.kraken.com" ~path:api_path () in
     let uri = Uri.add_query_params' uri request_params in
-
-    Log.Global.debug "Kraken API GET: %s" (Uri.to_string uri);
-
-    Cohttp_async.Client.get uri >>= fun (response, body) ->
-    match Cohttp.Response.status response with
-    | `OK ->
-      Cohttp_async.Body.to_string body >>| fun s ->
-      Log.Global.debug "Response: %s" s;
-      (try
-        let json = Yojson.Safe.from_string s in
-        Response.parse json Operation.response_of_yojson
-      with e ->
-        `Json_parse_error
-          Error.{ message = Exn.to_string e; body = s })
-    | `Not_found ->
-      return `Not_found
-    | `Not_acceptable ->
-      Cohttp_async.Body.to_string body >>| fun b -> `Not_acceptable b
-    | `Bad_request ->
-      Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
-    | `Service_unavailable ->
-      Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
-    | `Unauthorized ->
-      Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
-    | `Too_many_requests ->
-      Cohttp_async.Body.to_string body >>| fun b -> `Too_many_requests b
-    | (code : Cohttp.Code.status_code) ->
-      Cohttp_async.Body.to_string body >>| fun b ->
-      failwiths ~here:[%here]
-        (sprintf "Unexpected Kraken API status code (body=%S)" b)
-        code Cohttp.Code.sexp_of_status_code
+      Log.Global.debug "Kraken API GET: %s" (Uri.to_string uri);
+      Cohttp_async.Client.get uri
+      >>= fun (response, body) ->
+      match Cohttp.Response.status response with
+      | `OK ->
+        Cohttp_async.Body.to_string body
+        >>| fun s ->
+        Log.Global.debug "Response: %s" s;
+        (try
+           let json = Yojson.Safe.from_string s in
+             Response.parse json Operation.response_of_yojson
+         with
+         | e -> `Json_parse_error Error.{message= Exn.to_string e; body= s})
+      | `Not_found -> return `Not_found
+      | `Not_acceptable -> Cohttp_async.Body.to_string body >>| fun b -> `Not_acceptable b
+      | `Bad_request -> Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
+      | `Service_unavailable ->
+        Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
+      | `Unauthorized -> Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
+      | `Too_many_requests ->
+        Cohttp_async.Body.to_string body >>| fun b -> `Too_many_requests b
+      | (code : Cohttp.Code.status_code) ->
+        Cohttp_async.Body.to_string body
+        >>| fun b ->
+        failwiths
+          ~here:[%here]
+          (sprintf "Unexpected Kraken API status code (body=%S)" b)
+          code
+          Cohttp.Code.sexp_of_status_code
 end
 
 module Make_public (Operation : Operation.S) = struct
@@ -222,26 +202,31 @@ module Make_public (Operation : Operation.S) = struct
 
   let command =
     let open Command.Let_syntax in
-    ( Operation.name,
-      Command.async
+    ( Operation.name
+    , Command.async
         ~summary:(sprintf "Kraken %s public endpoint" Operation.endpoint)
         [%map_open
           let config = Cfg.param
           and request = anon ("request" %: sexp) in
-          fun () ->
-            let request = Operation.request_of_sexp request in
-            Log.Global.info "Request: %s"
-              (Operation.sexp_of_request request |> Sexp.to_string);
-            let config = Cfg.or_default config in
-            get config request >>= function
-            | `Ok response ->
-              Log.Global.info "Response: %s"
-                (Sexp.to_string_hum (Operation.sexp_of_response response));
-              Log.Global.flushed ()
-            | #Error.post as post_error ->
-              failwiths ~here:[%here]
-                (sprintf "Kraken %s failed" Operation.endpoint)
-                post_error Error.sexp_of_post] )
+            fun () ->
+              let request = Operation.request_of_sexp request in
+                Log.Global.info
+                  "Request: %s"
+                  (Operation.sexp_of_request request |> Sexp.to_string);
+                let config = Cfg.or_default config in
+                  get config request
+                  >>= function
+                  | `Ok response ->
+                    Log.Global.info
+                      "Response: %s"
+                      (Sexp.to_string_hum (Operation.sexp_of_response response));
+                    Log.Global.flushed ()
+                  | #Error.post as post_error ->
+                    failwiths
+                      ~here:[%here]
+                      (sprintf "Kraken %s failed" Operation.endpoint)
+                      post_error
+                      Error.sexp_of_post] )
 end
 
 module Make_public_with_params
@@ -254,31 +239,36 @@ struct
 
   let command =
     let open Command.Let_syntax in
-    ( Operation.name,
-      Command.async
+    ( Operation.name
+    , Command.async
         ~summary:(sprintf "Kraken %s public endpoint" Operation.endpoint)
         [%map_open
           let config = Cfg.param
           and request = Params.params
           and sexp_request = anon (maybe ("request-sexp" %: sexp)) in
-          fun () ->
-            let request =
-              match sexp_request with
-              | Some sexp -> Operation.request_of_sexp sexp
-              | None -> request
-            in
-            Log.Global.info "Request: %s"
-              (Operation.sexp_of_request request |> Sexp.to_string);
-            let config = Cfg.or_default config in
-            get config request >>= function
-            | `Ok response ->
-              Log.Global.info "Response: %s"
-                (Sexp.to_string_hum (Operation.sexp_of_response response));
-              Log.Global.flushed ()
-            | #Error.post as post_error ->
-              failwiths ~here:[%here]
-                (sprintf "Kraken %s failed" Operation.endpoint)
-                post_error Error.sexp_of_post] )
+            fun () ->
+              let request =
+                match sexp_request with
+                | Some sexp -> Operation.request_of_sexp sexp
+                | None -> request
+              in
+                Log.Global.info
+                  "Request: %s"
+                  (Operation.sexp_of_request request |> Sexp.to_string);
+                let config = Cfg.or_default config in
+                  get config request
+                  >>= function
+                  | `Ok response ->
+                    Log.Global.info
+                      "Response: %s"
+                      (Sexp.to_string_hum (Operation.sexp_of_response response));
+                    Log.Global.flushed ()
+                  | #Error.post as post_error ->
+                    failwiths
+                      ~here:[%here]
+                      (sprintf "Kraken %s failed" Operation.endpoint)
+                      post_error
+                      Error.sexp_of_post] )
 end
 
 module Make (Operation : Operation.S) = struct
@@ -286,26 +276,31 @@ module Make (Operation : Operation.S) = struct
 
   let command =
     let open Command.Let_syntax in
-    ( Operation.name,
-      Command.async
+    ( Operation.name
+    , Command.async
         ~summary:(sprintf "Kraken %s endpoint" Operation.endpoint)
         [%map_open
           let config = Cfg.param
           and request = anon ("request" %: sexp) in
-          fun () ->
-            let request = Operation.request_of_sexp request in
-            Log.Global.info "Request: %s"
-              (Operation.sexp_of_request request |> Sexp.to_string);
-            let config = Cfg.or_default config in
-            post config request >>= function
-            | `Ok response ->
-              Log.Global.info "Response: %s"
-                (Sexp.to_string_hum (Operation.sexp_of_response response));
-              Log.Global.flushed ()
-            | #Error.post as post_error ->
-              failwiths ~here:[%here]
-                (sprintf "Kraken %s failed" Operation.endpoint)
-                post_error Error.sexp_of_post] )
+            fun () ->
+              let request = Operation.request_of_sexp request in
+                Log.Global.info
+                  "Request: %s"
+                  (Operation.sexp_of_request request |> Sexp.to_string);
+                let config = Cfg.or_default config in
+                  post config request
+                  >>= function
+                  | `Ok response ->
+                    Log.Global.info
+                      "Response: %s"
+                      (Sexp.to_string_hum (Operation.sexp_of_response response));
+                    Log.Global.flushed ()
+                  | #Error.post as post_error ->
+                    failwiths
+                      ~here:[%here]
+                      (sprintf "Kraken %s failed" Operation.endpoint)
+                      post_error
+                      Error.sexp_of_post] )
 end
 
 module Make_no_arg (Operation : Operation.S_NO_ARG) = struct
@@ -313,23 +308,27 @@ module Make_no_arg (Operation : Operation.S_NO_ARG) = struct
 
   let command =
     let open Command.Let_syntax in
-    ( Operation.name,
-      Command.async
+    ( Operation.name
+    , Command.async
         ~summary:(sprintf "Kraken %s endpoint" Operation.endpoint)
         [%map_open
           let config = Cfg.param in
-          fun () ->
-            let request = () in
-            let config = Cfg.or_default config in
-            post config request >>= function
-            | `Ok response ->
-              Log.Global.info "Response: %s"
-                (Sexp.to_string_hum (Operation.sexp_of_response response));
-              Log.Global.flushed ()
-            | #Error.post as post_error ->
-              failwiths ~here:[%here]
-                (sprintf "Kraken %s failed" Operation.endpoint)
-                post_error Error.sexp_of_post] )
+            fun () ->
+              let request = () in
+              let config = Cfg.or_default config in
+                post config request
+                >>= function
+                | `Ok response ->
+                  Log.Global.info
+                    "Response: %s"
+                    (Sexp.to_string_hum (Operation.sexp_of_response response));
+                  Log.Global.flushed ()
+                | #Error.post as post_error ->
+                  failwiths
+                    ~here:[%here]
+                    (sprintf "Kraken %s failed" Operation.endpoint)
+                    post_error
+                    Error.sexp_of_post] )
 end
 
 module Make_with_params
@@ -342,30 +341,35 @@ struct
 
   let command =
     let open Command.Let_syntax in
-    ( Operation.name,
-      Command.async
+    ( Operation.name
+    , Command.async
         ~summary:(sprintf "Kraken %s endpoint" Operation.endpoint)
         [%map_open
           let config = Cfg.param
           and request = Params.params
           and sexp_request = anon (maybe ("request-sexp" %: sexp)) in
-          fun () ->
-            (* Prefer flags over sexp, but allow sexp as fallback *)
-            let request =
-              match sexp_request with
-              | Some sexp -> Operation.request_of_sexp sexp
-              | None -> request
-            in
-            Log.Global.info "Request: %s"
-              (Operation.sexp_of_request request |> Sexp.to_string);
-            let config = Cfg.or_default config in
-            post config request >>= function
-            | `Ok response ->
-              Log.Global.info "Response: %s"
-                (Sexp.to_string_hum (Operation.sexp_of_response response));
-              Log.Global.flushed ()
-            | #Error.post as post_error ->
-              failwiths ~here:[%here]
-                (sprintf "Kraken %s failed" Operation.endpoint)
-                post_error Error.sexp_of_post] )
+            fun () ->
+              (* Prefer flags over sexp, but allow sexp as fallback *)
+              let request =
+                match sexp_request with
+                | Some sexp -> Operation.request_of_sexp sexp
+                | None -> request
+              in
+                Log.Global.info
+                  "Request: %s"
+                  (Operation.sexp_of_request request |> Sexp.to_string);
+                let config = Cfg.or_default config in
+                  post config request
+                  >>= function
+                  | `Ok response ->
+                    Log.Global.info
+                      "Response: %s"
+                      (Sexp.to_string_hum (Operation.sexp_of_response response));
+                    Log.Global.flushed ()
+                  | #Error.post as post_error ->
+                    failwiths
+                      ~here:[%here]
+                      (sprintf "Kraken %s failed" Operation.endpoint)
+                      post_error
+                      Error.sexp_of_post] )
 end

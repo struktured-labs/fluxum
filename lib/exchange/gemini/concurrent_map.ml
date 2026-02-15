@@ -31,8 +31,7 @@ open Async
 
     Complexity: operations have the same asymptotics as the underlying
     [Core.Map] (typically O(log n) for lookup/update), plus constant overhead
-    for the [Mvar] wrapper.
-*)
+    for the [Mvar] wrapper. *)
 
 module Make (Key : Map.Key) = struct
   module M = Map.Make (Key)
@@ -45,8 +44,8 @@ module Make (Key : Map.Key) = struct
   (** Wrap an existing map in a concurrent container. *)
   let of_map (m : 'a M.t) : 'a t =
     let mvar = Mvar.create () in
-    Mvar.set mvar m;
-    mvar
+      Mvar.set mvar m;
+      mvar
 
   (** Create from an association list, raising on duplicate keys. *)
   let of_alist_exn l : 'a t = of_map (M.of_alist_exn l)
@@ -59,8 +58,7 @@ module Make (Key : Map.Key) = struct
   let empty () : 'a t = of_map M.empty
 
   (** Atomically add a new binding, raising if the key already exists. *)
-  let add_exn (t : 'a t) ~key ~data =
-    Mvar.update_exn t ~f:(Map.add_exn ~key ~data)
+  let add_exn (t : 'a t) ~key ~data = Mvar.update_exn t ~f:(Map.add_exn ~key ~data)
 
   (** Atomically set/replace a binding. *)
   let set (t : 'a t) ~key ~data = Mvar.update_exn t ~f:(Map.set ~key ~data)
@@ -112,19 +110,16 @@ module Make (Key : Map.Key) = struct
   let data (t : 'a t) = to_map t |> Map.data
 
   (** In-place filter: atomically retain only bindings satisfying [f]. *)
-  let filter_in_place (t : 'a t) ~f =
-    Mvar.update_exn t ~f:(fun m -> Map.filter m ~f)
+  let filter_in_place (t : 'a t) ~f = Mvar.update_exn t ~f:(fun m -> Map.filter m ~f)
 
   (** In-place filter with key access. *)
-  let filteri_in_place (t : 'a t) ~f =
-    Mvar.update_exn t ~f:(fun m -> Map.filteri m ~f)
+  let filteri_in_place (t : 'a t) ~f = Mvar.update_exn t ~f:(fun m -> Map.filteri m ~f)
 
   (** In-place map over values. *)
   let map_in_place (t : 'a t) ~f = Mvar.update_exn t ~f:(fun m -> M.map m ~f)
 
   (** In-place map with key access. *)
-  let mapi_in_place (t : 'a t) ~f =
-    Mvar.update_exn t ~f:(fun m -> Map.mapi m ~f)
+  let mapi_in_place (t : 'a t) ~f = Mvar.update_exn t ~f:(fun m -> Map.mapi m ~f)
 
   (** In-place filter_map: transform and drop [None]s. *)
   let filter_map_in_place (t : 'a t) ~f =

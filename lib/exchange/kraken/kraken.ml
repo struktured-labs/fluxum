@@ -1,5 +1,4 @@
 open Core
-
 module Cfg = Cfg
 module Common = Common
 module Rest = Rest
@@ -16,14 +15,14 @@ module Unified_cmd = Unified_cmd
 module Fluxum_adapter = Fluxum_adapter
 
 let command : Command.t =
-  Command.group ~summary:"Kraken Exchange Commands"
+  Command.group
+    ~summary:"Kraken Exchange Commands"
     [ V1.Balances.command
     ; V1.Open_orders.command
     ; V1.Add_order.command
     ; V1.Cancel_order.command
     ; V1.Query_orders.command
-    ; V1.Closed_orders.command
-    (* Account operations - deposits/withdrawals *)
+    ; V1.Closed_orders.command (* Account operations - deposits/withdrawals *)
     ; V1.Deposit_methods.command
     ; V1.Deposit_addresses.command
     ; V1.Deposit_status.command
@@ -34,5 +33,4 @@ let command : Command.t =
     ; Order.command
     ; Ws_cmd.command
     ; Ledger.command
-    ; Unified_cmd.command
-    ]
+    ; Unified_cmd.command ]

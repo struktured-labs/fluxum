@@ -1,8 +1,6 @@
 (library
  (name backtest_strategies)
  (public_name fluxum.backtest_strategies)
- (libraries
-  core
-  async
-  backtest)
- (preprocess (pps ppx_jane)))
+ (libraries core async backtest)
+ (preprocess
+  (pps ppx_jane)))

@@ -26,18 +26,16 @@
       let mid = Book.mid_price book in
       let spread = Book.spread book in
       let best_bid = Book.best_bid book in
-    ]}
-*)
+    ]} *)
 
 module Price_level : sig
   (** A single price level in the order book.
 
       Represents a bid or ask at a specific price with a total volume. *)
 
-  type t = {
-    price: float;   (** Price of this level *)
-    volume: float;  (** Total volume available at this price *)
-  }
+  type t =
+    { price: float (** Price of this level *)
+    ; volume: float (** Total volume available at this price *) }
 
   (** Create a price level. *)
   val create : price:float -> volume:float -> t
@@ -47,6 +45,7 @@ module Price_level : sig
 
   (** S-expression serialization. *)
   val sexp_of_t : t -> Core.Sexp.t
+
   val t_of_sexp : Core.Sexp.t -> t
 
   (** Get the price of this level. *)
@@ -64,11 +63,15 @@ end
 module Ask_price : sig
   (** Ask price comparator (ascending order: lowest ask first). *)
   type t = float
+
   include Core.Comparator.S with type t := t
 end
 
 (** Map of bid prices (sorted descending: best bid first). *)
-module Bid_price_map : Core.Map.S with type Key.t = float and type Key.comparator_witness = Bid_price.comparator_witness
+module Bid_price_map :
+  Core.Map.S
+  with type Key.t = float
+   and type Key.comparator_witness = Bid_price.comparator_witness
 
 (** Map of ask prices (sorted ascending: best ask first). *)
 module Ask_price_map : Core.Map.S with type Key.t = float
@@ -79,27 +82,28 @@ module Ask_price_map : Core.Map.S with type Key.t = float
 
     @param Config Configuration for symbol type and metadata. *)
 module Make (Config : sig
-  (** Symbol type (e.g., string, variant, custom type). *)
-  type symbol
+    (** Symbol type (e.g., string, variant, custom type). *)
+    type symbol
 
-  (** S-expression serialization for symbols. *)
-  val sexp_of_symbol : symbol -> Core.Sexp.t
-  val symbol_of_sexp : Core.Sexp.t -> symbol
+    (** S-expression serialization for symbols. *)
+    val sexp_of_symbol : symbol -> Core.Sexp.t
 
-  (** Symbol comparison for Maps. *)
-  val compare_symbol : symbol -> symbol -> int
+    val symbol_of_sexp : Core.Sexp.t -> symbol
 
-  (** Exchange-specific metadata (e.g., last update ID, timestamp). *)
-  type metadata
+    (** Symbol comparison for Maps. *)
+    val compare_symbol : symbol -> symbol -> int
 
-  (** S-expression serialization for metadata. *)
-  val sexp_of_metadata : metadata -> Core.Sexp.t
-  val metadata_of_sexp : Core.Sexp.t -> metadata
+    (** Exchange-specific metadata (e.g., last update ID, timestamp). *)
+    type metadata
 
-  (** Default metadata value. *)
-  val default_metadata : unit -> metadata
-end) : sig
+    (** S-expression serialization for metadata. *)
+    val sexp_of_metadata : metadata -> Core.Sexp.t
 
+    val metadata_of_sexp : Core.Sexp.t -> metadata
+
+    (** Default metadata value. *)
+    val default_metadata : unit -> metadata
+  end) : sig
   module Book : sig
     (** Order book for a single symbol.
 
@@ -114,6 +118,7 @@ end) : sig
 
     (** S-expression serialization. *)
     val sexp_of_t : t -> Core.Sexp.t
+
     val t_of_sexp : Core.Sexp.t -> t
 
     (** {1 Construction} *)
@@ -153,16 +158,15 @@ end) : sig
 
           (* Remove an ask *)
           let book = Book.set book ~side:`Ask ~price:50001. ~size:0. in
-        ]}
-    *)
-    val set :
-      ?timestamp:float ->
-      ?metadata:Config.metadata ->
-      t ->
-      side:[`Bid | `Ask] ->
-      price:float ->
-      size:float ->
-      t
+        ]} *)
+    val set
+      :  ?timestamp:float
+      -> ?metadata:Config.metadata
+      -> t
+      -> side:[`Bid | `Ask]
+      -> price:float
+      -> size:float
+      -> t
 
     (** Update multiple price levels in a single operation.
 
@@ -175,19 +179,17 @@ end) : sig
 
         {b Example:}
         {[
-          let book = Book.set_many book [
-            (`Bid, 50000., 1.5);
-            (`Bid, 49999., 2.0);
-            (`Ask, 50001., 1.2);
-          ]
-        ]}
-    *)
-    val set_many :
-      ?timestamp:float ->
-      ?metadata:Config.metadata ->
-      t ->
-      ([`Bid | `Ask] * float * float) list ->
-      t
+          let book =
+            Book.set_many
+              book
+              [(`Bid, 50000., 1.5); (`Bid, 49999., 2.0); (`Ask, 50001., 1.2)]
+        ]} *)
+    val set_many
+      :  ?timestamp:float
+      -> ?metadata:Config.metadata
+      -> t
+      -> ([`Bid | `Ask] * float * float) list
+      -> t
 
     (** {1 Market Data} *)
 
@@ -274,8 +276,7 @@ end) : sig
           match Book.vwap_buy book ~volume:10.0 with
           | Some price -> printf "VWAP to buy 10 BTC: $%.2f\\n" price
           | None -> printf "Insufficient liquidity\\n"
-        ]}
-    *)
+        ]} *)
     val vwap_buy : t -> volume:float -> float option
 
     (** Calculate volume-weighted average price for a sell order.
@@ -305,6 +306,7 @@ end) : sig
 
     (** S-expression serialization. *)
     val sexp_of_t : t -> Core.Sexp.t
+
     val t_of_sexp : Core.Sexp.t -> t
 
     (** Create an empty collection. *)
@@ -341,11 +343,10 @@ end) : sig
 
         {b Example:}
         {[
-          let books = Books.update_book books symbol ~f:(fun book ->
-            Book.set book ~side:`Bid ~price:50000. ~size:1.5
-          )
-        ]}
-    *)
+          let books =
+            Books.update_book books symbol ~f:(fun book ->
+              Book.set book ~side:`Bid ~price:50000. ~size:1.5)
+        ]} *)
     val update_book : t -> Config.symbol -> f:(book -> book) -> t
 
     (** Fold over all books in the collection. *)

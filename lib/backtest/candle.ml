@@ -3,18 +3,17 @@
 open Core
 
 type t =
-  { symbol    : string
-  ; timestamp : Time_ns_unix.t
-  ; open_     : float
-  ; high      : float
-  ; low       : float
-  ; close     : float
-  ; volume    : float
-  }
+  { symbol: string
+  ; timestamp: Time_ns_unix.t
+  ; open_: float
+  ; high: float
+  ; low: float
+  ; close: float
+  ; volume: float }
 [@@deriving sexp, compare, equal, fields]
 
 let create ~symbol ~timestamp ~open_ ~high ~low ~close ~volume =
-  { symbol; timestamp; open_; high; low; close; volume }
+  {symbol; timestamp; open_; high; low; close; volume}
 
 (** Get mid price: (high + low) / 2 *)
 let mid t = (t.high +. t.low) /. 2.
@@ -47,21 +46,19 @@ let of_csv_row ~symbol row =
       | ts -> ts
       | exception _ ->
         (* Try as epoch seconds (float) *)
-        match Float.of_string ts with
-        | epoch ->
-          let span = Time_ns.Span.of_sec epoch in
-          Time_ns.of_span_since_epoch span
-        | exception _ ->
-          failwith (sprintf "Cannot parse timestamp: %s" ts)
+        (match Float.of_string ts with
+         | epoch ->
+           let span = Time_ns.Span.of_sec epoch in
+             Time_ns.of_span_since_epoch span
+         | exception _ -> failwith (sprintf "Cannot parse timestamp: %s" ts))
     in
-    { symbol
-    ; timestamp
-    ; open_  = Float.of_string o
-    ; high   = Float.of_string h
-    ; low    = Float.of_string l
-    ; close  = Float.of_string c
-    ; volume = Float.of_string v
-    }
+      { symbol
+      ; timestamp
+      ; open_= Float.of_string o
+      ; high= Float.of_string h
+      ; low= Float.of_string l
+      ; close= Float.of_string c
+      ; volume= Float.of_string v }
   | _ ->
     failwith (sprintf "Invalid CSV row: expected 6 columns, got %d" (List.length row))
 
@@ -72,8 +69,7 @@ let to_csv_row t =
   ; Float.to_string t.high
   ; Float.to_string t.low
   ; Float.to_string t.close
-  ; Float.to_string t.volume
-  ]
+  ; Float.to_string t.volume ]
 
 (** Convert from Yojson *)
 let of_yojson json =
@@ -94,7 +90,7 @@ let of_yojson json =
     let low = json |> member "low" |> to_float in
     let close = json |> member "close" |> to_float in
     let volume = json |> member "volume" |> to_float in
-    Ok { symbol; timestamp; open_; high; low; close; volume }
+      Ok {symbol; timestamp; open_; high; low; close; volume}
   with
   | e -> Error (Exn.to_string e)
 
@@ -107,8 +103,7 @@ let to_yojson t =
     ; ("high", `Float t.high)
     ; ("low", `Float t.low)
     ; ("close", `Float t.close)
-    ; ("volume", `Float t.volume)
-    ]
+    ; ("volume", `Float t.volume) ]
 
 (** Compare by timestamp *)
 let compare_by_time a b = Time_ns.compare a.timestamp b.timestamp

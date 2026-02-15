@@ -4,126 +4,134 @@ open Core
 open Async
 
 (** Represents the market data stream *)
-type t = {
-  uri : Uri.t;
-  ws : Websocket_curl.t;
-  streams : Ws.Stream.t list ref;
-  message_pipe : string Pipe.Reader.t;
-  message_writer : string Pipe.Writer.t;
-  mutable active : bool;
-}
+type t =
+  { uri: Uri.t
+  ; ws: Websocket_curl.t
+  ; streams: Ws.Stream.t list ref
+  ; message_pipe: string Pipe.Reader.t
+  ; message_writer: string Pipe.Writer.t
+  ; mutable active: bool }
 
 (** Connect to Coinbase WebSocket and subscribe to streams *)
-let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.exchange) () : (t, string) Result.t Deferred.t =
+let connect ~(streams : Ws.Stream.t list) ?(url = Ws.Endpoint.exchange) ()
+  : (t, string) Result.t Deferred.t
+  =
   let open Deferred.Let_syntax in
   let uri = Uri.of_string url in
-
   (* Connect using websocket_curl *)
   let%bind ws_result = Websocket_curl.connect ~url () in
+    (* Validate streams is not empty *)
+    match streams with
+    | [] -> return (Error "Cannot connect with empty streams list")
+    | _ ->
+      (match ws_result with
+       | Error err -> return (Error (Error.to_string_hum err))
+       | Ok ws ->
+         let message_pipe_reader, message_pipe_writer = Pipe.create () in
+         let t =
+           { uri
+           ; ws
+           ; streams= ref streams
+           ; message_pipe= message_pipe_reader
+           ; message_writer= message_pipe_writer
+           ; active= true }
+         in
+           (* Start background task to receive messages *)
+           Log.Global.info "Coinbase: Starting receive loop in background";
+           let receive_count = ref 0 in
+             don't_wait_for
+               (let rec receive_loop () =
+                  match t.active with
+                  | false ->
+                    Log.Global.info "Coinbase: Receive loop ending (inactive)";
+                    Pipe.close t.message_writer;
+                    return ()
+                  | true ->
+                    let%bind msg_opt = Websocket_curl.receive ws in
+                      (match msg_opt with
+                       | None ->
+                         (* Connection closed *)
+                         Log.Global.info "Coinbase: Connection closed by server";
+                         t.active <- false;
+                         Pipe.close t.message_writer;
+                         return ()
+                       | Some payload ->
+                         receive_count := !receive_count + 1;
+                         (* Log first few messages for debugging *)
+                         (match !receive_count <= 5 with
+                          | true ->
+                            Log.Global.info
+                              "Coinbase: Message #%d: %s"
+                              !receive_count
+                              payload
+                          | false ->
+                            (match !receive_count mod 100 = 0 with
+                             | true ->
+                               Log.Global.info
+                                 "Coinbase: Received %d messages so far"
+                                 !receive_count
+                             | false -> ()));
+                         let%bind () = Pipe.write t.message_writer payload in
+                           receive_loop ())
+                in
+                  receive_loop ());
+             (* Coinbase doesn't require explicit ping messages - handled by server *)
 
-  (* Validate streams is not empty *)
-  match streams with
-  | [] -> return (Error "Cannot connect with empty streams list")
-  | _ ->
-
-  match ws_result with
-  | Error err ->
-    return (Error (Error.to_string_hum err))
-  | Ok ws ->
-    let message_pipe_reader, message_pipe_writer = Pipe.create () in
-
-    let t = {
-      uri;
-      ws;
-      streams = ref streams;
-      message_pipe = message_pipe_reader;
-      message_writer = message_pipe_writer;
-      active = true;
-    } in
-
-    (* Start background task to receive messages *)
-    Log.Global.info "Coinbase: Starting receive loop in background";
-    let receive_count = ref 0 in
-    don't_wait_for (
-      let rec receive_loop () =
-        match t.active with
-        | false ->
-          Log.Global.info "Coinbase: Receive loop ending (inactive)";
-          Pipe.close t.message_writer;
-          return ()
-        | true ->
-          let%bind msg_opt = Websocket_curl.receive ws in
-          match msg_opt with
-          | None ->
-            (* Connection closed *)
-            Log.Global.info "Coinbase: Connection closed by server";
-            t.active <- false;
-            Pipe.close t.message_writer;
-            return ()
-          | Some payload ->
-            receive_count := !receive_count + 1;
-            (* Log first few messages for debugging *)
-            (match !receive_count <= 5 with
-             | true -> Log.Global.info "Coinbase: Message #%d: %s" !receive_count payload
-             | false ->
-               match !receive_count mod 100 = 0 with
-               | true -> Log.Global.info "Coinbase: Received %d messages so far" !receive_count
-               | false -> ());
-            let%bind () = Pipe.write t.message_writer payload in
-            receive_loop ()
-      in
-      receive_loop ()
-    );
-
-    (* Coinbase doesn't require explicit ping messages - handled by server *)
-
-    (* Send subscription messages for each stream *)
-    let%bind () =
-      (* Check if API credentials are available for authentication *)
-      match Sys.getenv "COINBASE_API_KEY", Sys.getenv "COINBASE_API_SECRET" with
-      | Some api_key, Some api_secret ->
-        (* Generate authentication signature
-           Note: streams is guaranteed non-empty by validation at line 25-26 *)
-        let timestamp = Int63.to_string (Time_ns.to_int63_ns_since_epoch (Time_ns.now ())) in
-        let first_stream = match List.hd streams with
-          | Some s -> s
-          | None -> failwith "BUG: streams validated non-empty at entry"
-        in
-        let channel = Ws.Stream.channel_name first_stream in
-        let product_ids_str =
-          first_stream
-          |> Ws.Stream.product_ids
-          |> String.concat ~sep:","
-        in
-        let signature_result = Signature.coinbase_ws_signature
-          ~api_secret
-          ~timestamp
-          ~channel
-          ~product_ids:product_ids_str
-        in
-        let signature =
-          match signature_result with
-          | Ok s -> s
-          | Error (`Msg msg) -> failwith msg
-        in
-        let subscribe_msg = Ws.Stream.to_subscribe_message_authenticated
-          ~api_key
-          ~signature
-          ~timestamp
-          streams
-        in
-        let msg_str = Yojson.Safe.to_string subscribe_msg in
-        Log.Global.info "Coinbase: Sending authenticated subscription: %s" msg_str;
-        Websocket_curl.send ws msg_str
-      | _ ->
-        (* No credentials, try unauthenticated subscription (will fail for level2) *)
-        let subscribe_msg = Ws.Stream.to_subscribe_message streams in
-        let msg_str = Yojson.Safe.to_string subscribe_msg in
-        Log.Global.info "Coinbase: Sending unauthenticated subscription: %s" msg_str;
-        Websocket_curl.send ws msg_str
-    in
-
-    return (Ok t)
+             (* Send subscription messages for each stream *)
+             let%bind () =
+               (* Check if API credentials are available for authentication *)
+               match
+                 (Sys.getenv "COINBASE_API_KEY", Sys.getenv "COINBASE_API_SECRET")
+               with
+               | Some api_key, Some api_secret ->
+                 (* Generate authentication signature
+                    Note: streams is guaranteed non-empty by validation at line 25-26 *)
+                 let timestamp =
+                   Int63.to_string (Time_ns.to_int63_ns_since_epoch (Time_ns.now ()))
+                 in
+                 let first_stream =
+                   match List.hd streams with
+                   | Some s -> s
+                   | None -> failwith "BUG: streams validated non-empty at entry"
+                 in
+                 let channel = Ws.Stream.channel_name first_stream in
+                 let product_ids_str =
+                   first_stream |> Ws.Stream.product_ids |> String.concat ~sep:","
+                 in
+                 let signature_result =
+                   Signature.coinbase_ws_signature
+                     ~api_secret
+                     ~timestamp
+                     ~channel
+                     ~product_ids:product_ids_str
+                 in
+                 let signature =
+                   match signature_result with
+                   | Ok s -> s
+                   | Error (`Msg msg) -> failwith msg
+                 in
+                 let subscribe_msg =
+                   Ws.Stream.to_subscribe_message_authenticated
+                     ~api_key
+                     ~signature
+                     ~timestamp
+                     streams
+                 in
+                 let msg_str = Yojson.Safe.to_string subscribe_msg in
+                   Log.Global.info
+                     "Coinbase: Sending authenticated subscription: %s"
+                     msg_str;
+                   Websocket_curl.send ws msg_str
+               | _ ->
+                 (* No credentials, try unauthenticated subscription (will fail for level2) *)
+                 let subscribe_msg = Ws.Stream.to_subscribe_message streams in
+                 let msg_str = Yojson.Safe.to_string subscribe_msg in
+                   Log.Global.info
+                     "Coinbase: Sending unauthenticated subscription: %s"
+                     msg_str;
+                   Websocket_curl.send ws msg_str
+             in
+               return (Ok t))
 
 (** Get the message stream from the WebSocket *)
 let messages t : string Pipe.Reader.t = t.message_pipe
@@ -136,7 +144,7 @@ let subscribe t (stream : Ws.Stream.t) : unit Deferred.t =
   | true ->
     let msg = Ws.Stream.to_subscribe_message [stream] in
     let msg_str = Yojson.Safe.to_string msg in
-    Websocket_curl.send t.ws msg_str
+      Websocket_curl.send t.ws msg_str
 
 (** Unsubscribe from a stream *)
 let unsubscribe t (stream : Ws.Stream.t) : unit Deferred.t =
@@ -146,7 +154,7 @@ let unsubscribe t (stream : Ws.Stream.t) : unit Deferred.t =
   | true ->
     let msg = Ws.Stream.to_unsubscribe_message [stream] in
     let msg_str = Yojson.Safe.to_string msg in
-    Websocket_curl.send t.ws msg_str
+      Websocket_curl.send t.ws msg_str
 
 (** Close the connection *)
 let close t : unit Deferred.t =

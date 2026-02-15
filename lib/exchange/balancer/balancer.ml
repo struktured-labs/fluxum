@@ -1,7 +1,6 @@
 (** Balancer DEX (Multi-chain)
 
-    @see <https://balancer.fi/>
-*)
+    @see <https://balancer.fi/> *)
 
 module Cfg = Cfg
 module Types = Types

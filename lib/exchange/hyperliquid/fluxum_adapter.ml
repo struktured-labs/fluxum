@@ -73,36 +73,33 @@
 
     @see <https://hyperliquid.gitbook.io/hyperliquid-docs/> Hyperliquid Documentation
     @see <https://api.hyperliquid.xyz/info> REST API Base URL
-    @see <lib/exchange/hyperliquid/signing.ml> EIP-712 signing implementation
-*)
+    @see <lib/exchange/hyperliquid/signing.ml> EIP-712 signing implementation *)
 
 open Core
 open Async
-
 module Types = Fluxum.Types
 module Exchange_intf = Fluxum.Exchange_intf
-
 module Rest = Rest
 module Ws = Ws
 module Order_book = Order_book
 
 module Adapter = struct
   type t =
-    { cfg : Cfg.t
-    ; user : string option  (* Hyperliquid wallet address for account queries *)
-    ; private_key : string option  (* Private key for signing trades *)
-    ; symbols : string list
-    ; rate_limiter : Exchange_common.Rate_limiter.t
-    }
+    { cfg: Cfg.t
+    ; user: string option (* Hyperliquid wallet address for account queries *)
+    ; private_key: string option (* Private key for signing trades *)
+    ; symbols: string list
+    ; rate_limiter: Exchange_common.Rate_limiter.t }
 
   let create ~cfg ?user ?private_key ?(symbols = []) () =
     { cfg
     ; user
     ; private_key
     ; symbols
-    ; rate_limiter = Exchange_common.Rate_limiter.create
-        ~config:Exchange_common.Rate_limiter.Configs.hyperliquid ()
-    }
+    ; rate_limiter=
+        Exchange_common.Rate_limiter.create
+          ~config:Exchange_common.Rate_limiter.Configs.hyperliquid
+          () }
 
   module Venue = struct
     let t = Types.Venue.Hyperliquid
@@ -110,7 +107,7 @@ module Adapter = struct
 
   module Native = struct
     module Order = struct
-      type id = int64  (* oid - order ID *)
+      type id = int64 (* oid - order ID *)
       type request = Signing.order_request
       type response = Rest.ExchangeResponse.t
       type status = Rest.Types.open_order
@@ -131,17 +128,17 @@ module Adapter = struct
 
     module Book = struct
       type update =
-        { coin : string
-        ; side : [`Bid | `Ask]
-        ; levels : (float * float) list  (* price, size *)
-        ; time : int64
-        }
+        { coin: string
+        ; side: [`Bid | `Ask]
+        ; levels: (float * float) list (* price, size *)
+        ; time: int64 }
+
       type snapshot = Rest.Types.l2_book
     end
 
     module Ticker = struct
       (* Hyperliquid doesn't have 24hr ticker, use asset_ctx from meta *)
-      type t = string * Rest.Types.asset_ctx  (* coin, ctx *)
+      type t = string * Rest.Types.asset_ctx (* coin, ctx *)
     end
 
     module Public_trade = struct
@@ -149,7 +146,7 @@ module Adapter = struct
     end
 
     module Candle = struct
-      type t = unit  (* Hyperliquid candles - TODO: implement *)
+      type t = unit (* Hyperliquid candles - TODO: implement *)
     end
 
     module Symbol_info = struct
@@ -166,11 +163,10 @@ module Adapter = struct
     module Deposit_address = struct
       (** Hyperliquid doesn't have deposit addresses - deposits come from Arbitrum L2 bridge.
           The "address" is your wallet address on Arbitrum. *)
-      type t = {
-        venue : Types.Venue.t;
-        address : string;  (** User's wallet address *)
-        network : string;  (** "Arbitrum" *)
-      }
+      type t =
+        { venue: Types.Venue.t
+        ; address: string (** User's wallet address *)
+        ; network: string (** "Arbitrum" *) }
     end
 
     module Deposit = struct
@@ -193,8 +189,11 @@ module Adapter = struct
   let place_order (t : t) (req : Native.Order.request) =
     match t.private_key with
     | None ->
-      Deferred.return (Error (`Api_error
-        "Private key required for Hyperliquid trading - provide private_key when creating adapter"))
+      Deferred.return
+        (Error
+           (`Api_error
+               "Private key required for Hyperliquid trading - provide private_key when \
+                creating adapter"))
     | Some private_key ->
       Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
         (* Place order with default grouping "na" (no grouping) *)
@@ -206,50 +205,63 @@ module Adapter = struct
   let cancel_order (t : t) (oid : Native.Order.id) =
     match t.private_key with
     | None ->
-      Deferred.return (Error (`Api_error
-        "Private key required for Hyperliquid trading - provide private_key when creating adapter"))
+      Deferred.return
+        (Error
+           (`Api_error
+               "Private key required for Hyperliquid trading - provide private_key when \
+                creating adapter"))
     | Some private_key ->
       (* Need to know the asset ID to cancel - this is a limitation
          For now, we'll need to track this separately or fetch from open orders *)
-      match t.user with
-      | None ->
-        Deferred.return (Error (`Api_error
-          "User address required to determine asset ID for cancellation"))
-      | Some user ->
-        Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-          (* Fetch open orders to find the asset ID *)
-          Rest.open_orders t.cfg ~user
-          >>= function
-          | Error e -> Deferred.return (Error e)
-          | Ok orders ->
-            match List.find orders ~f:(fun o -> Int64.equal o.Rest.Types.oid oid) with
-            | None ->
-              Deferred.return (Error (`Api_error
-                (sprintf "Order %Ld not found - cannot determine asset ID" oid)))
-            | Some order ->
-              (* Get asset ID from symbol name *)
-              Rest.meta t.cfg
-              >>= function
-              | Error e -> Deferred.return (Error e)
-              | Ok meta ->
-                match List.findi meta.Rest.Types.universe ~f:(fun _ item ->
-                  String.equal item.Rest.Types.name order.Rest.Types.coin) with
-                | None ->
-                  Deferred.return (Error (`Api_error
-                    (sprintf "Asset %s not found in universe" order.Rest.Types.coin)))
-                | Some (asset_idx, _) ->
-                  let cancel_req : Signing.cancel_request = {
-                    Signing.asset = asset_idx;
-                    oid;
-                  } in
-                  Rest.cancel_order ~cfg:t.cfg ~private_key ~cancels:[cancel_req] ()
-                  >>| function
-                  | Ok resp -> Ok resp
-                  | Error e -> Error e)
+      (match t.user with
+       | None ->
+         Deferred.return
+           (Error
+              (`Api_error "User address required to determine asset ID for cancellation"))
+       | Some user ->
+         Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+           (* Fetch open orders to find the asset ID *)
+           Rest.open_orders t.cfg ~user
+           >>= function
+           | Error e -> Deferred.return (Error e)
+           | Ok orders ->
+             (match List.find orders ~f:(fun o -> Int64.equal o.Rest.Types.oid oid) with
+              | None ->
+                Deferred.return
+                  (Error
+                     (`Api_error
+                         (sprintf "Order %Ld not found - cannot determine asset ID" oid)))
+              | Some order ->
+                (* Get asset ID from symbol name *)
+                Rest.meta t.cfg
+                >>= (function
+                 | Error e -> Deferred.return (Error e)
+                 | Ok meta ->
+                   (match
+                      List.findi meta.Rest.Types.universe ~f:(fun _ item ->
+                        String.equal item.Rest.Types.name order.Rest.Types.coin)
+                    with
+                    | None ->
+                      Deferred.return
+                        (Error
+                           (`Api_error
+                               (sprintf
+                                  "Asset %s not found in universe"
+                                  order.Rest.Types.coin)))
+                    | Some (asset_idx, _) ->
+                      let cancel_req : Signing.cancel_request =
+                        {Signing.asset= asset_idx; oid}
+                      in
+                        Rest.cancel_order ~cfg:t.cfg ~private_key ~cancels:[cancel_req] ()
+                        >>| (function
+                         | Ok resp -> Ok resp
+                         | Error e -> Error e))))))
 
   let cancel_all_orders (_ : t) ?symbol:_ () =
-    Deferred.return (Error (`Api_error
-      "Hyperliquid cancel_all not implemented - requires blockchain transaction"))
+    Deferred.return
+      (Error
+         (`Api_error
+             "Hyperliquid cancel_all not implemented - requires blockchain transaction"))
 
   let get_candles (_ : t) ~symbol:_ ~timeframe:_ ?since:_ ?until:_ ?limit:_ () =
     Deferred.return (Error (`Api_error "Hyperliquid candles not yet implemented"))
@@ -259,94 +271,112 @@ module Adapter = struct
       Hyperliquid is a DEX on Arbitrum L2:
       - Deposits: Bridge USDC from Arbitrum to Hyperliquid (handled externally)
       - Withdrawals: Use withdraw3 signed action to withdraw USDC to Arbitrum
-      - Transfer history: Available via userFundings endpoint
-  *)
+      - Transfer history: Available via userFundings endpoint *)
 
   let get_deposit_address (t : t) ~currency:_ ?network:_ () =
     (* Hyperliquid deposits come from Arbitrum bridge to your wallet address *)
     match t.user with
-    | None ->
-      Deferred.return (Error (`Api_error "User wallet address required"))
+    | None -> Deferred.return (Error (`Api_error "User wallet address required"))
     | Some user ->
-      let deposit_addr : Native.Deposit_address.t = {
-        venue = Venue.t;
-        address = user;
-        network = "Arbitrum";
-      } in
-      Deferred.return (Ok deposit_addr)
+      let deposit_addr : Native.Deposit_address.t =
+        {venue= Venue.t; address= user; network= "Arbitrum"}
+      in
+        Deferred.return (Ok deposit_addr)
 
   let withdraw (t : t) ~currency:_ ~amount ~address ?tag:_ ?network:_ () =
     (* Hyperliquid only supports USDC withdrawals via withdraw3 action *)
     match t.private_key with
     | None ->
-      Deferred.return (Error (`Api_error
-        "Private key required for Hyperliquid withdrawals"))
+      Deferred.return
+        (Error (`Api_error "Private key required for Hyperliquid withdrawals"))
     | Some private_key ->
       Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
         (* Check if mainnet or testnet based on cfg *)
-        let is_mainnet = String.is_substring t.cfg.rest_url ~substring:"api.hyperliquid.xyz" in
+        let is_mainnet =
+          String.is_substring t.cfg.rest_url ~substring:"api.hyperliquid.xyz"
+        in
         let amount_str = Float.to_string amount in
-        Rest.withdraw ~cfg:t.cfg ~private_key ~destination:address ~amount:amount_str ~is_mainnet ()
-        >>| function
-        | Ok resp -> Ok (Native.Withdrawal.Withdraw_response resp)
-        | Error e -> Error e)
+          Rest.withdraw
+            ~cfg:t.cfg
+            ~private_key
+            ~destination:address
+            ~amount:amount_str
+            ~is_mainnet
+            ()
+          >>| function
+          | Ok resp -> Ok (Native.Withdrawal.Withdraw_response resp)
+          | Error e -> Error e)
 
   let get_deposits (t : t) ?currency:_ ?limit () =
     (* Get funding history and filter for deposits (positive amounts) *)
     match t.user with
-    | None ->
-      Deferred.return (Error (`Api_error "User wallet address required"))
+    | None -> Deferred.return (Error (`Api_error "User wallet address required"))
     | Some user ->
       Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
         (* Look back 90 days by default *)
-        let now_ms = Int64.of_float (Time_float_unix.now () |> Time_float_unix.to_span_since_epoch |> Time_float_unix.Span.to_ms) in
-        let ninety_days_ms = Int64.(now_ms - 7776000000L) in  (* 90 * 24 * 60 * 60 * 1000 *)
-        Rest.user_fundings t.cfg ~user ~start_time:ninety_days_ms ()
-        >>| function
-        | Error e -> Error e
-        | Ok fundings ->
-          (* Filter for deposits (positive USDC amounts) *)
-          let deposits = List.filter fundings ~f:(fun f ->
-            (* Check if usdc is positive - deposits have positive amounts *)
-            match Float.of_string_opt f.Rest.TransferTypes.usdc with
-            | Some amt -> Float.(amt > 0.)
-            | None -> false)
-          in
-          let limited = match limit with
-            | Some n -> List.take deposits n
-            | None -> deposits
-          in
-          Ok limited)
+        let now_ms =
+          Int64.of_float
+            (Time_float_unix.now ()
+             |> Time_float_unix.to_span_since_epoch
+             |> Time_float_unix.Span.to_ms)
+        in
+        let ninety_days_ms = Int64.(now_ms - 7776000000L) in
+          (* 90 * 24 * 60 * 60 * 1000 *)
+          Rest.user_fundings t.cfg ~user ~start_time:ninety_days_ms ()
+          >>| function
+          | Error e -> Error e
+          | Ok fundings ->
+            (* Filter for deposits (positive USDC amounts) *)
+            let deposits =
+              List.filter fundings ~f:(fun f ->
+                (* Check if usdc is positive - deposits have positive amounts *)
+                match Float.of_string_opt f.Rest.TransferTypes.usdc with
+                | Some amt -> Float.(amt > 0.)
+                | None -> false)
+            in
+            let limited =
+              match limit with
+              | Some n -> List.take deposits n
+              | None -> deposits
+            in
+              Ok limited)
 
   let get_withdrawals (t : t) ?currency:_ ?limit () =
     (* Get funding history and filter for withdrawals (negative amounts) *)
     match t.user with
-    | None ->
-      Deferred.return (Error (`Api_error "User wallet address required"))
+    | None -> Deferred.return (Error (`Api_error "User wallet address required"))
     | Some user ->
       Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
         (* Look back 90 days by default *)
-        let now_ms = Int64.of_float (Time_float_unix.now () |> Time_float_unix.to_span_since_epoch |> Time_float_unix.Span.to_ms) in
-        let ninety_days_ms = Int64.(now_ms - 7776000000L) in  (* 90 * 24 * 60 * 60 * 1000 *)
-        Rest.user_fundings t.cfg ~user ~start_time:ninety_days_ms ()
-        >>| function
-        | Error e -> Error e
-        | Ok fundings ->
-          (* Filter for withdrawals (negative USDC amounts) *)
-          let withdrawals = List.filter_map fundings ~f:(fun f ->
-            (* Check if usdc is negative - withdrawals have negative amounts *)
-            match Float.of_string_opt f.Rest.TransferTypes.usdc with
-            | Some amt ->
-              (match Float.(amt < 0.) with
-               | true -> Some (Native.Withdrawal.Funding_record f)
-               | false -> None)
-            | None -> None)
-          in
-          let limited = match limit with
-            | Some n -> List.take withdrawals n
-            | None -> withdrawals
-          in
-          Ok limited)
+        let now_ms =
+          Int64.of_float
+            (Time_float_unix.now ()
+             |> Time_float_unix.to_span_since_epoch
+             |> Time_float_unix.Span.to_ms)
+        in
+        let ninety_days_ms = Int64.(now_ms - 7776000000L) in
+          (* 90 * 24 * 60 * 60 * 1000 *)
+          Rest.user_fundings t.cfg ~user ~start_time:ninety_days_ms ()
+          >>| function
+          | Error e -> Error e
+          | Ok fundings ->
+            (* Filter for withdrawals (negative USDC amounts) *)
+            let withdrawals =
+              List.filter_map fundings ~f:(fun f ->
+                (* Check if usdc is negative - withdrawals have negative amounts *)
+                match Float.of_string_opt f.Rest.TransferTypes.usdc with
+                | Some amt ->
+                  (match Float.(amt < 0.) with
+                   | true -> Some (Native.Withdrawal.Funding_record f)
+                   | false -> None)
+                | None -> None)
+            in
+            let limited =
+              match limit with
+              | Some n -> List.take withdrawals n
+              | None -> withdrawals
+            in
+              Ok limited)
 
   (* ============================================================ *)
   (* Account/Position Queries *)
@@ -354,12 +384,13 @@ module Adapter = struct
 
   let balances (t : t) =
     match t.user with
-    | None -> Deferred.return (Error (`Api_error "User address required for balance queries"))
+    | None ->
+      Deferred.return (Error (`Api_error "User address required for balance queries"))
     | Some user ->
       Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
         Rest.clearinghouse_state t.cfg ~user
         >>| function
-        | Ok state -> Ok [state]  (* Wrap in list for consistency *)
+        | Ok state -> Ok [state] (* Wrap in list for consistency *)
         | Error e -> Error e)
 
   let get_order_status (t : t) (oid : Native.Order.id) =
@@ -387,8 +418,10 @@ module Adapter = struct
 
   let get_order_history (_ : t) ?symbol:_ ?limit:_ () =
     (* Hyperliquid doesn't have separate order history - only fills *)
-    Deferred.return (Error (`Api_error
-      "Hyperliquid order history not available - use get_my_trades for fills"))
+    Deferred.return
+      (Error
+         (`Api_error
+             "Hyperliquid order history not available - use get_my_trades for fills"))
 
   let get_my_trades (t : t) ~symbol:_ ?limit () =
     match t.user with
@@ -398,11 +431,12 @@ module Adapter = struct
         Rest.user_fills t.cfg ~user
         >>| function
         | Ok fills ->
-          let limited = match limit with
+          let limited =
+            match limit with
             | Some n -> List.take fills n
             | None -> fills
           in
-          Ok limited
+            Ok limited
         | Error e -> Error e)
 
   (* ============================================================ *)
@@ -422,8 +456,10 @@ module Adapter = struct
       >>| function
       | Ok (meta, ctxs) ->
         (* Find the index of the symbol in universe *)
-        (match List.findi meta.universe ~f:(fun _ item ->
-           String.equal item.Rest.Types.name symbol) with
+        (match
+           List.findi meta.universe ~f:(fun _ item ->
+             String.equal item.Rest.Types.name symbol)
+         with
          | Some (idx, _) ->
            (match List.nth ctxs idx with
             | Some ctx -> Ok (symbol, ctx)
@@ -433,22 +469,24 @@ module Adapter = struct
 
   let get_order_book (t : t) ~symbol ?limit () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      let _ = limit in  (* Hyperliquid doesn't support limit, ignore *)
-      Rest.l2_book t.cfg ~coin:symbol
-      >>| function
-      | Ok book -> Ok book
-      | Error e -> Error e)
+      let _ = limit in
+        (* Hyperliquid doesn't support limit, ignore *)
+        Rest.l2_book t.cfg ~coin:symbol
+        >>| function
+        | Ok book -> Ok book
+        | Error e -> Error e)
 
   let get_recent_trades (t : t) ~symbol ?limit () =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       Rest.recent_trades t.cfg ~coin:symbol
       >>| function
       | Ok trades ->
-        let limited = match limit with
+        let limited =
+          match limit with
           | Some n -> List.take trades n
           | None -> trades
         in
-        Ok limited
+          Ok limited
       | Error e -> Error e)
 
   (* ============================================================ *)
@@ -457,95 +495,123 @@ module Adapter = struct
 
   module Streams = struct
     let trades (t : t) =
-      let symbols = match t.symbols with
-        | [] -> ["BTC"]  (* Default *)
+      let symbols =
+        match t.symbols with
+        | [] -> ["BTC"] (* Default *)
         | s -> s
       in
-      let streams = List.map symbols ~f:(fun coin ->
-        Ws.Stream.Trades coin) in
-      Ws.connect ~streams ()
-      >>| function
-      | Error _ ->
-        let r, _w = Pipe.create () in
-        r
-      | Ok ws ->
-        let messages = Ws.messages ws in
-        let reader, writer = Pipe.create () in
-        don't_wait_for (
-          Pipe.iter messages ~f:(fun msg_str ->
-            match Ws.parse_message msg_str with
-            | Ws.Message.Trades trades ->
-              (* Convert each public trade to user_fill format and write *)
-              Deferred.List.iter trades ~how:`Sequential ~f:(fun t ->
-                let fill = { Rest.Types.
-                  coin = t.Ws.Message.coin
-                ; px = t.px
-                ; sz = t.sz
-                ; side = t.side
-                ; time = t.time
-                ; startPosition = "0"
-                ; dir = t.side
-                ; closedPnl = "0"
-                ; hash = t.hash
-                ; oid = Option.value t.tid ~default:0L
-                ; crossed = false
-                ; fee = "0"
-                ; tid = Option.value t.tid ~default:0L
-                ; feeToken = None
-                } in
-                Pipe.write writer fill)
-            | _ -> Deferred.return ())
-          >>| fun () -> Pipe.close writer);
-        reader
+      let streams = List.map symbols ~f:(fun coin -> Ws.Stream.Trades coin) in
+        Ws.connect ~streams ()
+        >>| function
+        | Error _ ->
+          let r, _w = Pipe.create () in
+            r
+        | Ok ws ->
+          let messages = Ws.messages ws in
+          let reader, writer = Pipe.create () in
+            don't_wait_for
+              (Pipe.iter messages ~f:(fun msg_str ->
+                 match Ws.parse_message msg_str with
+                 | Ws.Message.Trades trades ->
+                   (* Convert each public trade to user_fill format and write *)
+                   Deferred.List.iter trades ~how:`Sequential ~f:(fun t ->
+                     let fill =
+                       { Rest.Types.coin= t.Ws.Message.coin
+                       ; px= t.px
+                       ; sz= t.sz
+                       ; side= t.side
+                       ; time= t.time
+                       ; startPosition= "0"
+                       ; dir= t.side
+                       ; closedPnl= "0"
+                       ; hash= t.hash
+                       ; oid= Option.value t.tid ~default:0L
+                       ; crossed= false
+                       ; fee= "0"
+                       ; tid= Option.value t.tid ~default:0L
+                       ; feeToken= None }
+                     in
+                       Pipe.write writer fill)
+                 | _ -> Deferred.return ())
+               >>| fun () -> Pipe.close writer);
+            reader
 
     let book_updates (t : t) =
-      let symbols = match t.symbols with
+      let symbols =
+        match t.symbols with
         | [] -> ["BTC"]
         | s -> s
       in
-      let streams = List.map symbols ~f:(fun coin ->
-        Ws.Stream.L2Book { coin; n_sig_figs = None; mantissa = None }) in
-      Ws.connect ~streams ()
-      >>| function
-      | Error _ ->
-        let r, _w = Pipe.create () in
-        r
-      | Ok ws ->
-        let messages = Ws.messages ws in
-        let reader, writer = Pipe.create () in
-        don't_wait_for (
-          Pipe.iter messages ~f:(fun msg_str ->
-            match Ws.parse_message msg_str with
-            | Ws.Message.L2Book book ->
-              (* Split into separate updates for bids and asks *)
-              (match book.levels with
-               | [bids; asks] ->
-                 let parse_book_level (lvl : Ws.Message.book_level) : (float * float, string) Result.t =
-                   let open Result.Let_syntax in
-                   let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string lvl.Ws.Message.px in
-                   let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string lvl.sz in
-                   Ok (price, qty)
-                 in
-                 let bid_levels = List.filter_map bids ~f:(fun lvl ->
-                   match parse_book_level lvl with
-                   | Ok (price, qty) -> Some (price, qty)
-                   | Error err ->
-                     Log.Global.error "Hyperliquid WS: Failed to parse bid level: %s" err;
-                     None) in
-                 let ask_levels = List.filter_map asks ~f:(fun lvl ->
-                   match parse_book_level lvl with
-                   | Ok (price, qty) -> Some (price, qty)
-                   | Error err ->
-                     Log.Global.error "Hyperliquid WS: Failed to parse ask level: %s" err;
-                     None) in
-                 let bid_update = { Native.Book.coin = book.coin; side = `Bid; levels = bid_levels; time = book.time } in
-                 let ask_update = { Native.Book.coin = book.coin; side = `Ask; levels = ask_levels; time = book.time } in
-                 Pipe.write writer bid_update >>= fun () ->
-                 Pipe.write writer ask_update
-               | _ -> Deferred.return ())
-            | _ -> Deferred.return ())
-          >>| fun () -> Pipe.close writer);
-        reader
+      let streams =
+        List.map symbols ~f:(fun coin ->
+          Ws.Stream.L2Book {coin; n_sig_figs= None; mantissa= None})
+      in
+        Ws.connect ~streams ()
+        >>| function
+        | Error _ ->
+          let r, _w = Pipe.create () in
+            r
+        | Ok ws ->
+          let messages = Ws.messages ws in
+          let reader, writer = Pipe.create () in
+            don't_wait_for
+              (Pipe.iter messages ~f:(fun msg_str ->
+                 match Ws.parse_message msg_str with
+                 | Ws.Message.L2Book book ->
+                   (* Split into separate updates for bids and asks *)
+                   (match book.levels with
+                    | [bids; asks] ->
+                      let parse_book_level (lvl : Ws.Message.book_level)
+                        : (float * float, string) Result.t
+                        =
+                        let open Result.Let_syntax in
+                        let%bind price =
+                          Fluxum.Normalize_common.Float_conv.price_of_string
+                            lvl.Ws.Message.px
+                        in
+                        let%bind qty =
+                          Fluxum.Normalize_common.Float_conv.qty_of_string lvl.sz
+                        in
+                          Ok (price, qty)
+                      in
+                      let bid_levels =
+                        List.filter_map bids ~f:(fun lvl ->
+                          match parse_book_level lvl with
+                          | Ok (price, qty) -> Some (price, qty)
+                          | Error err ->
+                            Log.Global.error
+                              "Hyperliquid WS: Failed to parse bid level: %s"
+                              err;
+                            None)
+                      in
+                      let ask_levels =
+                        List.filter_map asks ~f:(fun lvl ->
+                          match parse_book_level lvl with
+                          | Ok (price, qty) -> Some (price, qty)
+                          | Error err ->
+                            Log.Global.error
+                              "Hyperliquid WS: Failed to parse ask level: %s"
+                              err;
+                            None)
+                      in
+                      let bid_update =
+                        { Native.Book.coin= book.coin
+                        ; side= `Bid
+                        ; levels= bid_levels
+                        ; time= book.time }
+                      in
+                      let ask_update =
+                        { Native.Book.coin= book.coin
+                        ; side= `Ask
+                        ; levels= ask_levels
+                        ; time= book.time }
+                      in
+                        Pipe.write writer bid_update
+                        >>= fun () -> Pipe.write writer ask_update
+                    | _ -> Deferred.return ())
+                 | _ -> Deferred.return ())
+               >>| fun () -> Pipe.close writer);
+            reader
   end
 
   (* ============================================================ *)
@@ -554,8 +620,7 @@ module Adapter = struct
 
   module Normalize = struct
     let time_of_ms (ms : int64) : Time_float_unix.t =
-      Time_float_unix.of_span_since_epoch
-        (Time_float_unix.Span.of_ms (Int64.to_float ms))
+      Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_ms (Int64.to_float ms))
 
     (* Use shared normalize function *)
     let side_of_string (s : string) : Types.Side.t =
@@ -563,18 +628,17 @@ module Adapter = struct
 
     let order_response (_r : Native.Order.response) : Types.Order.t =
       (* Not implemented - Hyperliquid doesn't support trading yet *)
-      { venue = Venue.t
-      ; id = "0"
-      ; symbol = ""
-      ; side = Types.Side.Buy
-      ; kind = Types.Order_kind.market
-      ; time_in_force = Types.Time_in_force.GTC
-      ; qty = 0.
-      ; filled = 0.
-      ; status = Types.Order_status.New
-      ; created_at = None
-      ; updated_at = None
-      }
+      { venue= Venue.t
+      ; id= "0"
+      ; symbol= ""
+      ; side= Types.Side.Buy
+      ; kind= Types.Order_kind.market
+      ; time_in_force= Types.Time_in_force.GTC
+      ; qty= 0.
+      ; filled= 0.
+      ; status= Types.Order_status.New
+      ; created_at= None
+      ; updated_at= None }
 
     let order_status (_o : Native.Order.status) : Types.Order_status.t =
       (* Open orders are considered New *)
@@ -582,228 +646,251 @@ module Adapter = struct
 
     let order_from_status (o : Native.Order.status) : (Types.Order.t, string) Result.t =
       let open Result.Let_syntax in
-      let%bind limit_price = Fluxum.Normalize_common.Float_conv.price_of_string o.limitPx in
+      let%bind limit_price =
+        Fluxum.Normalize_common.Float_conv.price_of_string o.limitPx
+      in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string o.sz in
-      Ok ({ venue = Venue.t
-      ; id = Int64.to_string o.oid
-      ; symbol = o.coin
-      ; side = side_of_string o.side
-      ; kind = Types.Order_kind.limit limit_price
-      ; time_in_force = Types.Time_in_force.GTC
-      ; qty
-      ; filled = 0.  (* Open orders have no filled qty *)
-      ; status = Types.Order_status.New
-      ; created_at = Some (time_of_ms o.timestamp)
-      ; updated_at = Some (time_of_ms o.timestamp)
-      } : Types.Order.t)
+        Ok
+          ({ venue= Venue.t
+           ; id= Int64.to_string o.oid
+           ; symbol= o.coin
+           ; side= side_of_string o.side
+           ; kind= Types.Order_kind.limit limit_price
+           ; time_in_force= Types.Time_in_force.GTC
+           ; qty
+           ; filled= 0. (* Open orders have no filled qty *)
+           ; status= Types.Order_status.New
+           ; created_at= Some (time_of_ms o.timestamp)
+           ; updated_at= Some (time_of_ms o.timestamp) }
+           : Types.Order.t)
 
     let trade (f : Native.Trade.t) : (Types.Trade.t, string) Result.t =
       let open Result.Let_syntax in
       let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string f.px in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string f.sz in
       let%bind fee = Fluxum.Normalize_common.Float_conv.qty_of_string f.fee in
-      Ok ({ venue = Venue.t
-      ; symbol = f.coin
-      ; side = side_of_string f.side
-      ; price
-      ; qty
-      ; fee = Some fee
-      ; trade_id = Some (Int64.to_string f.tid)
-      ; ts = Some (time_of_ms f.time)
-      } : Types.Trade.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= f.coin
+           ; side= side_of_string f.side
+           ; price
+           ; qty
+           ; fee= Some fee
+           ; trade_id= Some (Int64.to_string f.tid)
+           ; ts= Some (time_of_ms f.time) }
+           : Types.Trade.t)
 
     let balance (state : Native.Balance.t) : (Types.Balance.t, string) Result.t =
       let open Result.Let_syntax in
-      let%bind total = Fluxum.Normalize_common.Float_conv.amount_of_string state.marginSummary.accountValue in
-      let%bind available = Fluxum.Normalize_common.Float_conv.amount_of_string state.withdrawable in
-      let%bind locked = Fluxum.Normalize_common.Float_conv.amount_of_string state.marginSummary.totalMarginUsed in
-      Ok ({ venue = Venue.t
-      ; currency = "USD"  (* Hyperliquid uses USD-settled perps *)
-      ; total
-      ; available
-      ; locked
-      } : Types.Balance.t)
+      let%bind total =
+        Fluxum.Normalize_common.Float_conv.amount_of_string
+          state.marginSummary.accountValue
+      in
+      let%bind available =
+        Fluxum.Normalize_common.Float_conv.amount_of_string state.withdrawable
+      in
+      let%bind locked =
+        Fluxum.Normalize_common.Float_conv.amount_of_string
+          state.marginSummary.totalMarginUsed
+      in
+        Ok
+          ({ venue= Venue.t
+           ; currency= "USD" (* Hyperliquid uses USD-settled perps *)
+           ; total
+           ; available
+           ; locked }
+           : Types.Balance.t)
 
     let book_update (u : Native.Book.update) : Types.Book_update.t =
-      let side = match u.side with
+      let side =
+        match u.side with
         | `Bid -> Types.Book_update.Side.Bid
         | `Ask -> Types.Book_update.Side.Ask
       in
-      let levels = List.map u.levels ~f:(fun (price, qty) ->
-        { Types.Book_update.price; qty })
+      let levels =
+        List.map u.levels ~f:(fun (price, qty) -> {Types.Book_update.price; qty})
       in
-      { venue = Venue.t
-      ; symbol = u.coin
-      ; side
-      ; levels
-      ; ts = Some (time_of_ms u.time)
-      ; is_snapshot = true  (* Hyperliquid L2 updates are snapshots *)
-      }
+        { venue= Venue.t
+        ; symbol= u.coin
+        ; side
+        ; levels
+        ; ts= Some (time_of_ms u.time)
+        ; is_snapshot= true (* Hyperliquid L2 updates are snapshots *) }
 
     let symbol_info (item : Native.Symbol_info.t) : Types.Symbol_info.t =
-      { venue = Venue.t
-      ; symbol = item.name
-      ; base_currency = item.name  (* Hyperliquid perps use coin as base *)
-      ; quote_currency = "USD"
-      ; status = "ACTIVE"  (* All in universe are active *)
-      ; min_order_size = 0.0  (* Unknown, using 0 *)
-      ; tick_size = None
-      ; quote_increment =
+      { venue= Venue.t
+      ; symbol= item.name
+      ; base_currency= item.name (* Hyperliquid perps use coin as base *)
+      ; quote_currency= "USD"
+      ; status= "ACTIVE" (* All in universe are active *)
+      ; min_order_size= 0.0 (* Unknown, using 0 *)
+      ; tick_size= None
+      ; quote_increment=
           (* Size decimals determines increment - programmatically generated, should always be valid *)
-          let decimal_str = sprintf "0.%s1" (String.make item.szDecimals '0') in
-          match Fluxum.Normalize_common.Float_conv.amount_of_string decimal_str with
-          | Ok f -> Some f
-          | Error _ -> None  (* Fallback to None if parsing fails *)
-      }
+          (let decimal_str = sprintf "0.%s1" (String.make item.szDecimals '0') in
+             match Fluxum.Normalize_common.Float_conv.amount_of_string decimal_str with
+             | Ok f -> Some f
+             | Error _ -> None (* Fallback to None if parsing fails *)) }
 
     let ticker ((coin, ctx) : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       let open Result.Let_syntax in
       let%bind mark_px = Fluxum.Normalize_common.Float_conv.price_of_string ctx.markPx in
-      let%bind prev_day_px = Fluxum.Normalize_common.Float_conv.price_of_string ctx.prevDayPx in
-      let%bind volume_24h = Fluxum.Normalize_common.Float_conv.qty_of_string ctx.dayNtlVlm in
-      Ok ({ venue = Venue.t
-      ; symbol = coin
-      ; last_price = mark_px
-      ; bid_price = mark_px  (* Use mark price as approx *)
-      ; ask_price = mark_px
-      ; high_24h = prev_day_px  (* Best approx available *)
-      ; low_24h = prev_day_px
-      ; volume_24h
-      ; quote_volume = None
-      ; price_change = None
-      ; price_change_pct = None
-      ; ts = Some (Time_float_unix.now ())
-      } : Types.Ticker.t)
+      let%bind prev_day_px =
+        Fluxum.Normalize_common.Float_conv.price_of_string ctx.prevDayPx
+      in
+      let%bind volume_24h =
+        Fluxum.Normalize_common.Float_conv.qty_of_string ctx.dayNtlVlm
+      in
+        Ok
+          ({ venue= Venue.t
+           ; symbol= coin
+           ; last_price= mark_px
+           ; bid_price= mark_px (* Use mark price as approx *)
+           ; ask_price= mark_px
+           ; high_24h= prev_day_px (* Best approx available *)
+           ; low_24h= prev_day_px
+           ; volume_24h
+           ; quote_volume= None
+           ; price_change= None
+           ; price_change_pct= None
+           ; ts= Some (Time_float_unix.now ()) }
+           : Types.Ticker.t)
 
     let order_book (book : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
       let open Result.Let_syntax in
-      let parse_level (level : Rest.Types.level) : (Types.Order_book.Price_level.t, string) Result.t =
+      let parse_level (level : Rest.Types.level)
+        : (Types.Order_book.Price_level.t, string) Result.t
+        =
         let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string level.px in
         let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string level.sz in
-        Ok { Types.Order_book.Price_level.price; volume }
+          Ok {Types.Order_book.Price_level.price; volume}
       in
-      let parse_levels (levels : Rest.Types.level list) : (Types.Order_book.Price_level.t list, string) Result.t =
-        levels
-        |> List.map ~f:parse_level
-        |> Fluxum.Normalize_common.Result_util.transpose
+      let parse_levels (levels : Rest.Types.level list)
+        : (Types.Order_book.Price_level.t list, string) Result.t
+        =
+        levels |> List.map ~f:parse_level |> Fluxum.Normalize_common.Result_util.transpose
       in
-      let%bind (bid_levels, ask_levels) = match book.levels with
+      let%bind bid_levels, ask_levels =
+        match book.levels with
         | [bid_list; ask_list] ->
           let%bind bids = parse_levels bid_list in
           let%bind asks = parse_levels ask_list in
-          Ok (bids, asks)
+            Ok (bids, asks)
         | _ -> Ok ([], [])
       in
-      Ok ({ venue = Venue.t
-      ; symbol = book.coin
-      ; bids = bid_levels
-      ; asks = ask_levels
-      ; ts = Some (time_of_ms book.time)
-      ; epoch = 0  (* No sequence number from Hyperliquid *)
-      } : Types.Order_book.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= book.coin
+           ; bids= bid_levels
+           ; asks= ask_levels
+           ; ts= Some (time_of_ms book.time)
+           ; epoch= 0 (* No sequence number from Hyperliquid *) }
+           : Types.Order_book.t)
 
-    let public_trade (t : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
+    let public_trade (t : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t
+      =
       let open Result.Let_syntax in
       let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string t.px in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string t.sz in
-      Ok ({ venue = Venue.t
-      ; symbol = t.coin
-      ; price
-      ; qty
-      ; side = Some (side_of_string t.side)
-      ; trade_id = Some (Int64.to_string t.tid)
-      ; ts = Some (time_of_ms t.time)
-      } : Types.Public_trade.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= t.coin
+           ; price
+           ; qty
+           ; side= Some (side_of_string t.side)
+           ; trade_id= Some (Int64.to_string t.tid)
+           ; ts= Some (time_of_ms t.time) }
+           : Types.Public_trade.t)
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "Hyperliquid candle normalization not yet implemented"
 
     (** Account operations normalization *)
 
-    let deposit_address (addr : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
-      Ok ({ venue = addr.venue
-          ; currency = "USDC"  (* Hyperliquid only supports USDC *)
-          ; address = addr.address
-          ; tag = None  (* No memo needed *)
-          ; network = Some addr.network
-          } : Types.Deposit_address.t)
+    let deposit_address (addr : Native.Deposit_address.t)
+      : (Types.Deposit_address.t, string) Result.t
+      =
+      Ok
+        ({ venue= addr.venue
+         ; currency= "USDC" (* Hyperliquid only supports USDC *)
+         ; address= addr.address
+         ; tag= None (* No memo needed *)
+         ; network= Some addr.network }
+         : Types.Deposit_address.t)
 
     let deposit (f : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
       let open Result.Let_syntax in
       let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string f.usdc in
-      Ok ({ venue = Venue.t
-          ; id = f.hash
-          ; currency = "USDC"
-          ; amount
-          ; status = Types.Transfer_status.Completed  (* Funding records are completed *)
-          ; address = None  (* Source address not in funding record *)
-          ; tx_id = Some f.hash
-          ; created_at = Some (time_of_ms f.time)
-          ; updated_at = Some (time_of_ms f.time)
-          } : Types.Deposit.t)
+        Ok
+          ({ venue= Venue.t
+           ; id= f.hash
+           ; currency= "USDC"
+           ; amount
+           ; status= Types.Transfer_status.Completed (* Funding records are completed *)
+           ; address= None (* Source address not in funding record *)
+           ; tx_id= Some f.hash
+           ; created_at= Some (time_of_ms f.time)
+           ; updated_at= Some (time_of_ms f.time) }
+           : Types.Deposit.t)
 
     let withdrawal (w : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
       match w with
       | Native.Withdrawal.Withdraw_response resp ->
         (* Just submitted - status from response *)
-        let status = match resp.Rest.ExchangeResponse.status with
+        let status =
+          match resp.Rest.ExchangeResponse.status with
           | Rest.ExchangeResponse.Ok_status -> Types.Transfer_status.Processing
           | Rest.ExchangeResponse.Error_status _ -> Types.Transfer_status.Failed
         in
-        let id = match resp.response with
+        let id =
+          match resp.response with
           | Some (`String s) -> s
           | Some json -> Yojson.Safe.to_string json
           | None -> "unknown"
         in
-        Ok ({ venue = Venue.t
-            ; id
-            ; currency = "USDC"
-            ; amount = 0.  (* Amount not in response, would need to track from request *)
-            ; fee = Some 1.0  (* Hyperliquid withdrawal fee is $1 *)
-            ; status
-            ; address = ""  (* Not in response *)
-            ; tag = None
-            ; tx_id = None  (* Not immediately available *)
-            ; created_at = Some (Time_float_unix.now ())
-            ; updated_at = Some (Time_float_unix.now ())
-            } : Types.Withdrawal.t)
+          Ok
+            ({ venue= Venue.t
+             ; id
+             ; currency= "USDC"
+             ; amount= 0. (* Amount not in response, would need to track from request *)
+             ; fee= Some 1.0 (* Hyperliquid withdrawal fee is $1 *)
+             ; status
+             ; address= "" (* Not in response *)
+             ; tag= None
+             ; tx_id= None (* Not immediately available *)
+             ; created_at= Some (Time_float_unix.now ())
+             ; updated_at= Some (Time_float_unix.now ()) }
+             : Types.Withdrawal.t)
       | Native.Withdrawal.Funding_record f ->
         let open Result.Let_syntax in
         (* Funding records have negative amounts for withdrawals, take absolute value *)
-        let%bind amount_raw = Fluxum.Normalize_common.Float_conv.amount_of_string f.usdc in
+        let%bind amount_raw =
+          Fluxum.Normalize_common.Float_conv.amount_of_string f.usdc
+        in
         let amount = Float.abs amount_raw in
-        Ok ({ venue = Venue.t
-            ; id = f.hash
-            ; currency = "USDC"
-            ; amount
-            ; fee = Some 1.0  (* Hyperliquid withdrawal fee is $1 *)
-            ; status = Types.Transfer_status.Completed  (* Funding records are completed *)
-            ; address = ""  (* Destination not in funding record *)
-            ; tag = None
-            ; tx_id = Some f.hash
-            ; created_at = Some (time_of_ms f.time)
-            ; updated_at = Some (time_of_ms f.time)
-            } : Types.Withdrawal.t)
+          Ok
+            ({ venue= Venue.t
+             ; id= f.hash
+             ; currency= "USDC"
+             ; amount
+             ; fee= Some 1.0 (* Hyperliquid withdrawal fee is $1 *)
+             ; status= Types.Transfer_status.Completed (* Funding records are completed *)
+             ; address= "" (* Destination not in funding record *)
+             ; tag= None
+             ; tx_id= Some f.hash
+             ; created_at= Some (time_of_ms f.time)
+             ; updated_at= Some (time_of_ms f.time) }
+             : Types.Withdrawal.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with
       | `Http (code, msg) ->
         Types.Error.Exchange_specific
-          { venue = Venue.t
-          ; code = Int.to_string code
-          ; message = msg
-          }
+          {venue= Venue.t; code= Int.to_string code; message= msg}
       | `Json_parse msg ->
         Types.Error.Exchange_specific
-          { venue = Venue.t
-          ; code = "JSON_PARSE_ERROR"
-          ; message = msg
-          }
+          {venue= Venue.t; code= "JSON_PARSE_ERROR"; message= msg}
       | `Api_error msg ->
-        Types.Error.Exchange_specific
-          { venue = Venue.t
-          ; code = "API_ERROR"
-          ; message = msg
-          }
+        Types.Error.Exchange_specific {venue= Venue.t; code= "API_ERROR"; message= msg}
   end
 end

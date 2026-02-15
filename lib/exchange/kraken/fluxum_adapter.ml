@@ -40,15 +40,12 @@
     - Automatic heartbeat/pong
 
     @see <https://docs.kraken.com/rest/> Kraken REST API Documentation
-    @see <https://docs.kraken.com/websockets-v2/> Kraken WebSocket v2 Documentation
-*)
+    @see <https://docs.kraken.com/websockets-v2/> Kraken WebSocket v2 Documentation *)
 
 open Core
 open Async
-
 module Types = Fluxum.Types
 module Exchange_intf = Fluxum.Exchange_intf
-
 module V1 = V1
 module Common = Common
 module Ws = Ws
@@ -58,17 +55,17 @@ module Ws = Ws
 
 module Adapter = struct
   type t =
-    { cfg : (module Cfg.S)
-    ; symbols : string list
-    ; rate_limiter : Exchange_common.Rate_limiter.t
-    }
+    { cfg: (module Cfg.S)
+    ; symbols: string list
+    ; rate_limiter: Exchange_common.Rate_limiter.t }
 
   let create ~cfg ?(symbols = []) () =
     { cfg
     ; symbols
-    ; rate_limiter = Exchange_common.Rate_limiter.create
-        ~config:Exchange_common.Rate_limiter.Configs.kraken ()
-    }
+    ; rate_limiter=
+        Exchange_common.Rate_limiter.create
+          ~config:Exchange_common.Rate_limiter.Configs.kraken
+          () }
 
   module Venue = struct
     let t = Types.Venue.Kraken
@@ -76,7 +73,7 @@ module Adapter = struct
 
   module Native = struct
     module Order = struct
-      type id = string  (* Kraken txid *)
+      type id = string (* Kraken txid *)
       type request = V1.Add_order.T.request
       type response = V1.Add_order.T.response
       type status = V1.Open_orders.Order.t
@@ -87,16 +84,16 @@ module Adapter = struct
     end
 
     module Balance = struct
-      type t = string * string  (* currency, amount *)
+      type t = string * string (* currency, amount *)
     end
 
     module Book = struct
       type update = Ws.Public.Book_update.t
-      type snapshot = (string * V1.Depth.depth_data) list  (* pair -> depth data *)
+      type snapshot = (string * V1.Depth.depth_data) list (* pair -> depth data *)
     end
 
     module Ticker = struct
-      type t = string * V1.Ticker.Ticker_data.t  (* pair name, ticker data *)
+      type t = string * V1.Ticker.Ticker_data.t (* pair name, ticker data *)
     end
 
     module Public_trade = struct
@@ -106,21 +103,20 @@ module Adapter = struct
     module Candle = struct
       (** Kraken OHLC candle with context for normalization *)
       type t =
-        { symbol : string
-        ; timeframe : Types.Timeframe.t
-        ; time : float
-        ; open_ : string
-        ; high : string
-        ; low : string
-        ; close : string
-        ; vwap : string
-        ; volume : string
-        ; count : int
-        }
+        { symbol: string
+        ; timeframe: Types.Timeframe.t
+        ; time: float
+        ; open_: string
+        ; high: string
+        ; low: string
+        ; close: string
+        ; vwap: string
+        ; volume: string
+        ; count: int }
     end
 
     module Symbol_info = struct
-      type t = string * V1.Asset_pairs.Pair_info.t  (* pair name, info *)
+      type t = string * V1.Asset_pairs.Pair_info.t (* pair name, info *)
     end
 
     module Error = struct
@@ -131,10 +127,9 @@ module Adapter = struct
     module Deposit_address = struct
       (** Native deposit address with method info *)
       type t =
-        { address : V1.Deposit_addresses.Deposit_address.t
-        ; asset : string
-        ; method_ : string
-        }
+        { address: V1.Deposit_addresses.Deposit_address.t
+        ; asset: string
+        ; method_: string }
     end
 
     module Deposit = struct
@@ -142,236 +137,308 @@ module Adapter = struct
     end
 
     module Withdrawal = struct
-      (** Withdrawal can be either a status entry (for history) or a new withdrawal response *)
+      (** Withdrawal can be either a status entry (for history) or a new withdrawal response
+      *)
       type t =
         | Status of V1.Withdraw_status.Withdrawal_entry.t
-        | Response of { refid : string; asset : string; amount : string }
+        | Response of
+            { refid: string
+            ; asset: string
+            ; amount: string }
     end
   end
 
   let place_order (t : t) (req : Native.Order.request) =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Add_order.post (module Cfg) req
-      >>| function
-      | `Ok r -> Ok r
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Add_order.post (module Cfg) req
+        >>| function
+        | `Ok r -> Ok r
+        | #Rest.Error.post as e -> Error e)
 
   let cancel_order (t : t) (txid : Native.Order.id) =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Cancel_order.post (module Cfg) { txid }
-      >>| function
-      | `Ok _ -> Ok ()
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Cancel_order.post (module Cfg) {txid}
+        >>| function
+        | `Ok _ -> Ok ()
+        | #Rest.Error.post as e -> Error e)
 
   let balances (t : t) =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Balances.post (module Cfg) ()
-      >>| function
-      | `Ok bal_list -> Ok bal_list
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Balances.post (module Cfg) ()
+        >>| function
+        | `Ok bal_list -> Ok bal_list
+        | #Rest.Error.post as e -> Error e)
 
   let get_order_status (t : t) (txid : Native.Order.id) =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Query_orders.post (module Cfg) { txids = [txid]; trades = false }
-      >>| function
-      | `Ok orders ->
-        (match List.hd orders with
-         | Some (_, order) -> Ok order
-         | None -> Error (`Bad_request "Order not found"))
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Query_orders.post (module Cfg) {txids= [txid]; trades= false}
+        >>| function
+        | `Ok orders ->
+          (match List.hd orders with
+           | Some (_, order) -> Ok order
+           | None -> Error (`Bad_request "Order not found"))
+        | #Rest.Error.post as e -> Error e)
 
   let get_open_orders (t : t) ?symbol:_ () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Open_orders.post (module Cfg) { trades = false }
-      >>| function
-      | `Ok { open_; _ } -> Ok (List.map open_ ~f:snd)
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Open_orders.post (module Cfg) {trades= false}
+        >>| function
+        | `Ok {open_; _} -> Ok (List.map open_ ~f:snd)
+        | #Rest.Error.post as e -> Error e)
 
   let get_order_history (t : t) ?symbol:_ ?limit:_ () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Closed_orders.post (module Cfg)
-        { trades = false; userref = None; start = None; end_ = None; ofs = None; closetime = None }
-      >>| function
-      | `Ok { closed; _ } -> Ok (List.map closed ~f:snd)
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Closed_orders.post
+          (module Cfg)
+          { trades= false
+          ; userref= None
+          ; start= None
+          ; end_= None
+          ; ofs= None
+          ; closetime= None }
+        >>| function
+        | `Ok {closed; _} -> Ok (List.map closed ~f:snd)
+        | #Rest.Error.post as e -> Error e)
 
   let get_my_trades (t : t) ~symbol:_ ?limit:_ () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Trades_history.post (module Cfg)
-        { type_ = None; trades = false; start = None; end_ = None; ofs = None }
-      >>| function
-      | `Ok { trades; _ } -> Ok (List.map trades ~f:snd)
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Trades_history.post
+          (module Cfg)
+          {type_= None; trades= false; start= None; end_= None; ofs= None}
+        >>| function
+        | `Ok {trades; _} -> Ok (List.map trades ~f:snd)
+        | #Rest.Error.post as e -> Error e)
 
   let get_symbols (t : t) () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Asset_pairs.post (module Cfg) { pair = None; info = None }
-      >>| function
-      | `Ok pairs -> Ok pairs
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Asset_pairs.post (module Cfg) {pair= None; info= None}
+        >>| function
+        | `Ok pairs -> Ok pairs
+        | #Rest.Error.post as e -> Error e)
 
   let get_ticker (t : t) ~symbol () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Ticker.get (module Cfg) { pair = symbol }
-      >>| function
-      | `Ok tickers ->
-        (match List.hd tickers with
-         | Some ticker -> Ok ticker
-         | None -> Error (`Bad_request "Ticker not found"))
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Ticker.get (module Cfg) {pair= symbol}
+        >>| function
+        | `Ok tickers ->
+          (match List.hd tickers with
+           | Some ticker -> Ok ticker
+           | None -> Error (`Bad_request "Ticker not found"))
+        | #Rest.Error.post as e -> Error e)
 
   let get_order_book (t : t) ~symbol ?limit () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Depth.get (module Cfg) { pair = symbol; count = limit }
-      >>| function
-      | `Ok depth -> Ok depth
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Depth.get (module Cfg) {pair= symbol; count= limit}
+        >>| function
+        | `Ok depth -> Ok depth
+        | #Rest.Error.post as e -> Error e)
 
   let get_recent_trades (t : t) ~symbol ?limit () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Recent_trades.get (module Cfg) { pair = symbol; since = None; count = limit }
-      >>| function
-      | `Ok (trades, _last) ->
-        (* Flatten the pair -> trades list to just trades *)
-        let all_trades = List.concat_map trades ~f:snd in
-        Ok all_trades
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Recent_trades.get (module Cfg) {pair= symbol; since= None; count= limit}
+        >>| function
+        | `Ok (trades, _last) ->
+          (* Flatten the pair -> trades list to just trades *)
+          let all_trades = List.concat_map trades ~f:snd in
+            Ok all_trades
+        | #Rest.Error.post as e -> Error e)
 
   let cancel_all_orders (t : t) ?symbol:_ () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Cancel_all.post (module Cfg) ()
-      >>| function
-      | `Ok { count } -> Ok count
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Cancel_all.post (module Cfg) ()
+        >>| function
+        | `Ok {count} -> Ok count
+        | #Rest.Error.post as e -> Error e)
 
-  let get_candles (t : t) ~symbol ~(timeframe : Types.Timeframe.t) ?since ?until:_ ?limit:_ () =
+  let get_candles
+        (t : t)
+        ~symbol
+        ~(timeframe : Types.Timeframe.t)
+        ?since
+        ?until:_
+        ?limit:_
+        ()
+    =
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       (* Kraken OHLC endpoint: GET /0/public/OHLC *)
-      let interval = match timeframe with
-        | Types.Timeframe.M1  -> 1
-        | Types.Timeframe.M5  -> 5
+      let interval =
+        match timeframe with
+        | Types.Timeframe.M1 -> 1
+        | Types.Timeframe.M5 -> 5
         | Types.Timeframe.M15 -> 15
         | Types.Timeframe.M30 -> 30
-        | Types.Timeframe.H1  -> 60
-        | Types.Timeframe.H4  -> 240
-        | Types.Timeframe.D1  -> 1440
-        | Types.Timeframe.W1  -> 10080
-        | _ -> 60  (* Default to 1h for unsupported intervals *)
+        | Types.Timeframe.H1 -> 60
+        | Types.Timeframe.H4 -> 240
+        | Types.Timeframe.D1 -> 1440
+        | Types.Timeframe.W1 -> 10080
+        | _ -> 60 (* Default to 1h for unsupported intervals *)
       in
       let params = [("pair", [symbol]); ("interval", [Int.to_string interval])] in
-      let params = match since with
+      let params =
+        match since with
         | Some t ->
-          let secs = Time_float_unix.to_span_since_epoch t |> Time_float_unix.Span.to_sec |> Int.of_float in
-          ("since", [Int.to_string secs]) :: params
+          let secs =
+            Time_float_unix.to_span_since_epoch t
+            |> Time_float_unix.Span.to_sec
+            |> Int.of_float
+          in
+            ("since", [Int.to_string secs]) :: params
         | None -> params
       in
       let uri = Uri.of_string "https://api.kraken.com/0/public/OHLC" in
       let uri = Uri.with_query uri params in
-      Monitor.try_with (fun () ->
-        Cohttp_async.Client.get uri >>= fun (_, body) ->
-        Cohttp_async.Body.to_string body
-      ) >>| function
-      | Error _ -> Error (`Bad_request "Network error fetching OHLC")
-      | Ok body ->
-        match Yojson.Safe.from_string body with
-        | exception _ -> Error (`Bad_request "Failed to parse OHLC response")
-        | json ->
-          let open Yojson.Safe.Util in
-          let error = json |> member "error" |> to_list in
-          match error with
-          | [] ->
-            let result = json |> member "result" in
-            let pairs = result |> to_assoc |> List.filter ~f:(fun (k, _) -> not (String.equal k "last")) in
-            (match List.hd pairs with
-             | Some (_, ohlc_data) ->
-               let parse_ohlc ohlc =
-                 match ohlc with
-                 | `List [`Int time; `String open_; `String high; `String low; `String close;
-                          `String vwap; `String volume; `Int count] ->
-                   Some { Native.Candle.symbol; timeframe; time = Float.of_int time;
-                          open_; high; low; close; vwap; volume; count }
-                 | `List [`Float time; `String open_; `String high; `String low; `String close;
-                          `String vwap; `String volume; `Int count] ->
-                   Some { Native.Candle.symbol; timeframe; time;
-                          open_; high; low; close; vwap; volume; count }
-                 | _ -> None
-               in
-               Ok (ohlc_data |> to_list |> List.filter_map ~f:parse_ohlc)
-             | None -> Ok [])
-          | _ -> Error (`Bad_request "Kraken API error"))
+        Monitor.try_with (fun () ->
+          Cohttp_async.Client.get uri
+          >>= fun (_, body) -> Cohttp_async.Body.to_string body)
+        >>| function
+        | Error _ -> Error (`Bad_request "Network error fetching OHLC")
+        | Ok body ->
+          (match Yojson.Safe.from_string body with
+           | exception _ -> Error (`Bad_request "Failed to parse OHLC response")
+           | json ->
+             let open Yojson.Safe.Util in
+             let error = json |> member "error" |> to_list in
+               (match error with
+                | [] ->
+                  let result = json |> member "result" in
+                  let pairs =
+                    result
+                    |> to_assoc
+                    |> List.filter ~f:(fun (k, _) -> not (String.equal k "last"))
+                  in
+                    (match List.hd pairs with
+                     | Some (_, ohlc_data) ->
+                       let parse_ohlc ohlc =
+                         match ohlc with
+                         | `List
+                             [ `Int time
+                             ; `String open_
+                             ; `String high
+                             ; `String low
+                             ; `String close
+                             ; `String vwap
+                             ; `String volume
+                             ; `Int count ] ->
+                           Some
+                             { Native.Candle.symbol
+                             ; timeframe
+                             ; time= Float.of_int time
+                             ; open_
+                             ; high
+                             ; low
+                             ; close
+                             ; vwap
+                             ; volume
+                             ; count }
+                         | `List
+                             [ `Float time
+                             ; `String open_
+                             ; `String high
+                             ; `String low
+                             ; `String close
+                             ; `String vwap
+                             ; `String volume
+                             ; `Int count ] ->
+                           Some
+                             { Native.Candle.symbol
+                             ; timeframe
+                             ; time
+                             ; open_
+                             ; high
+                             ; low
+                             ; close
+                             ; vwap
+                             ; volume
+                             ; count }
+                         | _ -> None
+                       in
+                         Ok (ohlc_data |> to_list |> List.filter_map ~f:parse_ohlc)
+                     | None -> Ok [])
+                | _ -> Error (`Bad_request "Kraken API error"))))
 
   (** {2 Account Operations - Deposits/Withdrawals} *)
 
   let get_deposit_address (t : t) ~currency ?network () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      (* First get deposit methods to find the available networks *)
-      V1.Deposit_methods.post (module Cfg) { asset = currency }
-      >>= function
-      | `Ok methods ->
-        (* Find the matching method (network) *)
-        let method_name = match network with
-          | Some n -> n
-          | None ->
-            (* Use first available method if no network specified *)
-            match List.hd methods with
-            | Some m -> m.V1.Deposit_methods.Deposit_method.method_
-            | None -> ""
-        in
-        (match String.is_empty method_name with
-         | true ->
-           return (Error (`Bad_request "No deposit methods available for this asset"))
-         | false ->
-           (* Get the deposit address for the selected method *)
-           V1.Deposit_addresses.post (module Cfg) { asset = currency; method_ = method_name; new_ = false }
-           >>| function
-           | `Ok addresses ->
-             (match List.hd addresses with
-              | Some addr ->
-                Ok { Native.Deposit_address.address = addr; asset = currency; method_ = method_name }
-              | None -> Error (`Bad_request "No deposit address returned"))
-           | (#Rest.Error.post as e) -> Error e)
-      | (#Rest.Error.post as e) -> return (Error e))
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        (* First get deposit methods to find the available networks *)
+        V1.Deposit_methods.post (module Cfg) {asset= currency}
+        >>= function
+        | `Ok methods ->
+          (* Find the matching method (network) *)
+          let method_name =
+            match network with
+            | Some n -> n
+            | None ->
+              (* Use first available method if no network specified *)
+              (match List.hd methods with
+               | Some m -> m.V1.Deposit_methods.Deposit_method.method_
+               | None -> "")
+          in
+            (match String.is_empty method_name with
+             | true ->
+               return (Error (`Bad_request "No deposit methods available for this asset"))
+             | false ->
+               (* Get the deposit address for the selected method *)
+               V1.Deposit_addresses.post
+                 (module Cfg)
+                 {asset= currency; method_= method_name; new_= false}
+               >>| (function
+                | `Ok addresses ->
+                  (match List.hd addresses with
+                   | Some addr ->
+                     Ok
+                       { Native.Deposit_address.address= addr
+                       ; asset= currency
+                       ; method_= method_name }
+                   | None -> Error (`Bad_request "No deposit address returned"))
+                | #Rest.Error.post as e -> Error e))
+        | #Rest.Error.post as e -> return (Error e))
 
   let withdraw (t : t) ~currency ~amount ~address ?tag:_ ?network:_ () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      (* Kraken requires a pre-configured withdrawal key name, not a raw address.
-         The 'address' parameter here is actually the key name in Kraken's system.
-         For raw address withdrawals, users must first add the address in their account. *)
-      V1.Withdraw.post (module Cfg) { asset = currency; key = address; amount = Float.to_string amount }
-      >>| function
-      | `Ok { refid } ->
-        Ok (Native.Withdrawal.Response { refid; asset = currency; amount = Float.to_string amount })
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        (* Kraken requires a pre-configured withdrawal key name, not a raw address.
+           The 'address' parameter here is actually the key name in Kraken's system.
+           For raw address withdrawals, users must first add the address in their account. *)
+        V1.Withdraw.post
+          (module Cfg)
+          {asset= currency; key= address; amount= Float.to_string amount}
+        >>| function
+        | `Ok {refid} ->
+          Ok
+            (Native.Withdrawal.Response
+               {refid; asset= currency; amount= Float.to_string amount})
+        | #Rest.Error.post as e -> Error e)
 
   let get_deposits (t : t) ?currency ?limit:_ () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Deposit_status.post (module Cfg) { asset = currency; method_ = None }
-      >>| function
-      | `Ok deposits -> Ok deposits
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Deposit_status.post (module Cfg) {asset= currency; method_= None}
+        >>| function
+        | `Ok deposits -> Ok deposits
+        | #Rest.Error.post as e -> Error e)
 
   let get_withdrawals (t : t) ?currency ?limit:_ () =
     let (module Cfg) = t.cfg in
-    Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
-      V1.Withdraw_status.post (module Cfg) { asset = currency; method_ = None }
-      >>| function
-      | `Ok withdrawals -> Ok (List.map withdrawals ~f:(fun w -> Native.Withdrawal.Status w))
-      | (#Rest.Error.post as e) -> Error e)
+      Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
+        V1.Withdraw_status.post (module Cfg) {asset= currency; method_= None}
+        >>| function
+        | `Ok withdrawals ->
+          Ok (List.map withdrawals ~f:(fun w -> Native.Withdrawal.Status w))
+        | #Rest.Error.post as e -> Error e)
 
   module Streams = struct
     (** Private trade stream requires authenticated WebSocket connection.
@@ -379,79 +446,104 @@ module Adapter = struct
     let trades (_ : t) =
       (* Private trades require authenticated WebSocket - return empty pipe *)
       let r, _w = Pipe.create () in
-      Deferred.return r
+        Deferred.return r
 
     (** Subscribe to order book updates via public WebSocket *)
     let book_updates (t : t) =
-      let symbols = match t.symbols with
-        | [] -> ["XBT/USD"]  (* Default to BTC/USD *)
+      let symbols =
+        match t.symbols with
+        | [] -> ["XBT/USD"] (* Default to BTC/USD *)
         | s -> s
       in
-      let open Deferred.Let_syntax in
-      let%bind md_result = Market_data.connect
-        ~subscriptions:[{ channel = "book"; pairs = symbols; interval = None; depth = Some 10 }]
-        ()
-      in
-      match md_result with
-      | Error _ ->
-        let r, _w = Pipe.create () in
-        return r
-      | Ok md ->
-        let messages = Market_data.messages md in
-        let book_reader, book_writer = Pipe.create () in
-        don't_wait_for (
-          Pipe.iter messages ~f:(fun msg_str ->
-            match Ws.parse_message msg_str with
-            | Ok (Ws.Public (Ws.Public.Book book_data)) ->
-              (* Convert Book_data to Book_update for each side *)
-              let now = Time_float_unix.now () in
-              let symbol = book_data.pair in
-              let bids = List.filter_map book_data.update.bids ~f:(fun l ->
-                match (
-                  let open Result.Let_syntax in
-                  let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string l.Ws.Public.Price_level.price in
-                  let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string l.volume in
-                  Ok (price, volume)
-                ) with
-                | Ok (price, volume) -> Some (price, volume)
-                | Error err ->
-                  Log.Global.error "Kraken WS: Failed to parse book level: %s" err;
-                  None)
-              in
-              let asks = List.filter_map book_data.update.asks ~f:(fun l ->
-                match (
-                  let open Result.Let_syntax in
-                  let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string l.Ws.Public.Price_level.price in
-                  let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string l.volume in
-                  Ok (price, volume)
-                ) with
-                | Ok (price, volume) -> Some (price, volume)
-                | Error err ->
-                  Log.Global.error "Kraken WS: Failed to parse book level: %s" err;
-                  None)
-              in
-              let%bind () =
-                match bids with
-                | [] -> Deferred.unit
-                | _ ->
-                  let update : Ws.Public.Book_update.t =
-                    { side = `Bid; levels = bids; symbol; timestamp = now; is_snapshot = false }
-                  in
-                  Pipe.write book_writer update
-              in
-              (match asks with
-               | [] -> Deferred.unit
-               | _ ->
-                 let update : Ws.Public.Book_update.t =
-                   { side = `Ask; levels = asks; symbol; timestamp = now; is_snapshot = false }
-                 in
-                 Pipe.write book_writer update)
-            | Ok _ -> Deferred.unit  (* Other messages *)
-            | Error _ -> Deferred.unit
-          )
-          >>| fun () -> Pipe.close book_writer
-        );
-        return book_reader
+        let open Deferred.Let_syntax in
+        let%bind md_result =
+          Market_data.connect
+            ~subscriptions:
+              [{channel= "book"; pairs= symbols; interval= None; depth= Some 10}]
+            ()
+        in
+          match md_result with
+          | Error _ ->
+            let r, _w = Pipe.create () in
+              return r
+          | Ok md ->
+            let messages = Market_data.messages md in
+            let book_reader, book_writer = Pipe.create () in
+              don't_wait_for
+                (Pipe.iter messages ~f:(fun msg_str ->
+                   match Ws.parse_message msg_str with
+                   | Ok (Ws.Public (Ws.Public.Book book_data)) ->
+                     (* Convert Book_data to Book_update for each side *)
+                     let now = Time_float_unix.now () in
+                     let symbol = book_data.pair in
+                     let bids =
+                       List.filter_map book_data.update.bids ~f:(fun l ->
+                         match
+                           let open Result.Let_syntax in
+                           let%bind price =
+                             Fluxum.Normalize_common.Float_conv.price_of_string
+                               l.Ws.Public.Price_level.price
+                           in
+                           let%bind volume =
+                             Fluxum.Normalize_common.Float_conv.qty_of_string l.volume
+                           in
+                             Ok (price, volume)
+                         with
+                         | Ok (price, volume) -> Some (price, volume)
+                         | Error err ->
+                           Log.Global.error
+                             "Kraken WS: Failed to parse book level: %s"
+                             err;
+                           None)
+                     in
+                     let asks =
+                       List.filter_map book_data.update.asks ~f:(fun l ->
+                         match
+                           let open Result.Let_syntax in
+                           let%bind price =
+                             Fluxum.Normalize_common.Float_conv.price_of_string
+                               l.Ws.Public.Price_level.price
+                           in
+                           let%bind volume =
+                             Fluxum.Normalize_common.Float_conv.qty_of_string l.volume
+                           in
+                             Ok (price, volume)
+                         with
+                         | Ok (price, volume) -> Some (price, volume)
+                         | Error err ->
+                           Log.Global.error
+                             "Kraken WS: Failed to parse book level: %s"
+                             err;
+                           None)
+                     in
+                     let%bind () =
+                       match bids with
+                       | [] -> Deferred.unit
+                       | _ ->
+                         let update : Ws.Public.Book_update.t =
+                           { side= `Bid
+                           ; levels= bids
+                           ; symbol
+                           ; timestamp= now
+                           ; is_snapshot= false }
+                         in
+                           Pipe.write book_writer update
+                     in
+                       (match asks with
+                        | [] -> Deferred.unit
+                        | _ ->
+                          let update : Ws.Public.Book_update.t =
+                            { side= `Ask
+                            ; levels= asks
+                            ; symbol
+                            ; timestamp= now
+                            ; is_snapshot= false }
+                          in
+                            Pipe.write book_writer update)
+                   | Ok _ -> Deferred.unit (* Other messages *)
+                   | Error _ -> Deferred.unit)
+                 >>| fun () -> Pipe.close book_writer);
+              return book_reader
   end
 
   module Normalize = struct
@@ -469,27 +561,27 @@ module Adapter = struct
     let order_type_of_common (o : Common.Order_type.t) : Types.Order_kind.t =
       match o with
       | `Market -> Types.Order_kind.market
-      | `Limit -> Types.Order_kind.limit 0.0  (* price not available in status *)
+      | `Limit -> Types.Order_kind.limit 0.0 (* price not available in status *)
       | _ -> Types.Order_kind.market
 
     let order_response (r : Native.Order.response) : (Types.Order.t, string) Result.t =
       try
         let txid = List.hd r.txid |> Option.value ~default:"" in
-        Ok ({ venue = Venue.t
-        ; id = txid
-        ; symbol = ""  (* Not available in response *)
-        ; side = Types.Side.Buy  (* Not available in response *)
-        ; kind = Types.Order_kind.market
-        ; time_in_force = Types.Time_in_force.GTC
-        ; qty = 0.
-        ; filled = 0.
-        ; status = Types.Order_status.New
-        ; created_at = None
-        ; updated_at = None
-        } : Types.Order.t)
+          Ok
+            ({ venue= Venue.t
+             ; id= txid
+             ; symbol= "" (* Not available in response *)
+             ; side= Types.Side.Buy (* Not available in response *)
+             ; kind= Types.Order_kind.market
+             ; time_in_force= Types.Time_in_force.GTC
+             ; qty= 0.
+             ; filled= 0.
+             ; status= Types.Order_status.New
+             ; created_at= None
+             ; updated_at= None }
+             : Types.Order.t)
       with
-      | exn ->
-        Error (sprintf "Order response conversion error: %s" (Exn.to_string exn))
+      | exn -> Error (sprintf "Order response conversion error: %s" (Exn.to_string exn))
 
     let order_status (o : Native.Order.status) : Types.Order_status.t =
       status_of_string o.status
@@ -503,25 +595,25 @@ module Adapter = struct
         let%bind filled = Fluxum.Normalize_common.Float_conv.qty_of_string o.vol_exec in
         let status = status_of_string o.status in
         let created_at =
-          Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec o.opentm))
+          Some
+            (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec o.opentm))
         in
-        Ok ({ venue = Venue.t
-        ; id = ""  (* txid is the key, not in the order struct *)
-        ; symbol = o.descr.pair
-        ; side
-        ; kind
-        ; time_in_force = Types.Time_in_force.GTC  (* Kraken doesn't return TIF *)
-        ; qty
-        ; filled
-        ; status
-        ; created_at
-        ; updated_at = None
-        } : Types.Order.t)
+          Ok
+            ({ venue= Venue.t
+             ; id= "" (* txid is the key, not in the order struct *)
+             ; symbol= o.descr.pair
+             ; side
+             ; kind
+             ; time_in_force= Types.Time_in_force.GTC (* Kraken doesn't return TIF *)
+             ; qty
+             ; filled
+             ; status
+             ; created_at
+             ; updated_at= None }
+             : Types.Order.t)
       with
-      | Failure msg ->
-        Error (sprintf "Order conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Order unexpected error: %s" (Exn.to_string exn))
+      | Failure msg -> Error (sprintf "Order conversion failed: %s" msg)
+      | exn -> Error (sprintf "Order unexpected error: %s" (Exn.to_string exn))
 
     let trade (tr : Native.Trade.t) : (Types.Trade.t, string) Result.t =
       let open Result.Let_syntax in
@@ -530,78 +622,87 @@ module Adapter = struct
         let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string tr.price in
         let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string tr.vol in
         let%bind fee = Fluxum.Normalize_common.Float_conv.amount_of_string tr.fee in
-        let ts = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec tr.time)) in
-        Ok ({ venue = Venue.t
-        ; symbol = tr.pair
-        ; side
-        ; price
-        ; qty
-        ; fee = Some fee
-        ; trade_id = Some tr.ordertxid
-        ; ts
-        } : Types.Trade.t)
+        let ts =
+          Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec tr.time))
+        in
+          Ok
+            ({ venue= Venue.t
+             ; symbol= tr.pair
+             ; side
+             ; price
+             ; qty
+             ; fee= Some fee
+             ; trade_id= Some tr.ordertxid
+             ; ts }
+             : Types.Trade.t)
       with
-      | Failure msg ->
-        Error (sprintf "Trade conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
+      | Failure msg -> Error (sprintf "Trade conversion failed: %s" msg)
+      | exn -> Error (sprintf "Trade unexpected error: %s" (Exn.to_string exn))
 
-    let balance ((currency, amount) : Native.Balance.t) : (Types.Balance.t, string) Result.t =
+    let balance ((currency, amount) : Native.Balance.t)
+      : (Types.Balance.t, string) Result.t
+      =
       let open Result.Let_syntax in
       try
         let%bind total = Fluxum.Normalize_common.Float_conv.amount_of_string amount in
-        Ok ({ venue = Venue.t
-        ; currency
-        ; total
-        ; available = total  (* Kraken doesn't separate available in Balances endpoint *)
-        ; locked = 0.
-        } : Types.Balance.t)
+          Ok
+            ({ venue= Venue.t
+             ; currency
+             ; total
+             ; available=
+                 total (* Kraken doesn't separate available in Balances endpoint *)
+             ; locked= 0. }
+             : Types.Balance.t)
       with
-      | Failure msg ->
-        Error (sprintf "Balance conversion failed: %s" msg)
-      | exn ->
-        Error (sprintf "Balance unexpected error: %s" (Exn.to_string exn))
+      | Failure msg -> Error (sprintf "Balance conversion failed: %s" msg)
+      | exn -> Error (sprintf "Balance unexpected error: %s" (Exn.to_string exn))
 
     let book_update (u : Native.Book.update) : Types.Book_update.t =
-      let side = match u.side with
+      let side =
+        match u.side with
         | `Bid -> Types.Book_update.Side.Bid
         | `Ask -> Types.Book_update.Side.Ask
       in
-      let levels = List.map u.levels ~f:(fun (price, qty) ->
-        { Types.Book_update.price; qty })
+      let levels =
+        List.map u.levels ~f:(fun (price, qty) -> {Types.Book_update.price; qty})
       in
-      { venue = Venue.t
-      ; symbol = u.symbol
-      ; side
-      ; levels
-      ; ts = Some u.timestamp
-      ; is_snapshot = u.is_snapshot
-      }
+        { venue= Venue.t
+        ; symbol= u.symbol
+        ; side
+        ; levels
+        ; ts= Some u.timestamp
+        ; is_snapshot= u.is_snapshot }
 
-    let symbol_info ((name, info) : Native.Symbol_info.t) : (Types.Symbol_info.t, string) Result.t =
+    let symbol_info ((name, info) : Native.Symbol_info.t)
+      : (Types.Symbol_info.t, string) Result.t
+      =
       let open Result.Let_syntax in
-      let%bind min_order_size = match info.ordermin with
+      let%bind min_order_size =
+        match info.ordermin with
         | Some s -> Fluxum.Normalize_common.Float_conv.qty_of_string s
         | None -> Ok 0.0
       in
-      Ok ({ venue = Venue.t
-      ; symbol = name
-      ; base_currency = info.base
-      ; quote_currency = info.quote
-      ; status = info.status
-      ; min_order_size
-      ; tick_size = None  (* Kraken uses pair_decimals instead *)
-      ; quote_increment = None
-      } : Types.Symbol_info.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= name
+           ; base_currency= info.base
+           ; quote_currency= info.quote
+           ; status= info.status
+           ; min_order_size
+           ; tick_size= None (* Kraken uses pair_decimals instead *)
+           ; quote_increment= None }
+           : Types.Symbol_info.t)
 
     let ticker ((pair, data) : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       let open Result.Let_syntax in
       let get_first lst =
-        List.hd lst |> Option.value ~default:"0"
+        List.hd lst
+        |> Option.value ~default:"0"
         |> Fluxum.Normalize_common.Float_conv.of_string
       in
       let get_second lst =
-        List.nth lst 1 |> Option.value ~default:"0"
+        List.nth lst 1
+        |> Option.value ~default:"0"
         |> Fluxum.Normalize_common.Float_conv.of_string
       in
       let%bind last_price = get_first data.c in
@@ -610,21 +711,24 @@ module Adapter = struct
       let%bind high_24h = get_second data.h in
       let%bind low_24h = get_second data.l in
       let%bind volume_24h = get_second data.v in
-      Ok ({ venue = Venue.t
-      ; symbol = pair
-      ; last_price  (* c[0] = last trade price *)
-      ; bid_price   (* b[0] = best bid price *)
-      ; ask_price   (* a[0] = best ask price *)
-      ; high_24h    (* h[1] = 24hr high *)
-      ; low_24h     (* l[1] = 24hr low *)
-      ; volume_24h  (* v[1] = 24hr volume *)
-      ; quote_volume = None
-      ; price_change = None
-      ; price_change_pct = None
-      ; ts = None
-      } : Types.Ticker.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= pair
+           ; last_price (* c[0] = last trade price *)
+           ; bid_price (* b[0] = best bid price *)
+           ; ask_price (* a[0] = best ask price *)
+           ; high_24h (* h[1] = 24hr high *)
+           ; low_24h (* l[1] = 24hr low *)
+           ; volume_24h (* v[1] = 24hr volume *)
+           ; quote_volume= None
+           ; price_change= None
+           ; price_change_pct= None
+           ; ts= None }
+           : Types.Ticker.t)
 
-    let order_book (depth_list : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
+    let order_book (depth_list : Native.Book.snapshot)
+      : (Types.Order_book.t, string) Result.t
+      =
       let open Result.Let_syntax in
       (* Take first pair's depth data *)
       match List.hd depth_list with
@@ -634,7 +738,7 @@ module Adapter = struct
             let%bind acc = acc_result in
             let%bind price_f = Fluxum.Normalize_common.Float_conv.price_of_string price in
             let%bind volume_f = Fluxum.Normalize_common.Float_conv.qty_of_string vol in
-            Ok ({ Types.Order_book.Price_level.price = price_f; volume = volume_f } :: acc))
+              Ok ({Types.Order_book.Price_level.price= price_f; volume= volume_f} :: acc))
           |> Result.map ~f:List.rev
         in
         let%bind asks =
@@ -642,36 +746,38 @@ module Adapter = struct
             let%bind acc = acc_result in
             let%bind price_f = Fluxum.Normalize_common.Float_conv.price_of_string price in
             let%bind volume_f = Fluxum.Normalize_common.Float_conv.qty_of_string vol in
-            Ok ({ Types.Order_book.Price_level.price = price_f; volume = volume_f } :: acc))
+              Ok ({Types.Order_book.Price_level.price= price_f; volume= volume_f} :: acc))
           |> Result.map ~f:List.rev
         in
-        Ok ({ venue = Venue.t
-        ; symbol = pair
-        ; bids
-        ; asks
-        ; ts = None
-        ; epoch = 0
-        } : Types.Order_book.t)
-      | None ->
-        Error "Empty order book depth list"
+          Ok
+            ({venue= Venue.t; symbol= pair; bids; asks; ts= None; epoch= 0}
+             : Types.Order_book.t)
+      | None -> Error "Empty order book depth list"
 
-    let public_trade (tr : Native.Public_trade.t) : (Types.Public_trade.t, string) Result.t =
+    let public_trade (tr : Native.Public_trade.t)
+      : (Types.Public_trade.t, string) Result.t
+      =
       let open Result.Let_syntax in
-      let side = match tr.side with
+      let side =
+        match tr.side with
         | "b" -> Some Types.Side.Buy
         | "s" -> Some Types.Side.Sell
         | _ -> None
       in
       let%bind price = Fluxum.Normalize_common.Float_conv.price_of_string tr.price in
       let%bind qty = Fluxum.Normalize_common.Float_conv.qty_of_string tr.volume in
-      Ok ({ venue = Venue.t
-      ; symbol = ""  (* Not included in trade data *)
-      ; price
-      ; qty
-      ; side
-      ; trade_id = Some (Int.to_string tr.trade_id)
-      ; ts = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec tr.time))
-      } : Types.Public_trade.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol= "" (* Not included in trade data *)
+           ; price
+           ; qty
+           ; side
+           ; trade_id= Some (Int.to_string tr.trade_id)
+           ; ts=
+               Some
+                 (Time_float_unix.of_span_since_epoch
+                    (Time_float_unix.Span.of_sec tr.time)) }
+           : Types.Public_trade.t)
 
     let candle (c : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       let open Result.Let_syntax in
@@ -680,29 +786,35 @@ module Adapter = struct
       let%bind low = Fluxum.Normalize_common.Float_conv.price_of_string c.low in
       let%bind close = Fluxum.Normalize_common.Float_conv.price_of_string c.close in
       let%bind volume = Fluxum.Normalize_common.Float_conv.qty_of_string c.volume in
-      let open_time = Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec c.time) in
-      Ok ({ venue = Venue.t
-      ; symbol = c.symbol
-      ; timeframe = c.timeframe
-      ; open_time
-      ; open_
-      ; high
-      ; low
-      ; close
-      ; volume
-      ; quote_volume = None  (* Kraken provides VWAP instead *)
-      ; trades = Some c.count
-      ; closed = true
-      } : Types.Candle.t)
+      let open_time =
+        Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec c.time)
+      in
+        Ok
+          ({ venue= Venue.t
+           ; symbol= c.symbol
+           ; timeframe= c.timeframe
+           ; open_time
+           ; open_
+           ; high
+           ; low
+           ; close
+           ; volume
+           ; quote_volume= None (* Kraken provides VWAP instead *)
+           ; trades= Some c.count
+           ; closed= true }
+           : Types.Candle.t)
 
     (** Normalize deposit address *)
-    let deposit_address (addr : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
-      Ok ({ venue = Venue.t
-      ; currency = addr.asset
-      ; address = addr.address.V1.Deposit_addresses.Deposit_address.address
-      ; tag = addr.address.tag
-      ; network = Some addr.method_
-      } : Types.Deposit_address.t)
+    let deposit_address (addr : Native.Deposit_address.t)
+      : (Types.Deposit_address.t, string) Result.t
+      =
+      Ok
+        ({ venue= Venue.t
+         ; currency= addr.asset
+         ; address= addr.address.V1.Deposit_addresses.Deposit_address.address
+         ; tag= addr.address.tag
+         ; network= Some addr.method_ }
+         : Types.Deposit_address.t)
 
     (** Convert Kraken deposit status to normalized Transfer_status *)
     let transfer_status_of_kraken_status (status : string) : Types.Transfer_status.t =
@@ -719,25 +831,30 @@ module Adapter = struct
       let open Result.Let_syntax in
       let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string d.amount in
       let status = transfer_status_of_kraken_status d.status in
-      let created_at = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec d.time)) in
-      let tx_id = match String.is_empty d.txid with
+      let created_at =
+        Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec d.time))
+      in
+      let tx_id =
+        match String.is_empty d.txid with
         | true -> None
         | false -> Some d.txid
       in
-      let address = match String.is_empty d.info with
+      let address =
+        match String.is_empty d.info with
         | true -> None
         | false -> Some d.info
       in
-      Ok ({ venue = Venue.t
-      ; id = d.refid
-      ; currency = d.asset
-      ; amount
-      ; status
-      ; address
-      ; tx_id
-      ; created_at
-      ; updated_at = None
-      } : Types.Deposit.t)
+        Ok
+          ({ venue= Venue.t
+           ; id= d.refid
+           ; currency= d.asset
+           ; amount
+           ; status
+           ; address
+           ; tx_id
+           ; created_at
+           ; updated_at= None }
+           : Types.Deposit.t)
 
     (** Normalize withdrawal *)
     let withdrawal (w : Native.Withdrawal.t) : (Types.Withdrawal.t, string) Result.t =
@@ -747,51 +864,62 @@ module Adapter = struct
         let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string ws.amount in
         let%bind fee = Fluxum.Normalize_common.Float_conv.amount_of_string ws.fee in
         let status = transfer_status_of_kraken_status ws.status in
-        let created_at = Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec ws.time)) in
-        let tx_id = match String.is_empty ws.txid with
+        let created_at =
+          Some (Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec ws.time))
+        in
+        let tx_id =
+          match String.is_empty ws.txid with
           | true -> None
           | false -> Some ws.txid
         in
-        Ok ({ venue = Venue.t
-        ; id = ws.refid
-        ; currency = ws.asset
-        ; amount
-        ; fee = Some fee
-        ; status
-        ; address = ws.info  (* info field contains the address *)
-        ; tag = None
-        ; tx_id
-        ; created_at
-        ; updated_at = None
-        } : Types.Withdrawal.t)
-      | Native.Withdrawal.Response { refid; asset; amount = amount_str } ->
-        let%bind amount = Fluxum.Normalize_common.Float_conv.amount_of_string amount_str in
-        Ok ({ venue = Venue.t
-        ; id = refid
-        ; currency = asset
-        ; amount
-        ; fee = None
-        ; status = Types.Transfer_status.Pending
-        ; address = ""
-        ; tag = None
-        ; tx_id = None
-        ; created_at = Some (Time_float_unix.now ())
-        ; updated_at = None
-        } : Types.Withdrawal.t)
+          Ok
+            ({ venue= Venue.t
+             ; id= ws.refid
+             ; currency= ws.asset
+             ; amount
+             ; fee= Some fee
+             ; status
+             ; address= ws.info (* info field contains the address *)
+             ; tag= None
+             ; tx_id
+             ; created_at
+             ; updated_at= None }
+             : Types.Withdrawal.t)
+      | Native.Withdrawal.Response {refid; asset; amount= amount_str} ->
+        let%bind amount =
+          Fluxum.Normalize_common.Float_conv.amount_of_string amount_str
+        in
+          Ok
+            ({ venue= Venue.t
+             ; id= refid
+             ; currency= asset
+             ; amount
+             ; fee= None
+             ; status= Types.Transfer_status.Pending
+             ; address= ""
+             ; tag= None
+             ; tx_id= None
+             ; created_at= Some (Time_float_unix.now ())
+             ; updated_at= None }
+             : Types.Withdrawal.t)
 
     let error (e : Native.Error.t) : Types.Error.t =
       match e with
-      | `Bad_request msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "400"; message = msg }
-      | `Not_found -> Types.Error.Exchange_specific { venue = Venue.t; code = "404"; message = "not_found" }
-      | `Not_acceptable msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "406"; message = msg }
-      | `Service_unavailable msg -> Types.Error.Exchange_specific { venue = Venue.t; code = "503"; message = msg }
+      | `Bad_request msg ->
+        Types.Error.Exchange_specific {venue= Venue.t; code= "400"; message= msg}
+      | `Not_found ->
+        Types.Error.Exchange_specific {venue= Venue.t; code= "404"; message= "not_found"}
+      | `Not_acceptable msg ->
+        Types.Error.Exchange_specific {venue= Venue.t; code= "406"; message= msg}
+      | `Service_unavailable msg ->
+        Types.Error.Exchange_specific {venue= Venue.t; code= "503"; message= msg}
       | `Unauthorized _ -> Types.Error.Auth_failed
       | `Too_many_requests _ -> Types.Error.Rate_limited
-      | `Api_error { errors } ->
+      | `Api_error {errors} ->
         let msg = String.concat ~sep:"; " errors in
-        Types.Error.Exchange_specific { venue = Venue.t; code = "api"; message = msg }
-      | `Json_parse_error { message; body = _ } ->
-        Types.Error.Exchange_specific { venue = Venue.t; code = "json"; message }
+          Types.Error.Exchange_specific {venue= Venue.t; code= "api"; message= msg}
+      | `Json_parse_error {message; body= _} ->
+        Types.Error.Exchange_specific {venue= Venue.t; code= "json"; message}
   end
 end
 
@@ -799,32 +927,37 @@ module Builder = struct
   module E = Adapter
 
   let make_order_request ~symbol ~side ~kind ~qty =
-    let type_ : Common.Side.t = match side with
+    let type_ : Common.Side.t =
+      match side with
       | Types.Side.Buy -> `Buy
       | Types.Side.Sell -> `Sell
     in
-    let ordertype, price = match kind with
-      | Types.Order_kind.Basic Market -> (`Market : Common.Order_type.t), None
-      | Types.Order_kind.Basic (Limit p) -> (`Limit : Common.Order_type.t), Some (Float.to_string p)
-      | Types.Order_kind.Basic (Post_only p) -> (`Limit : Common.Order_type.t), Some (Float.to_string p)
-      | Types.Order_kind.Conditional (Stop_limit { limit = p; _ }) -> (`Limit : Common.Order_type.t), Some (Float.to_string p)
-      | Types.Order_kind.Conditional _ -> (`Market : Common.Order_type.t), None
+    let ordertype, price =
+      match kind with
+      | Types.Order_kind.Basic Market -> ((`Market : Common.Order_type.t), None)
+      | Types.Order_kind.Basic (Limit p) ->
+        ((`Limit : Common.Order_type.t), Some (Float.to_string p))
+      | Types.Order_kind.Basic (Post_only p) ->
+        ((`Limit : Common.Order_type.t), Some (Float.to_string p))
+      | Types.Order_kind.Conditional (Stop_limit {limit= p; _}) ->
+        ((`Limit : Common.Order_type.t), Some (Float.to_string p))
+      | Types.Order_kind.Conditional _ -> ((`Market : Common.Order_type.t), None)
     in
-    let oflags = match kind with
+    let oflags =
+      match kind with
       | Types.Order_kind.Basic (Post_only _) -> Some "post"
       | _ -> None
     in
-    V1.Add_order.T.
-      { pair = symbol
-      ; type_
-      ; ordertype
-      ; volume = qty
-      ; price
-      ; price2 = None
-      ; leverage = None
-      ; oflags
-      ; starttm = None
-      ; expiretm = None
-      ; timeinforce = None
-      }
+      V1.Add_order.T.
+        { pair= symbol
+        ; type_
+        ; ordertype
+        ; volume= qty
+        ; price
+        ; price2= None
+        ; leverage= None
+        ; oflags
+        ; starttm= None
+        ; expiretm= None
+        ; timeinforce= None }
 end

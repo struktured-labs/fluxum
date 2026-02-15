@@ -1,35 +1,25 @@
 (** Buy and Hold Strategy
 
     Simple baseline strategy: buy on the first candle and hold forever.
-    Useful for comparing other strategies against market performance.
-*)
+    Useful for comparing other strategies against market performance. *)
 
 open Core
 
 module Config = struct
-  type t =
-    { position_size : float  (** Fraction of equity to invest (0-1) *)
-    }
+  type t = {position_size: float (** Fraction of equity to invest (0-1) *)}
   [@@deriving sexp]
 
-  let default = { position_size = 0.95 }
+  let default = {position_size= 0.95}
 end
 
 type state =
-  { config : Config.t
-  ; bought : bool
-  }
+  { config: Config.t
+  ; bought: bool }
 [@@deriving sexp]
 
 let name = "buy-and-hold"
-
-let initial_state =
-  { config = Config.default
-  ; bought = false
-  }
-
-let with_config config =
-  { initial_state with config }
+let initial_state = {config= Config.default; bought= false}
+let with_config config = {initial_state with config}
 
 let on_candle state (ctx : Backtest.Strategy_intf.Context.t) =
   match state.bought with
@@ -42,11 +32,13 @@ let on_candle state (ctx : Backtest.Strategy_intf.Context.t) =
     let available = ctx.balance *. state.config.position_size in
     let qty = available /. price in
     let signal = Backtest.Strategy_intf.Signal.buy qty in
-    (signal, { state with bought = true })
+      (signal, {state with bought= true})
 
 module Default : Backtest.Strategy_intf.S = struct
   let name = name
+
   type nonrec state = state
+
   let initial_state = initial_state
   let on_candle = on_candle
 end

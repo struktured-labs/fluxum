@@ -17,10 +17,10 @@ open Async
 (** WebSocket channels *)
 module Channel = struct
   type t =
-    | Live_trades of string      (** Live trades for pair *)
-    | Live_orders of string       (** Live order book for pair *)
-    | Order_book of string        (** Full order book for pair *)
-    | Diff_order_book of string   (** Order book diffs for pair *)
+    | Live_trades of string (** Live trades for pair *)
+    | Live_orders of string (** Live order book for pair *)
+    | Order_book of string (** Full order book for pair *)
+    | Diff_order_book of string (** Order book diffs for pair *)
   [@@deriving sexp]
 
   (** Convert channel to string for subscription *)
@@ -44,13 +44,13 @@ end
 module Message = struct
   type t =
     | Connected
-    | Subscribed of string              (** Channel subscribed *)
-    | Unsubscribed of string            (** Channel unsubscribed *)
-    | Trade of Types.trade              (** Trade data *)
-    | Order_book of Types.order_book    (** Order book snapshot *)
-    | Data of string                    (** Generic data message (as JSON string) *)
-    | Error of string                   (** Error message *)
-    | Unknown of string                 (** Unknown message type *)
+    | Subscribed of string (** Channel subscribed *)
+    | Unsubscribed of string (** Channel unsubscribed *)
+    | Trade of Types.trade (** Trade data *)
+    | Order_book of Types.order_book (** Order book snapshot *)
+    | Data of string (** Generic data message (as JSON string) *)
+    | Error of string (** Error message *)
+    | Unknown of string (** Unknown message type *)
   [@@deriving sexp]
 end
 
@@ -69,8 +69,7 @@ let parse_message (msg : string) : Message.t =
          (match ws_msg.channel with
           | Some ch -> Message.Unsubscribed ch
           | None -> Message.Unknown "Unsubscription without channel")
-       | "bts:request_reconnect" ->
-         Message.Error "Server requested reconnect"
+       | "bts:request_reconnect" -> Message.Error "Server requested reconnect"
        | "data" | "trade" ->
          (match ws_msg.data with
           | Some data ->
@@ -91,74 +90,77 @@ let parse_message (msg : string) : Message.t =
 (** Create subscription message *)
 let create_subscription_message (channel : Channel.t) : string =
   let channel_str = Channel.to_string channel in
-  let subscription = Types.({
-    event = "bts:subscribe";
-    data = `Assoc [("channel", `String channel_str)];
-  }) in
-  Yojson.Safe.to_string (Types.subscription_to_yojson subscription)
+  let subscription =
+    Types.{event= "bts:subscribe"; data= `Assoc [("channel", `String channel_str)]}
+  in
+    Yojson.Safe.to_string (Types.subscription_to_yojson subscription)
 
 (** Create unsubscription message *)
 let create_unsubscription_message (channel : Channel.t) : string =
   let channel_str = Channel.to_string channel in
-  let subscription = Types.({
-    event = "bts:unsubscribe";
-    data = `Assoc [("channel", `String channel_str)];
-  }) in
-  Yojson.Safe.to_string (Types.subscription_to_yojson subscription)
+  let subscription =
+    Types.{event= "bts:unsubscribe"; data= `Assoc [("channel", `String channel_str)]}
+  in
+    Yojson.Safe.to_string (Types.subscription_to_yojson subscription)
 
 (** WebSocket connection state *)
-type connection = {
-  ws : Websocket_curl.t;
-  cfg : Cfg.t;
-  channels : Channel.t list ref;
-}
+type connection =
+  { ws: Websocket_curl.t
+  ; cfg: Cfg.t
+  ; channels: Channel.t list ref }
 
 (** Connect to Bitstamp WebSocket *)
 let connect ~cfg ~channels () : (connection, string) Deferred.Result.t =
   let open Deferred.Result.Let_syntax in
-
-  let%bind ws = Websocket_curl.connect ~url:cfg.Cfg.ws_url ()
+  let%bind ws =
+    Websocket_curl.connect ~url:cfg.Cfg.ws_url ()
     |> Deferred.Result.map_error ~f:(fun err ->
       sprintf "WebSocket connection failed: %s" (Core.Error.to_string_hum err))
   in
-
-  let conn = { ws; cfg; channels = ref channels } in
-
+  let conn = {ws; cfg; channels= ref channels} in
   (* Subscribe to initial channels *)
-  let%bind () = Deferred.Result.all_unit (
-    List.map channels ~f:(fun channel ->
-      let sub_msg = create_subscription_message channel in
-      Deferred.Or_error.try_with (fun () -> Websocket_curl.send ws sub_msg)
-      |> Deferred.map ~f:(Result.map_error ~f:(fun err ->
-        sprintf "Subscribe failed: %s" (Core.Error.to_string_hum err))))
-  ) in
-
-  return conn
+  let%bind () =
+    Deferred.Result.all_unit
+      (List.map channels ~f:(fun channel ->
+         let sub_msg = create_subscription_message channel in
+           Deferred.Or_error.try_with (fun () -> Websocket_curl.send ws sub_msg)
+           |> Deferred.map
+                ~f:
+                  (Result.map_error ~f:(fun err ->
+                     sprintf "Subscribe failed: %s" (Core.Error.to_string_hum err)))))
+  in
+    return conn
 
 (** Subscribe to channel *)
-let subscribe (conn : connection) (channel : Channel.t) : (unit, string) Deferred.Result.t =
+let subscribe (conn : connection) (channel : Channel.t) : (unit, string) Deferred.Result.t
+  =
   conn.channels := channel :: !(conn.channels);
   let sub_msg = create_subscription_message channel in
-  Deferred.Or_error.try_with (fun () -> Websocket_curl.send conn.ws sub_msg)
-  |> Deferred.map ~f:(Result.map_error ~f:(fun err ->
-    sprintf "Subscribe failed: %s" (Core.Error.to_string_hum err)))
+    Deferred.Or_error.try_with (fun () -> Websocket_curl.send conn.ws sub_msg)
+    |> Deferred.map
+         ~f:
+           (Result.map_error ~f:(fun err ->
+              sprintf "Subscribe failed: %s" (Core.Error.to_string_hum err)))
 
 (** Unsubscribe from channel *)
-let unsubscribe (conn : connection) (channel : Channel.t) : (unit, string) Deferred.Result.t =
-  conn.channels := List.filter !(conn.channels) ~f:(fun ch ->
-    not (phys_equal ch channel));
+let unsubscribe (conn : connection) (channel : Channel.t)
+  : (unit, string) Deferred.Result.t
+  =
+  conn.channels := List.filter !(conn.channels) ~f:(fun ch -> not (phys_equal ch channel));
   let unsub_msg = create_unsubscription_message channel in
-  Deferred.Or_error.try_with (fun () -> Websocket_curl.send conn.ws unsub_msg)
-  |> Deferred.map ~f:(Result.map_error ~f:(fun err ->
-    sprintf "Unsubscribe failed: %s" (Core.Error.to_string_hum err)))
+    Deferred.Or_error.try_with (fun () -> Websocket_curl.send conn.ws unsub_msg)
+    |> Deferred.map
+         ~f:
+           (Result.map_error ~f:(fun err ->
+              sprintf "Unsubscribe failed: %s" (Core.Error.to_string_hum err)))
 
 (** Receive one message from WebSocket
 
-    @return None if connection closed, Some msg otherwise
-    Use in a loop to continuously receive messages *)
+    @return
+      None if connection closed, Some msg otherwise
+      Use in a loop to continuously receive messages *)
 let receive (conn : connection) : string option Deferred.t =
   Websocket_curl.receive conn.ws
 
 (** Close WebSocket connection *)
-let close (conn : connection) : unit Deferred.t =
-  Websocket_curl.close conn.ws
+let close (conn : connection) : unit Deferred.t = Websocket_curl.close conn.ws

@@ -1,7 +1,6 @@
 (** Curve Finance DEX (Multi-chain)
 
-    @see <https://curve.fi/>
-*)
+    @see <https://curve.fi/> *)
 
 module Cfg = Cfg
 module Types = Types

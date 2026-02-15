@@ -13,8 +13,7 @@
     - Better test coverage (test once, applies everywhere)
     - Easier maintenance
 
-    @see <https://github.com/struktured-labs/fluxum> for usage examples
-*)
+    @see <https://github.com/struktured-labs/fluxum> for usage examples *)
 
 open Core
 
@@ -24,10 +23,8 @@ module Float_conv : sig
   (** Safe float conversion with validation
 
       All functions return Result.t to handle invalid input gracefully.
-      Rejects: non-numeric strings, infinity, NaN.
-  *)
+      Rejects: non-numeric strings, infinity, NaN. *)
 
-  val of_string : string -> (float, string) Result.t
   (** Convert string to float with validation.
 
       @return Ok float if valid and finite
@@ -36,10 +33,9 @@ module Float_conv : sig
       Examples:
       - "123.456" → Ok 123.456
       - "inf" → Error "Non-finite float: inf"
-      - "abc" → Error "Invalid float 'abc': ..."
-  *)
+      - "abc" → Error "Invalid float 'abc': ..." *)
+  val of_string : string -> (float, string) Result.t
 
-  val price_of_string : string -> (float, string) Result.t
   (** Convert string to price (must be positive).
 
       More strict than [of_string] - rejects zero and negative values.
@@ -50,10 +46,9 @@ module Float_conv : sig
       Examples:
       - "50000.25" → Ok 50000.25
       - "0.0" → Error "Price must be positive, got: 0.000000"
-      - "-100" → Error "Price must be positive, got: -100.000000"
-  *)
+      - "-100" → Error "Price must be positive, got: -100.000000" *)
+  val price_of_string : string -> (float, string) Result.t
 
-  val qty_of_string : string -> (float, string) Result.t
   (** Convert string to quantity (must be non-negative).
 
       Allows zero (for order cancellations) but rejects negative values.
@@ -64,17 +59,16 @@ module Float_conv : sig
       Examples:
       - "10.5" → Ok 10.5
       - "0.0" → Ok 0.0  (valid - represents no quantity)
-      - "-5.0" → Error "Quantity cannot be negative, got: -5.000000"
-  *)
+      - "-5.0" → Error "Quantity cannot be negative, got: -5.000000" *)
+  val qty_of_string : string -> (float, string) Result.t
 
-  val amount_of_string : string -> (float, string) Result.t
   (** Convert string to amount (allows negative for balance differences).
 
       Same as [of_string] but with clearer intent for financial amounts.
 
       @return Ok float if finite
-      @return Error if non-finite or invalid
-  *)
+      @return Error if non-finite or invalid *)
+  val amount_of_string : string -> (float, string) Result.t
 end
 
 (** {1 Result Utilities} *)
@@ -82,7 +76,6 @@ end
 module Result_util : sig
   (** Utilities for working with Result.t lists *)
 
-  val transpose : ('a, 'e) Result.t list -> ('a list, 'e) Result.t
   (** Transpose list of Results into Result of list.
 
       All elements must be Ok to get Ok list.
@@ -93,10 +86,9 @@ module Result_util : sig
       - [[Ok 1; Error "e"; Ok 3]] → [Error "e"]  (first error wins)
       - [[]] → [Ok []]  (empty list succeeds)
 
-      Use for: Converting multiple Result.t values in parallel operations.
-  *)
+      Use for: Converting multiple Result.t values in parallel operations. *)
+  val transpose : ('a, 'e) Result.t list -> ('a list, 'e) Result.t
 
-  val map_transpose : f:('a -> ('b, 'e) Result.t) -> 'a list -> ('b list, 'e) Result.t
   (** Map function that returns Result, then transpose.
 
       Convenience function combining [List.map] and [transpose].
@@ -104,8 +96,8 @@ module Result_util : sig
 
       @param f Function that may fail (returns Result.t)
       @param list Input list
-      @return Ok list if all succeed, Error if any fail
-  *)
+      @return Ok list if all succeed, Error if any fail *)
+  val map_transpose : f:('a -> ('b, 'e) Result.t) -> 'a list -> ('b list, 'e) Result.t
 end
 
 (** {1 Exchange Type Conversions} *)
@@ -113,7 +105,6 @@ end
 module Side : sig
   (** Convert exchange-specific side strings to normalized Types.Side.t *)
 
-  val of_string : string -> (Types.Side.t, string) Result.t
   (** Parse side from exchange string.
 
       Handles common variations (case-insensitive):
@@ -124,10 +115,9 @@ module Side : sig
       @return Ok side if recognized
       @return Error with details if unrecognized
 
-      Prefer this over [of_string_exn] - explicit error handling is better.
-  *)
+      Prefer this over [of_string_exn] - explicit error handling is better. *)
+  val of_string : string -> (Types.Side.t, string) Result.t
 
-  val of_string_exn : ?default:Types.Side.t -> string -> Types.Side.t
   (** Parse side with fallback default (for backwards compatibility).
 
       Warning: Using defaults can mask data quality issues.
@@ -136,14 +126,13 @@ module Side : sig
       @param default Fallback value if string unrecognized (default: Buy)
       @return Parsed side or default if parsing fails
 
-      Prefer [of_string] which returns Result.t for explicit error handling.
-  *)
+      Prefer [of_string] which returns Result.t for explicit error handling. *)
+  val of_string_exn : ?default:Types.Side.t -> string -> Types.Side.t
 end
 
 module Order_status : sig
   (** Convert exchange-specific status strings to normalized Types.Order_status.t *)
 
-  val of_string : string -> (Types.Order_status.t, string) Result.t
   (** Parse order status from exchange string.
 
       Handles common variations across exchanges (case-insensitive):
@@ -157,23 +146,21 @@ module Order_status : sig
       @return Ok status if recognized
       @return Error if unrecognized
 
-      Note: "expired" maps to Canceled (common exchange behavior).
-  *)
+      Note: "expired" maps to Canceled (common exchange behavior). *)
+  val of_string : string -> (Types.Order_status.t, string) Result.t
 
-  val of_string_exn : ?default:Types.Order_status.t -> string -> Types.Order_status.t
   (** Parse status with fallback default (for backwards compatibility).
 
       Warning: Using defaults can mask data quality issues.
       Prefer [of_string] which returns Result.t.
 
-      @param default Fallback value if unrecognized (default: New)
-  *)
+      @param default Fallback value if unrecognized (default: New) *)
+  val of_string_exn : ?default:Types.Order_status.t -> string -> Types.Order_status.t
 end
 
 module Order_type : sig
   (** Convert exchange-specific order type strings to normalized Types.Order_kind.t *)
 
-  val of_string : string -> (Types.Order_kind.t, string) Result.t
   (** Parse order type from exchange string.
 
       Handles common variations (case-insensitive):
@@ -196,15 +183,14 @@ module Order_type : sig
           Types.Order_kind.limit (Float.of_string order.price)
         | Ok other -> other
         | Error msg -> failwith msg
-      ]}
-  *)
+      ]} *)
+  val of_string : string -> (Types.Order_kind.t, string) Result.t
 
-  val of_string_exn : ?default:Types.Order_kind.t -> string -> Types.Order_kind.t
   (** Parse order type with fallback default.
 
       Warning: Using defaults can mask data quality issues.
       Prefer [of_string] which returns Result.t.
 
-      @param default Fallback value if unrecognized (default: Market)
-  *)
+      @param default Fallback value if unrecognized (default: Market) *)
+  val of_string_exn : ?default:Types.Order_kind.t -> string -> Types.Order_kind.t
 end

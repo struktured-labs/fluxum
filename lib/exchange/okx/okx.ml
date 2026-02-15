@@ -14,7 +14,8 @@ module Unified_adapter = Unified_adapter
 
 (** Main OKX command group *)
 let command : Command.t =
-  Command.group ~summary:"OKX Exchange Commands"
+  Command.group
+    ~summary:"OKX Exchange Commands"
     [ ("ledger", Ledger.command)
     ; ("market-tickers", V5.Market_tickers.command)
     ; ("instruments", V5.Instruments.command)
@@ -24,5 +25,4 @@ let command : Command.t =
     ; ("place-order", V5.Place_order.command)
     ; ("cancel-order", V5.Cancel_order.command)
     ; ("order-details", V5.Order_details.command)
-    ; ("orders-history", V5.Orders_history.command)
-    ]
+    ; ("orders-history", V5.Orders_history.command) ]

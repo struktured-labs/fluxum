@@ -23,8 +23,7 @@ let arg_type = Command.Arg_type.create of_string
 
 let param =
   Command.Param.(
-    flag "-cfg" (optional arg_type)
-      ~doc:"STRING MEXC environment (production)")
+    flag "-cfg" (optional arg_type) ~doc:"STRING MEXC environment (production)")
 
 let or_default cfg =
   match cfg with

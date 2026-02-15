@@ -1,7 +1,6 @@
 (** Bitfinex Exchange Module
 
-    @see <https://docs.bitfinex.com/docs/introduction>
-*)
+    @see <https://docs.bitfinex.com/docs/introduction> *)
 
 module Cfg = Cfg
 module Types = Types

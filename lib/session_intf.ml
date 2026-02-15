@@ -10,7 +10,7 @@ module State = struct
     | Connecting
     | Connected
     | Ready
-    | Reconnecting of { attempt : int }
+    | Reconnecting of {attempt: int}
     | Failed of Error.t
   [@@deriving sexp, compare, equal]
 end
@@ -21,21 +21,21 @@ module Auto_restart = struct
 
       @param name Name for logging
       @param create_pipe Function to create a new pipe connection
-      @return A pipe that never closes - automatically reconnects
-  *)
+      @return A pipe that never closes - automatically reconnects *)
   let pipe ~name ~create_pipe () =
     let reader, writer = Pipe.create () in
     let rec restart_loop () =
       Log.Global.info "auto_restart_pipe[%s]: connecting..." name;
-      create_pipe () >>= fun source_pipe ->
+      create_pipe ()
+      >>= fun source_pipe ->
       Log.Global.info "auto_restart_pipe[%s]: connected, relaying" name;
-      Pipe.transfer source_pipe writer ~f:Fn.id >>= fun () ->
+      Pipe.transfer source_pipe writer ~f:Fn.id
+      >>= fun () ->
       Log.Global.info "auto_restart_pipe[%s]: EOF detected, restarting in 1s" name;
-      after (Time_float_unix.Span.of_sec 1.0) >>= fun () ->
-      restart_loop ()
+      after (Time_float_unix.Span.of_sec 1.0) >>= fun () -> restart_loop ()
     in
-    don't_wait_for (restart_loop ());
-    reader
+      don't_wait_for (restart_loop ());
+      reader
 end
 
 (** Multi-stream event container *)
@@ -47,7 +47,6 @@ module type EVENTS = sig
   type ledger_entry
   type order_event
   type order_id
-
   type t
 
   val symbols : t -> Types.Symbol.t list

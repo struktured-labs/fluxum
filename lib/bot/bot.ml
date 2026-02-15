@@ -52,8 +52,7 @@
       Dashboard.run_with_engine dashboard engine
     ]}
 
-    {1 Modules}
-*)
+    {1 Modules} *)
 
 (** Event types with bin_prot serialization *)
 module Event = Event
@@ -78,4 +77,5 @@ module Parquet_export = Parquet_export
 
 (** Unified ledger (re-export) *)
 module Ledger = Unified_ledger.Ledger
+
 module Entry = Unified_ledger.Entry

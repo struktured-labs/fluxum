@@ -2,7 +2,6 @@
 
 open Core
 open Async
-
 module Cfg = Cfg
 module Rest = Rest
 
@@ -22,7 +21,7 @@ module Server_time = struct
 
     let request_to_params () = []
 
-    type response = { serverTime : int64 } [@@deriving sexp, of_yojson]
+    type response = {serverTime: int64} [@@deriving sexp, of_yojson]
   end
 
   include T
@@ -37,34 +36,32 @@ module Exchange_info = struct
     let http_method = `GET
     let requires_auth = false
 
-    type request = { symbol : string option [@default None] } [@@deriving sexp]
+    type request = {symbol: string option [@default None]} [@@deriving sexp]
 
-    let request_to_params { symbol } =
+    let request_to_params {symbol} =
       match symbol with
-      | Some s -> [ ("symbol", s) ]
+      | Some s -> [("symbol", s)]
       | None -> []
 
     type symbol_info =
-      { symbol : string
-      ; status : string
-      ; baseAsset : string
-      ; quoteAsset : string
-      ; baseAssetPrecision : int [@default 8]
-      ; quotePrecision : int [@default 8]
-      ; quoteAssetPrecision : int [@default 8]
-      ; baseCommissionPrecision : int [@default 8]
-      ; quoteCommissionPrecision : int [@default 8]
-      ; isSpotTradingAllowed : bool [@default true]
-      ; isMarginTradingAllowed : bool [@default false]
-      }
-    [@@deriving sexp, of_yojson { strict = false }]
+      { symbol: string
+      ; status: string
+      ; baseAsset: string
+      ; quoteAsset: string
+      ; baseAssetPrecision: int [@default 8]
+      ; quotePrecision: int [@default 8]
+      ; quoteAssetPrecision: int [@default 8]
+      ; baseCommissionPrecision: int [@default 8]
+      ; quoteCommissionPrecision: int [@default 8]
+      ; isSpotTradingAllowed: bool [@default true]
+      ; isMarginTradingAllowed: bool [@default false] }
+    [@@deriving sexp, of_yojson {strict= false}]
 
     type response =
-      { timezone : string
-      ; serverTime : int64
-      ; symbols : symbol_info list
-      }
-    [@@deriving sexp, of_yojson { strict = false }]
+      { timezone: string
+      ; serverTime: int64
+      ; symbols: symbol_info list }
+    [@@deriving sexp, of_yojson {strict= false}]
   end
 
   include T
@@ -80,29 +77,27 @@ module Depth = struct
     let requires_auth = false
 
     type request =
-      { symbol : string
-      ; limit : int option [@default None]
-      }
+      { symbol: string
+      ; limit: int option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { symbol; limit } =
-      let base = [ ("symbol", symbol) ] in
-      match limit with
-      | Some n -> base @ [ ("limit", Int.to_string n) ]
-      | None -> base
+    let request_to_params {symbol; limit} =
+      let base = [("symbol", symbol)] in
+        match limit with
+        | Some n -> base @ [("limit", Int.to_string n)]
+        | None -> base
 
     type level = string * string [@@deriving sexp]
 
     let level_of_yojson = function
-      | `List [ `String price; `String qty ] -> Ok (price, qty)
+      | `List [`String price; `String qty] -> Ok (price, qty)
       | json -> Error (sprintf "Invalid level: %s" (Yojson.Safe.to_string json))
 
     type response =
-      { lastUpdateId : int64 [@default 0L]
-      ; bids : level list
-      ; asks : level list
-      ; timestamp : int64 [@default 0L]
-      }
+      { lastUpdateId: int64 [@default 0L]
+      ; bids: level list
+      ; asks: level list
+      ; timestamp: int64 [@default 0L] }
     [@@deriving sexp, of_yojson]
   end
 
@@ -118,32 +113,31 @@ module Ticker_24hr = struct
     let http_method = `GET
     let requires_auth = false
 
-    type request = { symbol : string option [@default None] } [@@deriving sexp]
+    type request = {symbol: string option [@default None]} [@@deriving sexp]
 
-    let request_to_params { symbol } =
+    let request_to_params {symbol} =
       match symbol with
-      | Some s -> [ ("symbol", s) ]
+      | Some s -> [("symbol", s)]
       | None -> []
 
     type ticker =
-      { symbol : string
-      ; priceChange : string
-      ; priceChangePercent : string
-      ; prevClosePrice : string [@default "0"]
-      ; lastPrice : string
-      ; bidPrice : string [@default "0"]
-      ; bidQty : string [@default "0"]
-      ; askPrice : string [@default "0"]
-      ; askQty : string [@default "0"]
-      ; openPrice : string
-      ; highPrice : string
-      ; lowPrice : string
-      ; volume : string
-      ; quoteVolume : string
-      ; openTime : int64
-      ; closeTime : int64
-      ; count : int option [@default None]
-      }
+      { symbol: string
+      ; priceChange: string
+      ; priceChangePercent: string
+      ; prevClosePrice: string [@default "0"]
+      ; lastPrice: string
+      ; bidPrice: string [@default "0"]
+      ; bidQty: string [@default "0"]
+      ; askPrice: string [@default "0"]
+      ; askQty: string [@default "0"]
+      ; openPrice: string
+      ; highPrice: string
+      ; lowPrice: string
+      ; volume: string
+      ; quoteVolume: string
+      ; openTime: int64
+      ; closeTime: int64
+      ; count: int option [@default None] }
     [@@deriving sexp, of_yojson]
 
     type response = ticker [@@deriving sexp, of_yojson]
@@ -162,27 +156,25 @@ module Recent_trades = struct
     let requires_auth = false
 
     type request =
-      { symbol : string
-      ; limit : int option [@default None]
-      }
+      { symbol: string
+      ; limit: int option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { symbol; limit } =
-      let base = [ ("symbol", symbol) ] in
-      match limit with
-      | Some n -> base @ [ ("limit", Int.to_string n) ]
-      | None -> base
+    let request_to_params {symbol; limit} =
+      let base = [("symbol", symbol)] in
+        match limit with
+        | Some n -> base @ [("limit", Int.to_string n)]
+        | None -> base
 
     type trade =
-      { id : int64 option [@default None]
-      ; price : string
-      ; qty : string
-      ; quoteQty : string
-      ; time : int64
-      ; isBuyerMaker : bool
-      ; isBestMatch : bool [@default true]
-      ; tradeType : string [@default ""]
-      }
+      { id: int64 option [@default None]
+      ; price: string
+      ; qty: string
+      ; quoteQty: string
+      ; time: int64
+      ; isBuyerMaker: bool
+      ; isBestMatch: bool [@default true]
+      ; tradeType: string [@default ""] }
     [@@deriving sexp, of_yojson]
 
     type response = trade list [@@deriving sexp, of_yojson]
@@ -209,23 +201,21 @@ module Account = struct
     let request_to_params () = []
 
     type balance =
-      { asset : string
-      ; free : string
-      ; locked : string
-      }
+      { asset: string
+      ; free: string
+      ; locked: string }
     [@@deriving sexp, of_yojson]
 
     type response =
-      { makerCommission : int [@default 0]
-      ; takerCommission : int [@default 0]
-      ; buyerCommission : int [@default 0]
-      ; sellerCommission : int [@default 0]
-      ; canTrade : bool [@default true]
-      ; canWithdraw : bool [@default true]
-      ; canDeposit : bool [@default true]
-      ; accountType : string [@default "SPOT"]
-      ; balances : balance list
-      }
+      { makerCommission: int [@default 0]
+      ; takerCommission: int [@default 0]
+      ; buyerCommission: int [@default 0]
+      ; sellerCommission: int [@default 0]
+      ; canTrade: bool [@default true]
+      ; canWithdraw: bool [@default true]
+      ; canDeposit: bool [@default true]
+      ; accountType: string [@default "SPOT"]
+      ; balances: balance list }
     [@@deriving sexp, of_yojson]
   end
 
@@ -242,52 +232,57 @@ module New_order = struct
     let requires_auth = true
 
     type request =
-      { symbol : string
-      ; side : Common.Side.t
-      ; order_type : Common.Order_type.t
-      ; quantity : string option [@default None]
-      ; quoteOrderQty : string option [@default None]
-      ; price : string option [@default None]
-      ; newClientOrderId : string option [@default None]
-      ; timeInForce : Common.Time_in_force.t option [@default None]
-      }
+      { symbol: string
+      ; side: Common.Side.t
+      ; order_type: Common.Order_type.t
+      ; quantity: string option [@default None]
+      ; quoteOrderQty: string option [@default None]
+      ; price: string option [@default None]
+      ; newClientOrderId: string option [@default None]
+      ; timeInForce: Common.Time_in_force.t option [@default None] }
     [@@deriving sexp]
 
     let request_to_params
-        { symbol; side; order_type; quantity; quoteOrderQty; price
-        ; newClientOrderId; timeInForce } =
+          { symbol
+          ; side
+          ; order_type
+          ; quantity
+          ; quoteOrderQty
+          ; price
+          ; newClientOrderId
+          ; timeInForce }
+      =
       let base =
         [ ("symbol", symbol)
         ; ("side", Common.Side.to_string side)
-        ; ("type", Common.Order_type.to_string order_type)
-        ]
+        ; ("type", Common.Order_type.to_string order_type) ]
       in
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      base
-      |> add_opt "quantity" quantity
-      |> add_opt "quoteOrderQty" quoteOrderQty
-      |> add_opt "price" price
-      |> add_opt "newClientOrderId" newClientOrderId
-      |> add_opt "timeInForce"
-           (Option.map timeInForce ~f:Common.Time_in_force.to_string)
+        base
+        |> add_opt "quantity" quantity
+        |> add_opt "quoteOrderQty" quoteOrderQty
+        |> add_opt "price" price
+        |> add_opt "newClientOrderId" newClientOrderId
+        |> add_opt
+             "timeInForce"
+             (Option.map timeInForce ~f:Common.Time_in_force.to_string)
 
     type response =
-      { symbol : string
-      ; orderId : string
-      ; orderListId : int64 [@default (-1L)]
-      ; price : string [@default "0"]
-      ; origQty : string
-      ; executedQty : string [@default "0"]
-      ; cummulativeQuoteQty : string [@default "0"]
-      ; status : string
-      ; timeInForce : string [@default "GTC"]
-      ; type_ : string [@key "type"]
-      ; side : string
-      ; transactTime : int64 [@default 0L]
-      }
+      { symbol: string
+      ; orderId: string
+      ; orderListId: int64 [@default -1L]
+      ; price: string [@default "0"]
+      ; origQty: string
+      ; executedQty: string [@default "0"]
+      ; cummulativeQuoteQty: string [@default "0"]
+      ; status: string
+      ; timeInForce: string [@default "GTC"]
+      ; type_: string [@key "type"]
+      ; side: string
+      ; transactTime: int64 [@default 0L] }
     [@@deriving sexp, of_yojson]
   end
 
@@ -298,8 +293,7 @@ module New_order = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let symbol =
-          string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
+        let symbol = string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
         and side =
           enum_flag
             ~field_name:"side"
@@ -316,18 +310,14 @@ module New_order = struct
             ~all:Common.Order_type.all
             ~to_string:Common.Order_type.to_string
             ~doc:"Order type (LIMIT, MARKET, etc.)"
-        and quantity =
-          string_flag_option ~field_name:"quantity" ~doc:"Order quantity"
+        and quantity = string_flag_option ~field_name:"quantity" ~doc:"Order quantity"
         and quoteOrderQty =
           string_flag_option
             ~field_name:"quoteOrderQty"
             ~doc:"Quote order quantity (for MARKET orders)"
-        and price =
-          string_flag_option ~field_name:"price" ~doc:"Limit price"
+        and price = string_flag_option ~field_name:"price" ~doc:"Limit price"
         and newClientOrderId =
-          string_flag_option
-            ~field_name:"newClientOrderId"
-            ~doc:"Custom client order ID"
+          string_flag_option ~field_name:"newClientOrderId" ~doc:"Custom client order ID"
         and timeInForce =
           enum_flag_option
             ~field_name:"timeInForce"
@@ -337,15 +327,14 @@ module New_order = struct
             ~to_string:Common.Time_in_force.to_string
             ~doc:"Time in force (GTC, IOC, FOK)"
         in
-        { symbol
-        ; side
-        ; order_type
-        ; quantity
-        ; quoteOrderQty
-        ; price
-        ; newClientOrderId
-        ; timeInForce
-        }]
+          { symbol
+          ; side
+          ; order_type
+          ; quantity
+          ; quoteOrderQty
+          ; price
+          ; newClientOrderId
+          ; timeInForce }]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -360,35 +349,31 @@ module Cancel_order = struct
     let requires_auth = true
 
     type request =
-      { symbol : string
-      ; orderId : string option [@default None]
-      ; origClientOrderId : string option [@default None]
-      }
+      { symbol: string
+      ; orderId: string option [@default None]
+      ; origClientOrderId: string option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { symbol; orderId; origClientOrderId } =
-      let base = [ ("symbol", symbol) ] in
+    let request_to_params {symbol; orderId; origClientOrderId} =
+      let base = [("symbol", symbol)] in
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      base
-      |> add_opt "orderId" orderId
-      |> add_opt "origClientOrderId" origClientOrderId
+        base |> add_opt "orderId" orderId |> add_opt "origClientOrderId" origClientOrderId
 
     type response =
-      { symbol : string
-      ; orderId : string
-      ; origClientOrderId : string [@default ""]
-      ; price : string [@default "0"]
-      ; origQty : string
-      ; executedQty : string [@default "0"]
-      ; cummulativeQuoteQty : string [@default "0"]
-      ; status : string
-      ; timeInForce : string [@default "GTC"]
-      ; type_ : string [@key "type"]
-      ; side : string
-      }
+      { symbol: string
+      ; orderId: string
+      ; origClientOrderId: string [@default ""]
+      ; price: string [@default "0"]
+      ; origQty: string
+      ; executedQty: string [@default "0"]
+      ; cummulativeQuoteQty: string [@default "0"]
+      ; status: string
+      ; timeInForce: string [@default "GTC"]
+      ; type_: string [@key "type"]
+      ; side: string }
     [@@deriving sexp, of_yojson]
   end
 
@@ -399,16 +384,14 @@ module Cancel_order = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let symbol =
-          string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
-        and orderId =
-          string_flag_option ~field_name:"orderId" ~doc:"Order ID to cancel"
+        let symbol = string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
+        and orderId = string_flag_option ~field_name:"orderId" ~doc:"Order ID to cancel"
         and origClientOrderId =
           string_flag_option
             ~field_name:"origClientOrderId"
             ~doc:"Client order ID to cancel"
         in
-        { symbol; orderId; origClientOrderId }]
+          {symbol; orderId; origClientOrderId}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -423,41 +406,37 @@ module Query_order = struct
     let requires_auth = true
 
     type request =
-      { symbol : string
-      ; orderId : string option [@default None]
-      ; origClientOrderId : string option [@default None]
-      }
+      { symbol: string
+      ; orderId: string option [@default None]
+      ; origClientOrderId: string option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { symbol; orderId; origClientOrderId } =
-      let base = [ ("symbol", symbol) ] in
+    let request_to_params {symbol; orderId; origClientOrderId} =
+      let base = [("symbol", symbol)] in
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      base
-      |> add_opt "orderId" orderId
-      |> add_opt "origClientOrderId" origClientOrderId
+        base |> add_opt "orderId" orderId |> add_opt "origClientOrderId" origClientOrderId
 
     type response =
-      { symbol : string
-      ; orderId : string
-      ; orderListId : int64 [@default (-1L)]
-      ; clientOrderId : string [@default ""]
-      ; price : string
-      ; origQty : string
-      ; executedQty : string
-      ; cummulativeQuoteQty : string [@default "0"]
-      ; status : string
-      ; timeInForce : string [@default "GTC"]
-      ; type_ : string [@key "type"]
-      ; side : string
-      ; stopPrice : string [@default "0"]
-      ; time : int64
-      ; updateTime : int64
-      ; isWorking : bool [@default true]
-      ; origQuoteOrderQty : string [@default "0"]
-      }
+      { symbol: string
+      ; orderId: string
+      ; orderListId: int64 [@default -1L]
+      ; clientOrderId: string [@default ""]
+      ; price: string
+      ; origQty: string
+      ; executedQty: string
+      ; cummulativeQuoteQty: string [@default "0"]
+      ; status: string
+      ; timeInForce: string [@default "GTC"]
+      ; type_: string [@key "type"]
+      ; side: string
+      ; stopPrice: string [@default "0"]
+      ; time: int64
+      ; updateTime: int64
+      ; isWorking: bool [@default true]
+      ; origQuoteOrderQty: string [@default "0"] }
     [@@deriving sexp, of_yojson]
   end
 
@@ -468,16 +447,14 @@ module Query_order = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let symbol =
-          string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
-        and orderId =
-          string_flag_option ~field_name:"orderId" ~doc:"Order ID to query"
+        let symbol = string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
+        and orderId = string_flag_option ~field_name:"orderId" ~doc:"Order ID to query"
         and origClientOrderId =
           string_flag_option
             ~field_name:"origClientOrderId"
             ~doc:"Client order ID to query"
         in
-        { symbol; orderId; origClientOrderId }]
+          {symbol; orderId; origClientOrderId}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -491,32 +468,31 @@ module Open_orders = struct
     let http_method = `GET
     let requires_auth = true
 
-    type request = { symbol : string option [@default None] } [@@deriving sexp]
+    type request = {symbol: string option [@default None]} [@@deriving sexp]
 
-    let request_to_params { symbol } =
+    let request_to_params {symbol} =
       match symbol with
-      | Some s -> [ ("symbol", s) ]
+      | Some s -> [("symbol", s)]
       | None -> []
 
     type order =
-      { symbol : string
-      ; orderId : string
-      ; orderListId : int64 [@default (-1L)]
-      ; clientOrderId : string [@default ""]
-      ; price : string
-      ; origQty : string
-      ; executedQty : string
-      ; cummulativeQuoteQty : string [@default "0"]
-      ; status : string
-      ; timeInForce : string [@default "GTC"]
-      ; type_ : string [@key "type"]
-      ; side : string
-      ; stopPrice : string [@default "0"]
-      ; time : int64
-      ; updateTime : int64
-      ; isWorking : bool [@default true]
-      ; origQuoteOrderQty : string [@default "0"]
-      }
+      { symbol: string
+      ; orderId: string
+      ; orderListId: int64 [@default -1L]
+      ; clientOrderId: string [@default ""]
+      ; price: string
+      ; origQty: string
+      ; executedQty: string
+      ; cummulativeQuoteQty: string [@default "0"]
+      ; status: string
+      ; timeInForce: string [@default "GTC"]
+      ; type_: string [@key "type"]
+      ; side: string
+      ; stopPrice: string [@default "0"]
+      ; time: int64
+      ; updateTime: int64
+      ; isWorking: bool [@default true]
+      ; origQuoteOrderQty: string [@default "0"] }
     [@@deriving sexp, of_yojson]
 
     type response = order list [@@deriving sexp, of_yojson]
@@ -532,7 +508,7 @@ module Open_orders = struct
         let symbol =
           string_flag_option ~field_name:"symbol" ~doc:"Trading pair (optional)"
         in
-        { symbol }]
+          {symbol}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -547,25 +523,24 @@ module All_orders = struct
     let requires_auth = true
 
     type request =
-      { symbol : string
-      ; orderId : string option [@default None]
-      ; startTime : int64 option [@default None]
-      ; endTime : int64 option [@default None]
-      ; limit : int option [@default None]
-      }
+      { symbol: string
+      ; orderId: string option [@default None]
+      ; startTime: int64 option [@default None]
+      ; endTime: int64 option [@default None]
+      ; limit: int option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { symbol; orderId; startTime; endTime; limit } =
-      let base = [ ("symbol", symbol) ] in
+    let request_to_params {symbol; orderId; startTime; endTime; limit} =
+      let base = [("symbol", symbol)] in
       let add_opt key f = function
         | None -> Fun.id
         | Some v -> List.cons (key, f v)
       in
-      base
-      |> add_opt "orderId" Fn.id orderId
-      |> add_opt "startTime" Int64.to_string startTime
-      |> add_opt "endTime" Int64.to_string endTime
-      |> add_opt "limit" Int.to_string limit
+        base
+        |> add_opt "orderId" Fn.id orderId
+        |> add_opt "startTime" Int64.to_string startTime
+        |> add_opt "endTime" Int64.to_string endTime
+        |> add_opt "limit" Int.to_string limit
 
     type response = Open_orders.T.order list [@@deriving sexp, of_yojson]
   end
@@ -577,18 +552,14 @@ module All_orders = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let symbol =
-          string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
-        and orderId =
-          string_flag_option ~field_name:"orderId" ~doc:"Start from order ID"
-        and startTime =
-          int64_flag_option ~field_name:"startTime" ~doc:"Start time (ms)"
-        and endTime =
-          int64_flag_option ~field_name:"endTime" ~doc:"End time (ms)"
+        let symbol = string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
+        and orderId = string_flag_option ~field_name:"orderId" ~doc:"Start from order ID"
+        and startTime = int64_flag_option ~field_name:"startTime" ~doc:"Start time (ms)"
+        and endTime = int64_flag_option ~field_name:"endTime" ~doc:"End time (ms)"
         and limit =
           int_flag_option ~field_name:"limit" ~doc:"Max results (default 500)"
         in
-        { symbol; orderId; startTime; endTime; limit }]
+          {symbol; orderId; startTime; endTime; limit}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -603,42 +574,40 @@ module My_trades = struct
     let requires_auth = true
 
     type request =
-      { symbol : string
-      ; orderId : string option [@default None]
-      ; startTime : int64 option [@default None]
-      ; endTime : int64 option [@default None]
-      ; fromId : int64 option [@default None]
-      ; limit : int option [@default None]
-      }
+      { symbol: string
+      ; orderId: string option [@default None]
+      ; startTime: int64 option [@default None]
+      ; endTime: int64 option [@default None]
+      ; fromId: int64 option [@default None]
+      ; limit: int option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { symbol; orderId; startTime; endTime; fromId; limit } =
-      let base = [ ("symbol", symbol) ] in
+    let request_to_params {symbol; orderId; startTime; endTime; fromId; limit} =
+      let base = [("symbol", symbol)] in
       let add_opt key f = function
         | None -> Fun.id
         | Some v -> List.cons (key, f v)
       in
-      base
-      |> add_opt "orderId" Fn.id orderId
-      |> add_opt "startTime" Int64.to_string startTime
-      |> add_opt "endTime" Int64.to_string endTime
-      |> add_opt "fromId" Int64.to_string fromId
-      |> add_opt "limit" Int.to_string limit
+        base
+        |> add_opt "orderId" Fn.id orderId
+        |> add_opt "startTime" Int64.to_string startTime
+        |> add_opt "endTime" Int64.to_string endTime
+        |> add_opt "fromId" Int64.to_string fromId
+        |> add_opt "limit" Int.to_string limit
 
     type trade =
-      { symbol : string
-      ; id : int64
-      ; orderId : string
-      ; price : string
-      ; qty : string
-      ; quoteQty : string
-      ; commission : string
-      ; commissionAsset : string
-      ; time : int64
-      ; isBuyer : bool
-      ; isMaker : bool
-      ; isBestMatch : bool [@default true]
-      }
+      { symbol: string
+      ; id: int64
+      ; orderId: string
+      ; price: string
+      ; qty: string
+      ; quoteQty: string
+      ; commission: string
+      ; commissionAsset: string
+      ; time: int64
+      ; isBuyer: bool
+      ; isMaker: bool
+      ; isBestMatch: bool [@default true] }
     [@@deriving sexp, of_yojson]
 
     type response = trade list [@@deriving sexp, of_yojson]
@@ -651,20 +620,15 @@ module My_trades = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let symbol =
-          string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
-        and orderId =
-          string_flag_option ~field_name:"orderId" ~doc:"Filter by order ID"
-        and startTime =
-          int64_flag_option ~field_name:"startTime" ~doc:"Start time (ms)"
-        and endTime =
-          int64_flag_option ~field_name:"endTime" ~doc:"End time (ms)"
-        and fromId =
-          int64_flag_option ~field_name:"fromId" ~doc:"Start from trade ID"
+        let symbol = string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
+        and orderId = string_flag_option ~field_name:"orderId" ~doc:"Filter by order ID"
+        and startTime = int64_flag_option ~field_name:"startTime" ~doc:"Start time (ms)"
+        and endTime = int64_flag_option ~field_name:"endTime" ~doc:"End time (ms)"
+        and fromId = int64_flag_option ~field_name:"fromId" ~doc:"Start from trade ID"
         and limit =
           int_flag_option ~field_name:"limit" ~doc:"Max results (default 500)"
         in
-        { symbol; orderId; startTime; endTime; fromId; limit }]
+          {symbol; orderId; startTime; endTime; fromId; limit}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -678,9 +642,9 @@ module Cancel_all_orders = struct
     let http_method = `DELETE
     let requires_auth = true
 
-    type request = { symbol : string } [@@deriving sexp]
+    type request = {symbol: string} [@@deriving sexp]
 
-    let request_to_params { symbol } = [ ("symbol", symbol) ]
+    let request_to_params {symbol} = [("symbol", symbol)]
 
     type response = Cancel_order.T.response list [@@deriving sexp, of_yojson]
   end
@@ -695,7 +659,7 @@ module Cancel_all_orders = struct
         let symbol =
           string_flag ~field_name:"symbol" ~doc:"Trading pair (e.g., BTCUSDT)"
         in
-        { symbol }]
+          {symbol}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -714,23 +678,21 @@ module Deposit_address = struct
     let requires_auth = true
 
     type request =
-      { coin : string
-      ; network : string option [@default None]
-      }
+      { coin: string
+      ; network: string option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { coin; network } =
-      let base = [ ("coin", coin) ] in
-      match network with
-      | Some n -> base @ [ ("network", n) ]
-      | None -> base
+    let request_to_params {coin; network} =
+      let base = [("coin", coin)] in
+        match network with
+        | Some n -> base @ [("network", n)]
+        | None -> base
 
     type response =
-      { coin : string
-      ; address : string
-      ; tag : string [@default ""]
-      ; network : string
-      }
+      { coin: string
+      ; address: string
+      ; tag: string [@default ""]
+      ; network: string }
     [@@deriving sexp, of_yojson]
   end
 
@@ -741,12 +703,11 @@ module Deposit_address = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let coin =
-          string_flag ~field_name:"coin" ~doc:"Coin symbol (e.g., BTC, ETH)"
+        let coin = string_flag ~field_name:"coin" ~doc:"Coin symbol (e.g., BTC, ETH)"
         and network =
           string_flag_option ~field_name:"network" ~doc:"Network (e.g., ERC20, TRC20)"
         in
-        { coin; network }]
+          {coin; network}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -761,37 +722,36 @@ module Deposit_history = struct
     let requires_auth = true
 
     type request =
-      { coin : string option [@default None]
-      ; status : int option [@default None]  (** 1=small, 2=large, 3=pending, 4=cancelled, 5=completed *)
-      ; startTime : int64 option [@default None]
-      ; endTime : int64 option [@default None]
-      ; limit : int option [@default None]
-      }
+      { coin: string option [@default None]
+      ; status: int option [@default None]
+        (** 1=small, 2=large, 3=pending, 4=cancelled, 5=completed *)
+      ; startTime: int64 option [@default None]
+      ; endTime: int64 option [@default None]
+      ; limit: int option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { coin; status; startTime; endTime; limit } =
+    let request_to_params {coin; status; startTime; endTime; limit} =
       let add_opt key f = function
         | None -> Fun.id
         | Some v -> List.cons (key, f v)
       in
-      []
-      |> add_opt "coin" Fn.id coin
-      |> add_opt "status" Int.to_string status
-      |> add_opt "startTime" Int64.to_string startTime
-      |> add_opt "endTime" Int64.to_string endTime
-      |> add_opt "limit" Int.to_string limit
+        []
+        |> add_opt "coin" Fn.id coin
+        |> add_opt "status" Int.to_string status
+        |> add_opt "startTime" Int64.to_string startTime
+        |> add_opt "endTime" Int64.to_string endTime
+        |> add_opt "limit" Int.to_string limit
 
     type deposit =
-      { id : string
-      ; amount : string
-      ; coin : string
-      ; network : string
-      ; status : int  (** 1=small, 2=large, 3=pending, 4=cancelled, 5=completed *)
-      ; address : string
-      ; txId : string [@default ""]
-      ; insertTime : int64
-      ; confirmTimes : string [@default "0/0"]
-      }
+      { id: string
+      ; amount: string
+      ; coin: string
+      ; network: string
+      ; status: int (** 1=small, 2=large, 3=pending, 4=cancelled, 5=completed *)
+      ; address: string
+      ; txId: string [@default ""]
+      ; insertTime: int64
+      ; confirmTimes: string [@default "0/0"] }
     [@@deriving sexp, of_yojson]
 
     type response = deposit list [@@deriving sexp, of_yojson]
@@ -804,18 +764,15 @@ module Deposit_history = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let coin =
-          string_flag_option ~field_name:"coin" ~doc:"Filter by coin"
+        let coin = string_flag_option ~field_name:"coin" ~doc:"Filter by coin"
         and status =
-          int_flag_option ~field_name:"status" ~doc:"Status: 1=small, 2=large, 3=pending, 4=cancelled, 5=completed"
-        and startTime =
-          int64_flag_option ~field_name:"startTime" ~doc:"Start time (ms)"
-        and endTime =
-          int64_flag_option ~field_name:"endTime" ~doc:"End time (ms)"
-        and limit =
-          int_flag_option ~field_name:"limit" ~doc:"Max results"
-        in
-        { coin; status; startTime; endTime; limit }]
+          int_flag_option
+            ~field_name:"status"
+            ~doc:"Status: 1=small, 2=large, 3=pending, 4=cancelled, 5=completed"
+        and startTime = int64_flag_option ~field_name:"startTime" ~doc:"Start time (ms)"
+        and endTime = int64_flag_option ~field_name:"endTime" ~doc:"End time (ms)"
+        and limit = int_flag_option ~field_name:"limit" ~doc:"Max results" in
+          {coin; status; startTime; endTime; limit}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -830,35 +787,26 @@ module Withdraw = struct
     let requires_auth = true
 
     type request =
-      { coin : string
-      ; address : string
-      ; amount : string
-      ; network : string option [@default None]
-      ; memo : string option [@default None]  (** Tag/memo for coins like XRP, XLM *)
-      ; withdrawOrderId : string option [@default None]  (** Client-defined ID *)
-      }
+      { coin: string
+      ; address: string
+      ; amount: string
+      ; network: string option [@default None]
+      ; memo: string option [@default None] (** Tag/memo for coins like XRP, XLM *)
+      ; withdrawOrderId: string option [@default None] (** Client-defined ID *) }
     [@@deriving sexp]
 
-    let request_to_params { coin; address; amount; network; memo; withdrawOrderId } =
-      let base =
-        [ ("coin", coin)
-        ; ("address", address)
-        ; ("amount", amount)
-        ]
-      in
+    let request_to_params {coin; address; amount; network; memo; withdrawOrderId} =
+      let base = [("coin", coin); ("address", address); ("amount", amount)] in
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      base
-      |> add_opt "network" network
-      |> add_opt "memo" memo
-      |> add_opt "withdrawOrderId" withdrawOrderId
+        base
+        |> add_opt "network" network
+        |> add_opt "memo" memo
+        |> add_opt "withdrawOrderId" withdrawOrderId
 
-    type response =
-      { id : string
-      }
-    [@@deriving sexp, of_yojson]
+    type response = {id: string} [@@deriving sexp, of_yojson]
   end
 
   include T
@@ -868,20 +816,19 @@ module Withdraw = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let coin =
-          string_flag ~field_name:"coin" ~doc:"Coin symbol (e.g., BTC, ETH)"
-        and address =
-          string_flag ~field_name:"address" ~doc:"Withdrawal address"
-        and amount =
-          string_flag ~field_name:"amount" ~doc:"Withdrawal amount"
+        let coin = string_flag ~field_name:"coin" ~doc:"Coin symbol (e.g., BTC, ETH)"
+        and address = string_flag ~field_name:"address" ~doc:"Withdrawal address"
+        and amount = string_flag ~field_name:"amount" ~doc:"Withdrawal amount"
         and network =
           string_flag_option ~field_name:"network" ~doc:"Network (e.g., ERC20, TRC20)"
         and memo =
           string_flag_option ~field_name:"memo" ~doc:"Memo/tag for XRP, XLM, etc."
         and withdrawOrderId =
-          string_flag_option ~field_name:"withdrawOrderId" ~doc:"Client-defined withdrawal ID"
+          string_flag_option
+            ~field_name:"withdrawOrderId"
+            ~doc:"Client-defined withdrawal ID"
         in
-        { coin; address; amount; network; memo; withdrawOrderId }]
+          {coin; address; amount; network; memo; withdrawOrderId}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -896,42 +843,44 @@ module Withdrawal_history = struct
     let requires_auth = true
 
     type request =
-      { coin : string option [@default None]
-      ; status : string option [@default None]  (** APPLY, AUDITING, WAIT, PROCESSING, WAIT_PACKAGING, WAIT_CONFIRM, SUCCESS, CANCEL, FAIL *)
-      ; startTime : int64 option [@default None]
-      ; endTime : int64 option [@default None]
-      ; limit : int option [@default None]
-      }
+      { coin: string option [@default None]
+      ; status: string option [@default None]
+        (** APPLY, AUDITING, WAIT, PROCESSING, WAIT_PACKAGING, WAIT_CONFIRM, SUCCESS, CANCEL, FAIL
+        *)
+      ; startTime: int64 option [@default None]
+      ; endTime: int64 option [@default None]
+      ; limit: int option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { coin; status; startTime; endTime; limit } =
+    let request_to_params {coin; status; startTime; endTime; limit} =
       let add_opt key f = function
         | None -> Fun.id
         | Some v -> List.cons (key, f v)
       in
-      []
-      |> add_opt "coin" Fn.id coin
-      |> add_opt "status" Fn.id status
-      |> add_opt "startTime" Int64.to_string startTime
-      |> add_opt "endTime" Int64.to_string endTime
-      |> add_opt "limit" Int.to_string limit
+        []
+        |> add_opt "coin" Fn.id coin
+        |> add_opt "status" Fn.id status
+        |> add_opt "startTime" Int64.to_string startTime
+        |> add_opt "endTime" Int64.to_string endTime
+        |> add_opt "limit" Int.to_string limit
 
     type withdrawal =
-      { id : string
-      ; amount : string
-      ; transactionFee : string [@default "0"]
-      ; coin : string
-      ; status : string  (** APPLY, AUDITING, WAIT, PROCESSING, WAIT_PACKAGING, WAIT_CONFIRM, SUCCESS, CANCEL, FAIL *)
-      ; address : string
-      ; txId : string [@default ""]
-      ; applyTime : int64
-      ; network : string
-      ; transferType : int [@default 0]  (** 0=external, 1=internal *)
-      ; info : string [@default ""]
-      ; confirmNo : int [@default 0]
-      ; withdrawOrderId : string [@default ""]
-      ; memo : string [@default ""]
-      }
+      { id: string
+      ; amount: string
+      ; transactionFee: string [@default "0"]
+      ; coin: string
+      ; status: string
+        (** APPLY, AUDITING, WAIT, PROCESSING, WAIT_PACKAGING, WAIT_CONFIRM, SUCCESS, CANCEL, FAIL
+        *)
+      ; address: string
+      ; txId: string [@default ""]
+      ; applyTime: int64
+      ; network: string
+      ; transferType: int [@default 0] (** 0=external, 1=internal *)
+      ; info: string [@default ""]
+      ; confirmNo: int [@default 0]
+      ; withdrawOrderId: string [@default ""]
+      ; memo: string [@default ""] }
     [@@deriving sexp, of_yojson]
 
     type response = withdrawal list [@@deriving sexp, of_yojson]
@@ -944,18 +893,12 @@ module Withdrawal_history = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let coin =
-          string_flag_option ~field_name:"coin" ~doc:"Filter by coin"
-        and status =
-          string_flag_option ~field_name:"status" ~doc:"Status filter"
-        and startTime =
-          int64_flag_option ~field_name:"startTime" ~doc:"Start time (ms)"
-        and endTime =
-          int64_flag_option ~field_name:"endTime" ~doc:"End time (ms)"
-        and limit =
-          int_flag_option ~field_name:"limit" ~doc:"Max results"
-        in
-        { coin; status; startTime; endTime; limit }]
+        let coin = string_flag_option ~field_name:"coin" ~doc:"Filter by coin"
+        and status = string_flag_option ~field_name:"status" ~doc:"Status filter"
+        and startTime = int64_flag_option ~field_name:"startTime" ~doc:"Start time (ms)"
+        and endTime = int64_flag_option ~field_name:"endTime" ~doc:"End time (ms)"
+        and limit = int_flag_option ~field_name:"limit" ~doc:"Max results" in
+          {coin; status; startTime; endTime; limit}]
   end
 
   include Rest.Make_with_params (T) (Params)

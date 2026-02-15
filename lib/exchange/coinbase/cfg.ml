@@ -39,7 +39,8 @@ module Production : S = struct
   let ws_url = Endpoint.ws_url
 end
 
-(** Sandbox/testnet configuration - requires COINBASE_SANDBOX_API_KEY and COINBASE_SANDBOX_API_SECRET *)
+(** Sandbox/testnet configuration - requires COINBASE_SANDBOX_API_KEY and COINBASE_SANDBOX_API_SECRET
+*)
 let sandbox () : (module S) =
   (module struct
     let api_key = require_env "COINBASE_SANDBOX_API_KEY"

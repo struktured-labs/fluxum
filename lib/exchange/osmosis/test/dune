@@ -1,1 +1,7 @@
-(test (name run_tests) (modules run_tests) (libraries core osmosis) (preprocess (pps ppx_jane)) (flags :standard -open Core))
+(test
+ (name run_tests)
+ (modules run_tests)
+ (libraries core osmosis)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core))

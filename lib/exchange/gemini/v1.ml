@@ -8,7 +8,7 @@ module Inf_pipe = Inf_pipe
 module Poly_ok = Poly_ok
 
 module T = struct
-  let path = [ "v1" ]
+  let path = ["v1"]
 
   module Side = Side
   module Exchange = Exchange
@@ -25,20 +25,18 @@ module T = struct
   module Heartbeat = struct
     module T = struct
       let name = "heartbeat"
-
-      let path = path @ [ "heartbeat" ]
+      let path = path @ ["heartbeat"]
 
       type uri_args = unit
+
       let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
       let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-      let all_of_uri_args = [ () ]
-      let encode_uri_args (_:uri_args) = ""
+      let all_of_uri_args = [()]
+      let encode_uri_args (_ : uri_args) = ""
       let default_uri_args : uri_args option = None
 
       type request = unit [@@deriving sexp, yojson]
-
-      type response = { result : bool [@default true] }
-      [@@deriving sexp, of_yojson]
+      type response = {result: bool [@default true]} [@@deriving sexp, of_yojson]
     end
 
     include T
@@ -47,46 +45,44 @@ module T = struct
 
   module Order = struct
     let name = "order"
-
-    let path = path @ [ "order" ]
+    let path = path @ ["order"]
 
     module Status = struct
       module T = struct
         let name = "status"
-
-        let path = path @ [ "status" ]
+        let path = path @ ["status"]
 
         type uri_args = unit
+
         let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
         let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-        let all_of_uri_args = [ () ]
-        let encode_uri_args (_:uri_args) = ""
+        let all_of_uri_args = [()]
+        let encode_uri_args (_ : uri_args) = ""
         let default_uri_args : uri_args option = None
 
-        type request = { order_id : Int_number.t } [@@deriving yojson, sexp]
+        type request = {order_id: Int_number.t} [@@deriving yojson, sexp]
 
         type response =
-          { client_order_id : Client_order_id.t option; [@default None]
-            order_id : Int_string.t;
-            id : Int_string.t;
-            symbol : Symbol.Enum_or_string.t;
-            exchange : Exchange.t;
-            avg_execution_price : Decimal_string.t;
-            side : Side.t;
-            type_ : Order_type.t; [@key "type"]
-            timestamp : Timestamp.Sec.t;
-            timestampms : Timestamp.Ms.t;
-            is_live : bool;
-            is_cancelled : bool;
-            is_hidden : bool;
-            was_forced : bool;
-            executed_amount : Decimal_string.t;
-            remaining_amount : Decimal_string.t;
-            options : Order_execution_option.t list; [@default []]
-            price : Decimal_string.t;
-            original_amount : Decimal_string.t;
-            reason : Reject_reason.t option; [@default None]
-          }
+          { client_order_id: Client_order_id.t option [@default None]
+          ; order_id: Int_string.t
+          ; id: Int_string.t
+          ; symbol: Symbol.Enum_or_string.t
+          ; exchange: Exchange.t
+          ; avg_execution_price: Decimal_string.t
+          ; side: Side.t
+          ; type_: Order_type.t [@key "type"]
+          ; timestamp: Timestamp.Sec.t
+          ; timestampms: Timestamp.Ms.t
+          ; is_live: bool
+          ; is_cancelled: bool
+          ; is_hidden: bool
+          ; was_forced: bool
+          ; executed_amount: Decimal_string.t
+          ; remaining_amount: Decimal_string.t
+          ; options: Order_execution_option.t list [@default []]
+          ; price: Decimal_string.t
+          ; original_amount: Decimal_string.t
+          ; reason: Reject_reason.t option [@default None] }
         [@@deriving yojson, sexp]
       end
 
@@ -97,25 +93,24 @@ module T = struct
     module New = struct
       module T = struct
         let name = "new"
-
-        let path = path @ [ "new" ]
+        let path = path @ ["new"]
 
         type uri_args = unit
+
         let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
         let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-        let all_of_uri_args = [ () ]
-        let encode_uri_args (_:uri_args) = ""
+        let all_of_uri_args = [()]
+        let encode_uri_args (_ : uri_args) = ""
         let default_uri_args : uri_args option = None
 
         type request =
-          { client_order_id : Client_order_id.t;
-            symbol : Symbol.t;
-            amount : Decimal_string.t;
-            price : Decimal_string.t;
-            side : Side.t;
-            type_ : Order_type.t; [@key "type"]
-            options : Order_execution_option.t list
-          }
+          { client_order_id: Client_order_id.t
+          ; symbol: Symbol.t
+          ; amount: Decimal_string.t
+          ; price: Decimal_string.t
+          ; side: Side.t
+          ; type_: Order_type.t [@key "type"]
+          ; options: Order_execution_option.t list }
         [@@deriving sexp, yojson]
 
         type response = Status.response [@@deriving of_yojson, sexp]
@@ -128,38 +123,46 @@ module T = struct
           let open Command.Let_syntax in
           let open Fluxum.Cli_args in
           [%map_open
-            let client_order_id = string_flag ~field_name:"client_order_id"
-              ~doc:"Client-specified order ID"
+            let client_order_id =
+              string_flag ~field_name:"client_order_id" ~doc:"Client-specified order ID"
             and symbol =
-              enum_flag ~field_name:"symbol" ~type_name:"SYMBOL"
+              enum_flag
+                ~field_name:"symbol"
+                ~type_name:"SYMBOL"
                 ~of_string_opt:Symbol.of_string_opt
                 ~all:Symbol.all
                 ~to_string:Symbol.to_string
                 ~doc:"Trading pair symbol (e.g., btcusd, ethbtc)"
-            and amount = string_flag ~field_name:"amount"
-              ~doc:"Order size (decimal string)"
-            and price = string_flag ~field_name:"price"
-              ~doc:"Order price (decimal string)"
+            and amount =
+              string_flag ~field_name:"amount" ~doc:"Order size (decimal string)"
+            and price =
+              string_flag ~field_name:"price" ~doc:"Order price (decimal string)"
             and side =
-              enum_flag ~field_name:"side" ~type_name:"SIDE"
+              enum_flag
+                ~field_name:"side"
+                ~type_name:"SIDE"
                 ~of_string_opt:Side.of_string_opt
                 ~all:Side.all
                 ~to_string:Side.to_string
                 ~doc:"Order side (buy or sell)"
             and type_ =
-              enum_flag ~field_name:"type_" ~type_name:"ORDER_TYPE"
+              enum_flag
+                ~field_name:"type_"
+                ~type_name:"ORDER_TYPE"
                 ~of_string_opt:Order_type.of_string_opt
                 ~all:Order_type.all
                 ~to_string:Order_type.to_string
                 ~doc:"Order type (exchange-limit, market-buy, etc.)"
             and options =
-              enum_list_flag ~field_name:"options" ~type_name:"EXECUTION_OPTION"
+              enum_list_flag
+                ~field_name:"options"
+                ~type_name:"EXECUTION_OPTION"
                 ~of_string_opt:Order_execution_option.of_string_opt
                 ~all:Order_execution_option.all
                 ~to_string:Order_execution_option.to_string
                 ~doc:"Execution options (can specify multiple)"
             in
-            { client_order_id; symbol; amount; price; side; type_; options }]
+              {client_order_id; symbol; amount; price; side; type_; options}]
       end
 
       include Rest.Make_with_params (T) (Params)
@@ -167,24 +170,22 @@ module T = struct
 
     module Cancel = struct
       let name = "cancel"
-
-      let path = path @ [ "cancel" ]
+      let path = path @ ["cancel"]
 
       module By_order_id = struct
         module T = struct
           let name = "by-order-id"
-
           let path = path
 
           type uri_args = unit
+
           let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
           let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-          let all_of_uri_args = [ () ]
-          let encode_uri_args (_:uri_args) = ""
+          let all_of_uri_args = [()]
+          let encode_uri_args (_ : uri_args) = ""
           let default_uri_args : uri_args option = None
 
-          type request = { order_id : Int_string.t } [@@deriving sexp, yojson]
-
+          type request = {order_id: Int_string.t} [@@deriving sexp, yojson]
           type response = Status.response [@@deriving sexp, of_yojson]
         end
 
@@ -195,37 +196,35 @@ module T = struct
             let open Command.Let_syntax in
             let open Fluxum.Cli_args in
             [%map_open
-              let order_id = int64_flag ~field_name:"order_id"
-                ~doc:"Order ID to cancel"
+              let order_id =
+                int64_flag ~field_name:"order_id" ~doc:"Order ID to cancel"
               in
-              { order_id }]
+                {order_id}]
         end
 
         include Rest.Make_with_params (T) (Params)
       end
 
       type details =
-        { cancelled_orders : Status.response list; [@key "cancelledOrders"]
-          cancel_rejects : Status.response list [@key "cancelRejects"]
-        }
+        { cancelled_orders: Status.response list [@key "cancelledOrders"]
+        ; cancel_rejects: Status.response list [@key "cancelRejects"] }
       [@@deriving sexp, yojson]
 
       module All = struct
         module T = struct
           let name = "all"
-
-          let path = path @ [ "all" ]
+          let path = path @ ["all"]
 
           type uri_args = unit
+
           let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
           let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-          let all_of_uri_args = [ () ]
-          let encode_uri_args (_:uri_args) = ""
+          let all_of_uri_args = [()]
+          let encode_uri_args (_ : uri_args) = ""
           let default_uri_args : uri_args option = None
 
           type request = unit [@@deriving sexp, yojson]
-
-          type response = { details : details } [@@deriving sexp, of_yojson]
+          type response = {details: details} [@@deriving sexp, of_yojson]
         end
 
         include T
@@ -235,19 +234,18 @@ module T = struct
       module Session = struct
         module T = struct
           let name = "session"
-
-          let path = path @ [ "session" ]
+          let path = path @ ["session"]
 
           type uri_args = unit
+
           let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
           let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-          let all_of_uri_args = [ () ]
-          let encode_uri_args (_:uri_args) = ""
+          let all_of_uri_args = [()]
+          let encode_uri_args (_ : uri_args) = ""
           let default_uri_args : uri_args option = None
 
           type request = unit [@@deriving sexp, yojson]
-
-          type response = { details : details } [@@deriving sexp, of_yojson]
+          type response = {details: details} [@@deriving sexp, of_yojson]
         end
 
         include T
@@ -255,34 +253,33 @@ module T = struct
       end
 
       let command : string * Command.t =
-        ( name,
-          Command.group
+        ( name
+        , Command.group
             ~summary:(Path.to_summary ~has_subnames:true path)
-            [ By_order_id.command; Session.command; All.command ] )
+            [By_order_id.command; Session.command; All.command] )
     end
 
     let command : string * Command.t =
-      ( name,
-        Command.group
+      ( name
+      , Command.group
           ~summary:(Path.to_summary ~has_subnames:true path)
-          [ New.command; Cancel.command; Status.command ] )
+          [New.command; Cancel.command; Status.command] )
   end
 
   module Orders = struct
     module T = struct
       let name = "orders"
-
-      let path = path @ [ "orders" ]
+      let path = path @ ["orders"]
 
       type uri_args = unit
+
       let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
       let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-      let all_of_uri_args = [ () ]
-      let encode_uri_args (_:uri_args) = ""
+      let all_of_uri_args = [()]
+      let encode_uri_args (_ : uri_args) = ""
       let default_uri_args : uri_args option = None
 
       type request = unit [@@deriving sexp, yojson]
-
       type response = Order.Status.response list [@@deriving of_yojson, sexp]
     end
 
@@ -292,41 +289,39 @@ module T = struct
 
   module Mytrades = struct
     type trade =
-      { price : Decimal_string.t;
-        amount : Decimal_string.t;
-        timestamp : Timestamp.Sec.t;
-        timestampms : Timestamp.Ms.t;
-        type_ : Side.t; [@key "type"]
-        aggressor : bool;
-        fee_currency : Currency.Enum_or_string.t;
-        fee_amount : Decimal_string.t;
-        tid : Int_number.t;
-        order_id : Int_string.t;
-        client_order_id : Client_order_id.t option; [@default None]
-        is_auction_fill : bool;
-        is_clearing_fill : bool;
-        symbol : Symbol.Enum_or_string.t;
-        exchange : Exchange.t
-      }
+      { price: Decimal_string.t
+      ; amount: Decimal_string.t
+      ; timestamp: Timestamp.Sec.t
+      ; timestampms: Timestamp.Ms.t
+      ; type_: Side.t [@key "type"]
+      ; aggressor: bool
+      ; fee_currency: Currency.Enum_or_string.t
+      ; fee_amount: Decimal_string.t
+      ; tid: Int_number.t
+      ; order_id: Int_string.t
+      ; client_order_id: Client_order_id.t option [@default None]
+      ; is_auction_fill: bool
+      ; is_clearing_fill: bool
+      ; symbol: Symbol.Enum_or_string.t
+      ; exchange: Exchange.t }
     [@@deriving yojson, sexp]
 
     module T = struct
       let name = "mytrades"
-
-      let path = path @ [ "mytrades" ]
+      let path = path @ ["mytrades"]
 
       type uri_args = unit
+
       let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
       let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-      let all_of_uri_args = [ () ]
-      let encode_uri_args (_:uri_args) = ""
+      let all_of_uri_args = [()]
+      let encode_uri_args (_ : uri_args) = ""
       let default_uri_args : uri_args option = None
 
       type request =
-        { symbol : Symbol.t;
-          limit_trades : int option; [@default None]
-          timestamp : Timestamp.Sec.t option [@default None]
-        }
+        { symbol: Symbol.t
+        ; limit_trades: int option [@default None]
+        ; timestamp: Timestamp.Sec.t option [@default None] }
       [@@deriving sexp, yojson]
 
       type response = trade list [@@deriving of_yojson, sexp]
@@ -341,25 +336,31 @@ module T = struct
         let timestamp_arg_type =
           Command.Arg_type.create (fun s ->
             match Float.of_string_opt s with
-            | Some f -> Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec f)
+            | Some f ->
+              Time_float_unix.of_span_since_epoch (Time_float_unix.Span.of_sec f)
             | None -> failwith (sprintf "Invalid timestamp: %s" s))
         in
         [%map_open
           let symbol =
-            enum_flag ~field_name:"symbol" ~type_name:"SYMBOL"
+            enum_flag
+              ~field_name:"symbol"
+              ~type_name:"SYMBOL"
               ~of_string_opt:Symbol.of_string_opt
               ~all:Symbol.all
               ~to_string:Symbol.to_string
               ~doc:"Trading pair symbol (e.g., btcusd, ethbtc)"
-          and limit_trades = int_flag_option ~field_name:"limit_trades"
-            ~doc:"Maximum number of trades to return"
+          and limit_trades =
+            int_flag_option
+              ~field_name:"limit_trades"
+              ~doc:"Maximum number of trades to return"
           and timestamp =
             let flag_name = field_to_flag_name "timestamp" in
-            Command.Param.flag ("-" ^ flag_name)
-              (Command.Param.optional timestamp_arg_type)
-              ~doc:"Only return trades after this timestamp (unix seconds)"
+              Command.Param.flag
+                ("-" ^ flag_name)
+                (Command.Param.optional timestamp_arg_type)
+                ~doc:"Only return trades after this timestamp (unix seconds)"
           in
-          { symbol; limit_trades; timestamp }]
+            {symbol; limit_trades; timestamp}]
     end
 
     include Rest.Make_with_params (T) (Params)
@@ -367,52 +368,46 @@ module T = struct
 
   module Tradevolume = struct
     type volume =
-      { account_id : (Int_number.t option[@default None]);
-        symbol : Symbol.Enum_or_string.t;
-        base_currency : Currency.Enum_or_string.t;
-        notional_currency : Currency.Enum_or_string.t;
-        data_date : string;
-            (*TODO use timestamp or a date module with MMMM-DD-YY *)
-        total_volume_base : Decimal_number.t;
-        maker_buy_sell_ratio : Decimal_number.t;
-        buy_maker_base : Decimal_number.t;
-        buy_maker_notional : Decimal_number.t;
-        buy_maker_count : Int_number.t;
-        sell_maker_base : Decimal_number.t;
-        sell_maker_notional : Decimal_number.t;
-        sell_maker_count : Int_number.t;
-        buy_taker_base : Decimal_number.t;
-        buy_taker_notional : Decimal_number.t;
-        buy_taker_count : Int_number.t;
-        sell_taker_base : Decimal_number.t;
-        sell_taker_notional : Decimal_number.t;
-        sell_taker_count : Int_number.t
-      }
+      { account_id: (Int_number.t option[@default None])
+      ; symbol: Symbol.Enum_or_string.t
+      ; base_currency: Currency.Enum_or_string.t
+      ; notional_currency: Currency.Enum_or_string.t
+      ; data_date: string (*TODO use timestamp or a date module with MMMM-DD-YY *)
+      ; total_volume_base: Decimal_number.t
+      ; maker_buy_sell_ratio: Decimal_number.t
+      ; buy_maker_base: Decimal_number.t
+      ; buy_maker_notional: Decimal_number.t
+      ; buy_maker_count: Int_number.t
+      ; sell_maker_base: Decimal_number.t
+      ; sell_maker_notional: Decimal_number.t
+      ; sell_maker_count: Int_number.t
+      ; buy_taker_base: Decimal_number.t
+      ; buy_taker_notional: Decimal_number.t
+      ; buy_taker_count: Int_number.t
+      ; sell_taker_base: Decimal_number.t
+      ; sell_taker_notional: Decimal_number.t
+      ; sell_taker_count: Int_number.t }
     [@@deriving yojson, sexp, fields]
 
     module T = struct
       let name = "tradevolume"
-
-      let path = path @ [ "tradevolume" ]
+      let path = path @ ["tradevolume"]
 
       type uri_args = unit
+
       let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
       let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-      let all_of_uri_args = [ () ]
-      let encode_uri_args (_:uri_args) = ""
+      let all_of_uri_args = [()]
+      let encode_uri_args (_ : uri_args) = ""
       let default_uri_args : uri_args option = None
 
       type request = unit [@@deriving yojson, sexp]
-
       type response = volume list [@@deriving sexp]
-
       type nested_response = volume list list list [@@deriving sexp, of_yojson]
 
-      let response_of_yojson (yojson : Yojson.Safe.t) :
-          (response, 'err) Result.t =
+      let response_of_yojson (yojson : Yojson.Safe.t) : (response, 'err) Result.t =
         nested_response_of_yojson yojson
-        |> Result.map ~f:(fun events ->
-               List.bind events ~f:Fn.id |> List.bind ~f:Fn.id )
+        |> Result.map ~f:(fun events -> List.bind events ~f:Fn.id |> List.bind ~f:Fn.id)
     end
 
     include T
@@ -422,26 +417,24 @@ module T = struct
   module Balances = struct
     module T = struct
       let name = "balances"
-
-      let path = path @ [ "balances" ]
+      let path = path @ ["balances"]
 
       type uri_args = unit
+
       let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
       let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-      let all_of_uri_args = [ () ]
-      let encode_uri_args (_:uri_args) = ""
+      let all_of_uri_args = [()]
+      let encode_uri_args (_ : uri_args) = ""
       let default_uri_args : uri_args option = None
 
       type request = unit [@@deriving yojson, sexp]
 
       type balance =
-        { currency : Currency.Enum_or_string.t;
-          amount : Decimal_string.t;
-          available : Decimal_string.t;
-          available_for_withdrawal : Decimal_string.t;
-              [@key "availableForWithdrawal"]
-          type_ : string [@key "type"]
-        }
+        { currency: Currency.Enum_or_string.t
+        ; amount: Decimal_string.t
+        ; available: Decimal_string.t
+        ; available_for_withdrawal: Decimal_string.t [@key "availableForWithdrawal"]
+        ; type_: string [@key "type"] }
       [@@deriving yojson, sexp]
 
       type response = balance list [@@deriving of_yojson, sexp]
@@ -457,27 +450,26 @@ module T = struct
       let name = "deposit-address"
 
       (* Path is set per-currency, but we handle it in the post function *)
-      let path = path @ [ "deposit" ]
+      let path = path @ ["deposit"]
 
       type uri_args = unit
+
       let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
       let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-      let all_of_uri_args = [ () ]
-      let encode_uri_args (_:uri_args) = ""
+      let all_of_uri_args = [()]
+      let encode_uri_args (_ : uri_args) = ""
       let default_uri_args : uri_args option = None
 
       type request =
-        { currency : string  (** Currency to generate address for *)
-        ; label : string option [@default None]  (** Optional label for the address *)
-        }
+        { currency: string (** Currency to generate address for *)
+        ; label: string option [@default None] (** Optional label for the address *) }
       [@@deriving sexp, yojson]
 
       type response =
-        { address : string
-        ; currency : string
-        ; label : string option [@default None]
-        ; network : string option [@default None]
-        }
+        { address: string
+        ; currency: string
+        ; label: string option [@default None]
+        ; network: string option [@default None] }
       [@@deriving sexp, of_yojson]
     end
 
@@ -485,66 +477,69 @@ module T = struct
 
     (** Custom post that handles currency in path *)
     let post (module Cfg : Cfg.S) (nonce : Nonce.reader) (request : request) =
-      let path = [ "v1"; "deposit"; String.lowercase request.currency; "newAddress" ] in
+      let path = ["v1"; "deposit"; String.lowercase request.currency; "newAddress"] in
       let payload = request_to_yojson request in
-      Nonce.Request.make ~nonce ~request:(Path.to_string path) ~payload () >>= fun nonce_request ->
-      (Nonce.Request.to_yojson nonce_request |> Yojson.Safe.pretty_to_string |> fun s ->
-       Log.Global.info "deposit address request as json:\n %s" s;
-       return @@ Auth.of_payload s)
-      >>= fun payload_str ->
-      let headers = Auth.to_headers (module Cfg) payload_str in
-      let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path:(Path.to_string path) () in
-      Cohttp_async.Client.post ~headers uri
-      >>= fun (response, body) ->
-      match Cohttp.Response.status response with
-      | `OK ->
-        Cohttp_async.Body.to_string body >>| fun s ->
-        Log.Global.debug "deposit address response:\n %s" s;
-        let yojson = Yojson.Safe.from_string s in
-        (Rest.Response.parse yojson response_of_yojson
-          :> [ `Ok of response | Rest.Error.post ])
-      | `Not_found -> return `Not_found
-      | `Bad_request ->
-        Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
-      | `Unauthorized ->
-        Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
-      | `Service_unavailable ->
-        Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
-      | (code : Cohttp.Code.status_code) ->
-        Cohttp_async.Body.to_string body >>| fun b ->
-        let msg = sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) b in
-        `Service_unavailable msg
+        Nonce.Request.make ~nonce ~request:(Path.to_string path) ~payload ()
+        >>= fun nonce_request ->
+        Nonce.Request.to_yojson nonce_request
+        |> Yojson.Safe.pretty_to_string
+        |> (fun s ->
+        Log.Global.info "deposit address request as json:\n %s" s;
+        return @@ Auth.of_payload s)
+        >>= fun payload_str ->
+        let headers = Auth.to_headers (module Cfg) payload_str in
+        let uri =
+          Uri.make ~scheme:"https" ~host:Cfg.api_host ~path:(Path.to_string path) ()
+        in
+          Cohttp_async.Client.post ~headers uri
+          >>= fun (response, body) ->
+          match Cohttp.Response.status response with
+          | `OK ->
+            Cohttp_async.Body.to_string body
+            >>| fun s ->
+            Log.Global.debug "deposit address response:\n %s" s;
+            let yojson = Yojson.Safe.from_string s in
+              (Rest.Response.parse yojson response_of_yojson
+                :> [`Ok of response | Rest.Error.post])
+          | `Not_found -> return `Not_found
+          | `Bad_request -> Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
+          | `Unauthorized -> Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
+          | `Service_unavailable ->
+            Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
+          | (code : Cohttp.Code.status_code) ->
+            Cohttp_async.Body.to_string body
+            >>| fun b ->
+            let msg = sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) b in
+              `Service_unavailable msg
   end
 
   (** Withdraw crypto - POST /v1/withdraw/{currency} *)
   module Withdraw = struct
     module T = struct
       let name = "withdraw"
-
-      let path = path @ [ "withdraw" ]
+      let path = path @ ["withdraw"]
 
       type uri_args = unit
+
       let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
       let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-      let all_of_uri_args = [ () ]
-      let encode_uri_args (_:uri_args) = ""
+      let all_of_uri_args = [()]
+      let encode_uri_args (_ : uri_args) = ""
       let default_uri_args : uri_args option = None
 
       type request =
-        { currency : string         (** Currency to withdraw *)
-        ; address : string          (** Destination blockchain address *)
-        ; amount : Decimal_string.t (** Amount to withdraw *)
-        ; memo : string option [@default None]  (** Optional memo/tag for XRP, XLM *)
-        }
+        { currency: string (** Currency to withdraw *)
+        ; address: string (** Destination blockchain address *)
+        ; amount: Decimal_string.t (** Amount to withdraw *)
+        ; memo: string option [@default None] (** Optional memo/tag for XRP, XLM *) }
       [@@deriving sexp, yojson]
 
       type response =
-        { address : string
-        ; amount : Decimal_string.t
-        ; withdrawalId : string  (** Gemini's withdrawal ID *)
-        ; message : string option [@default None]  (** Status message *)
-        ; txHash : string option [@default None]   (** Blockchain tx hash *)
-        }
+        { address: string
+        ; amount: Decimal_string.t
+        ; withdrawalId: string (** Gemini's withdrawal ID *)
+        ; message: string option [@default None] (** Status message *)
+        ; txHash: string option [@default None] (** Blockchain tx hash *) }
       [@@deriving sexp, of_yojson]
     end
 
@@ -552,40 +547,48 @@ module T = struct
 
     (** Custom post that handles currency in path *)
     let post (module Cfg : Cfg.S) (nonce : Nonce.reader) (request : request) =
-      let path = [ "v1"; "withdraw"; String.lowercase request.currency ] in
+      let path = ["v1"; "withdraw"; String.lowercase request.currency] in
       let payload = request_to_yojson request in
-      Nonce.Request.make ~nonce ~request:(Path.to_string path) ~payload () >>= fun nonce_request ->
-      (Nonce.Request.to_yojson nonce_request |> Yojson.Safe.pretty_to_string |> fun s ->
-       Log.Global.info "withdraw request as json:\n %s" s;
-       return @@ Auth.of_payload s)
-      >>= fun payload_str ->
-      let headers = Auth.to_headers (module Cfg) payload_str in
-      let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path:(Path.to_string path) () in
-      Cohttp_async.Client.post ~headers uri
-      >>= fun (response, body) ->
-      match Cohttp.Response.status response with
-      | `OK ->
-        Cohttp_async.Body.to_string body >>| fun s ->
-        Log.Global.debug "withdraw response:\n %s" s;
-        let yojson = Yojson.Safe.from_string s in
-        (Rest.Response.parse yojson response_of_yojson
-          :> [ `Ok of response | Rest.Error.post ])
-      | `Not_found -> return `Not_found
-      | `Bad_request ->
-        Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
-      | `Unauthorized ->
-        Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
-      | `Service_unavailable ->
-        Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
-      | (code : Cohttp.Code.status_code) ->
-        Cohttp_async.Body.to_string body >>| fun b ->
-        let msg = sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) b in
-        `Service_unavailable msg
+        Nonce.Request.make ~nonce ~request:(Path.to_string path) ~payload ()
+        >>= fun nonce_request ->
+        Nonce.Request.to_yojson nonce_request
+        |> Yojson.Safe.pretty_to_string
+        |> (fun s ->
+        Log.Global.info "withdraw request as json:\n %s" s;
+        return @@ Auth.of_payload s)
+        >>= fun payload_str ->
+        let headers = Auth.to_headers (module Cfg) payload_str in
+        let uri =
+          Uri.make ~scheme:"https" ~host:Cfg.api_host ~path:(Path.to_string path) ()
+        in
+          Cohttp_async.Client.post ~headers uri
+          >>= fun (response, body) ->
+          match Cohttp.Response.status response with
+          | `OK ->
+            Cohttp_async.Body.to_string body
+            >>| fun s ->
+            Log.Global.debug "withdraw response:\n %s" s;
+            let yojson = Yojson.Safe.from_string s in
+              (Rest.Response.parse yojson response_of_yojson
+                :> [`Ok of response | Rest.Error.post])
+          | `Not_found -> return `Not_found
+          | `Bad_request -> Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
+          | `Unauthorized -> Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
+          | `Service_unavailable ->
+            Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
+          | (code : Cohttp.Code.status_code) ->
+            Cohttp_async.Body.to_string body
+            >>| fun b ->
+            let msg = sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) b in
+              `Service_unavailable msg
   end
 
   (** Get transfers (deposits and withdrawals) - POST /v1/transfers *)
   module Transfers = struct
-    type transfer_type = [ `Deposit | `Withdrawal ] [@@deriving sexp]
+    type transfer_type =
+      [ `Deposit
+      | `Withdrawal ]
+    [@@deriving sexp]
 
     let transfer_type_of_yojson json =
       match json with
@@ -594,42 +597,45 @@ module T = struct
       | _ -> Error "Unknown transfer type"
 
     let transfer_type_to_yojson t =
-      `String (match t with `Deposit -> "Deposit" | `Withdrawal -> "Withdrawal")
+      `String
+        (match t with
+         | `Deposit -> "Deposit"
+         | `Withdrawal -> "Withdrawal")
 
     type transfer =
-      { type_ : transfer_type [@key "type"]
-      ; status : string
-      ; timestampms : Timestamp.Ms.t
-      ; eid : Int_number.t        (** Exchange ID *)
-      ; currency : Currency.Enum_or_string.t
-      ; amount : Decimal_string.t
-      ; method_ : string option [@default None] [@key "method"]  (** e.g., "ACH", "Wire" for fiat *)
-      ; txHash : string option [@default None]      (** Blockchain tx hash *)
-      ; outputIdx : Int_number.t option [@default None]  (** Output index for tx *)
-      ; destination : string option [@default None]  (** Destination address *)
-      ; purpose : string option [@default None]
-      ; feeAmount : Decimal_string.t option [@default None]  (** Fee charged *)
-      ; feeCurrency : Currency.Enum_or_string.t option [@default None]
-      }
+      { type_: transfer_type [@key "type"]
+      ; status: string
+      ; timestampms: Timestamp.Ms.t
+      ; eid: Int_number.t (** Exchange ID *)
+      ; currency: Currency.Enum_or_string.t
+      ; amount: Decimal_string.t
+      ; method_: string option [@default None] [@key "method"]
+        (** e.g., "ACH", "Wire" for fiat *)
+      ; txHash: string option [@default None] (** Blockchain tx hash *)
+      ; outputIdx: Int_number.t option [@default None] (** Output index for tx *)
+      ; destination: string option [@default None] (** Destination address *)
+      ; purpose: string option [@default None]
+      ; feeAmount: Decimal_string.t option [@default None] (** Fee charged *)
+      ; feeCurrency: Currency.Enum_or_string.t option [@default None] }
     [@@deriving sexp, yojson]
 
     module T = struct
       let name = "transfers"
-
-      let path = path @ [ "transfers" ]
+      let path = path @ ["transfers"]
 
       type uri_args = unit
+
       let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
       let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-      let all_of_uri_args = [ () ]
-      let encode_uri_args (_:uri_args) = ""
+      let all_of_uri_args = [()]
+      let encode_uri_args (_ : uri_args) = ""
       let default_uri_args : uri_args option = None
 
       type request =
-        { currency : string option [@default None]  (** Filter by currency *)
-        ; timestamp : Timestamp.Sec.t option [@default None]  (** Filter transfers after this time *)
-        ; limit_transfers : int option [@default None]  (** Max transfers to return *)
-        }
+        { currency: string option [@default None] (** Filter by currency *)
+        ; timestamp: Timestamp.Sec.t option [@default None]
+          (** Filter transfers after this time *)
+        ; limit_transfers: int option [@default None] (** Max transfers to return *) }
       [@@deriving sexp, yojson]
 
       type response = transfer list [@@deriving sexp, of_yojson]
@@ -642,45 +648,42 @@ module T = struct
   module Notional_volume = struct
     module T = struct
       let name = "notionalvolume"
-
-      let path = path @ [ "notionalvolume" ]
+      let path = path @ ["notionalvolume"]
 
       type uri_args = unit
+
       let sexp_of_uri_args = Sexplib0.Sexp_conv.sexp_of_unit
       let uri_args_of_sexp = Sexplib0.Sexp_conv.unit_of_sexp
-      let all_of_uri_args = [ () ]
-      let encode_uri_args (_:uri_args) = ""
+      let all_of_uri_args = [()]
+      let encode_uri_args (_ : uri_args) = ""
       let default_uri_args : uri_args option = None
 
       type request =
-        { symbol : Symbol.t option; [@default None]
-          account : string option [@default None]
-        }
+        { symbol: Symbol.t option [@default None]
+        ; account: string option [@default None] }
       [@@deriving yojson, sexp, fields]
 
       type notional_1d_volume =
-        { date : string; (* TODO use strict date type *)
-          notional_volume : Decimal_number.t
-        }
+        { date: string (* TODO use strict date type *)
+        ; notional_volume: Decimal_number.t }
       [@@deriving sexp, yojson]
 
       type response =
-        { last_updated_ms : Timestamp.Ms.t;
-          web_maker_fee_bps : Int_number.t;
-          web_taker_fee_bps : Int_number.t;
-          web_auction_fee_bps : Int_number.t option; [@default None]
-          api_maker_fee_bps : Int_number.t;
-          api_taker_fee_bps : Int_number.t;
-          api_auction_fee_bps : Int_number.t option; [@default None]
-          fix_maker_fee_bps : Int_number.t;
-          fix_taker_fee_bps : Int_number.t;
-          fix_auction_fee_bps : Int_number.t option; [@default None]
-          block_maker_fee_bps : Int_number.t;
-          block_taker_fee_bps : Int_number.t;
-          date : string; (* TODO use strict date type *)
-          notional_30d_volume : Decimal_number.t;
-          notional_1d_volume : notional_1d_volume list
-        }
+        { last_updated_ms: Timestamp.Ms.t
+        ; web_maker_fee_bps: Int_number.t
+        ; web_taker_fee_bps: Int_number.t
+        ; web_auction_fee_bps: Int_number.t option [@default None]
+        ; api_maker_fee_bps: Int_number.t
+        ; api_taker_fee_bps: Int_number.t
+        ; api_auction_fee_bps: Int_number.t option [@default None]
+        ; fix_maker_fee_bps: Int_number.t
+        ; fix_taker_fee_bps: Int_number.t
+        ; fix_auction_fee_bps: Int_number.t option [@default None]
+        ; block_maker_fee_bps: Int_number.t
+        ; block_taker_fee_bps: Int_number.t
+        ; date: string (* TODO use strict date type *)
+        ; notional_30d_volume: Decimal_number.t
+        ; notional_1d_volume: notional_1d_volume list }
       [@@deriving yojson, sexp]
     end
 
@@ -692,27 +695,25 @@ module T = struct
     (* https://docs.gemini.com/rest/market-data#get-symbol-details *)
     module T = struct
       let name = "symboldetails"
-
-      let path = path @ [ "symbols"; "details" ]
+      let path = path @ ["symbols"; "details"]
 
       type uri_args = Symbol.t [@@deriving sexp, enumerate]
-      let encode_uri_args (s:uri_args) = Symbol.to_string s
-      
+
+      let encode_uri_args (s : uri_args) = Symbol.to_string s
       let default_uri_args : uri_args option = Some `Btcusd
 
       type response =
-        { symbol : Symbol.Enum_or_string.t;
-          base_currency : Currency.Enum_or_string.t;
-          quote_currency : Currency.Enum_or_string.t;
-          tick_size : Decimal_number.t;
-          quote_increment : Decimal_number.t;
-          min_order_size : Decimal_string.t;
-          status : string;
-          wrap_enabled : bool;
-          product_type : string;
-          contract_type : string;
-          contract_price_currency : Currency.Enum_or_string.t
-        }
+        { symbol: Symbol.Enum_or_string.t
+        ; base_currency: Currency.Enum_or_string.t
+        ; quote_currency: Currency.Enum_or_string.t
+        ; tick_size: Decimal_number.t
+        ; quote_increment: Decimal_number.t
+        ; min_order_size: Decimal_string.t
+        ; status: string
+        ; wrap_enabled: bool
+        ; product_type: string
+        ; contract_type: string
+        ; contract_price_currency: Currency.Enum_or_string.t }
       [@@deriving yojson, sexp]
     end
 

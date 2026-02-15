@@ -12,22 +12,22 @@ module Auto_restart = Exchange_common.Auto_restart
 module Events = struct
   (** Type aliases for Binance-specific types *)
   type balance = V3.Account.balance
+
   type trade = V3.My_trades.trade
-  type market_event = string  (* Raw WebSocket message *)
+  type market_event = string (* Raw WebSocket message *)
   type book = Order_book.Book.t
   type ledger_entry = Ledger.Entry.t
-  type order_event = V3.New_order.response  (* Order execution updates *)
+  type order_event = V3.New_order.response (* Order execution updates *)
   type order_id = int64
 
   type t =
-    { symbols : Fluxum.Types.Symbol.t list;
-      balance_pipe : balance Pipe.Reader.t;
-      trades : trade list Pipe.Reader.t Fluxum.Types.Symbol.Map.t;
-      market_data : market_event Pipe.Reader.t Fluxum.Types.Symbol.Map.t;
-      order_books : (book, market_event) Result.t Pipe.Reader.t Fluxum.Types.Symbol.Map.t;
-      ledger : ledger_entry Pipe.Reader.t Fluxum.Types.Symbol.Map.t;
-      order_events_pipe : order_event Pipe.Reader.t;
-    }
+    { symbols: Fluxum.Types.Symbol.t list
+    ; balance_pipe: balance Pipe.Reader.t
+    ; trades: trade list Pipe.Reader.t Fluxum.Types.Symbol.Map.t
+    ; market_data: market_event Pipe.Reader.t Fluxum.Types.Symbol.Map.t
+    ; order_books: (book, market_event) Result.t Pipe.Reader.t Fluxum.Types.Symbol.Map.t
+    ; ledger: ledger_entry Pipe.Reader.t Fluxum.Types.Symbol.Map.t
+    ; order_events_pipe: order_event Pipe.Reader.t }
 
   let symbols t = t.symbols
   let balance t = t.balance_pipe
@@ -39,213 +39,206 @@ module Events = struct
 
   (** Create session events *)
   let create
-      ~cfg:(module Cfg : Cfg.S)
-      ?(symbols : Fluxum.Types.Symbol.t list = [])
-      ?order_ids:_
-      ()
-    : t Deferred.t =
+        ~cfg:(module Cfg : Cfg.S)
+        ?(symbols : Fluxum.Types.Symbol.t list = [])
+        ?order_ids:_
+        ()
+    : t Deferred.t
+    =
     Log.Global.info "Events.create: start symbols=%d" (List.length symbols);
-
     (* Balance pipe - REST polling every 5s *)
     let balance_pipe =
-      Auto_restart.pipe ~name:"binance_balance_poll" ~create_pipe:(fun () ->
-        let reader, writer = Pipe.create () in
-        let rec poll_loop () =
-          V3.Account.request (module Cfg) () >>= function
-          | `Ok resp ->
-            Deferred.List.iter ~how:`Sequential resp.balances ~f:(fun balance ->
-              Pipe.write writer balance)
-            >>= fun () ->
-            after (Time_float_unix.Span.of_sec 5.0) >>= poll_loop
-          | #Rest.Error.t as err ->
-            Log.Global.error "Binance balance poll failed: %s"
-              (Sexp.to_string (Rest.Error.sexp_of_t err));
-            after (Time_float_unix.Span.of_sec 10.0) >>= poll_loop
-        in
-        don't_wait_for (poll_loop ());
-        return reader
-      ) ()
+      Auto_restart.pipe
+        ~name:"binance_balance_poll"
+        ~create_pipe:(fun () ->
+          let reader, writer = Pipe.create () in
+          let rec poll_loop () =
+            V3.Account.request (module Cfg) ()
+            >>= function
+            | `Ok resp ->
+              Deferred.List.iter ~how:`Sequential resp.balances ~f:(fun balance ->
+                Pipe.write writer balance)
+              >>= fun () -> after (Time_float_unix.Span.of_sec 5.0) >>= poll_loop
+            | #Rest.Error.t as err ->
+              Log.Global.error
+                "Binance balance poll failed: %s"
+                (Sexp.to_string (Rest.Error.sexp_of_t err));
+              after (Time_float_unix.Span.of_sec 10.0) >>= poll_loop
+          in
+            don't_wait_for (poll_loop ());
+            return reader)
+        ()
     in
-
     (* Market data pipes - one per symbol using WebSocket *)
     let market_data =
-      Fluxum.Types.Symbol.Map.of_alist_exn (
-        List.map symbols ~f:(fun symbol ->
-          let name = sprintf "market_data[%s]" symbol in
-          let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
-            Log.Global.info "Creating market data connection for %s" symbol;
-            let streams = [Ws.Stream.Trade symbol; Ws.Stream.BookTicker symbol] in
-            Market_data.connect ~streams () >>| function
-            | Ok md -> Market_data.messages md
-            | Error err ->
-              Log.Global.error "Failed to connect market data for %s: %s" symbol err;
-              let reader, _writer = Pipe.create () in
-              reader
-          ) () in
-          (symbol, pipe)
-        )
-      )
+      Fluxum.Types.Symbol.Map.of_alist_exn
+        (List.map symbols ~f:(fun symbol ->
+           let name = sprintf "market_data[%s]" symbol in
+           let pipe =
+             Auto_restart.pipe
+               ~name
+               ~create_pipe:(fun () ->
+                 Log.Global.info "Creating market data connection for %s" symbol;
+                 let streams = [Ws.Stream.Trade symbol; Ws.Stream.BookTicker symbol] in
+                   Market_data.connect ~streams ()
+                   >>| function
+                   | Ok md -> Market_data.messages md
+                   | Error err ->
+                     Log.Global.error
+                       "Failed to connect market data for %s: %s"
+                       symbol
+                       err;
+                     let reader, _writer = Pipe.create () in
+                       reader)
+               ()
+           in
+             (symbol, pipe)))
     in
-
     (* Order book pipes - one per symbol with auto-restart *)
     let order_books =
-      Fluxum.Types.Symbol.Map.of_alist_exn (
-        List.map symbols ~f:(fun symbol ->
-          let name = sprintf "order_book[%s]" symbol in
-          let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
-            Log.Global.info "Creating order book for %s" symbol;
-            Order_book.Book.pipe ~symbol ()
-          ) () in
-          (symbol, pipe)
-        )
-      )
+      Fluxum.Types.Symbol.Map.of_alist_exn
+        (List.map symbols ~f:(fun symbol ->
+           let name = sprintf "order_book[%s]" symbol in
+           let pipe =
+             Auto_restart.pipe
+               ~name
+               ~create_pipe:(fun () ->
+                 Log.Global.info "Creating order book for %s" symbol;
+                 Order_book.Book.pipe ~symbol ())
+               ()
+           in
+             (symbol, pipe)))
     in
-
     (* Trades pipes - one per symbol using WebSocket *)
     let trades =
-      Fluxum.Types.Symbol.Map.of_alist_exn (
-        List.map symbols ~f:(fun symbol ->
-          let name = sprintf "trades[%s]" symbol in
-          let pipe = Auto_restart.pipe ~name ~create_pipe:(fun () ->
-            Log.Global.info "Creating trade stream for %s" symbol;
-            let streams = [Ws.Stream.Trade symbol] in
-            Market_data.connect ~streams () >>| function
-            | Ok md ->
-              (* Parse trade messages and convert to trade list *)
-              let trade_reader, trade_writer = Pipe.create () in
-              don't_wait_for (
-                Pipe.iter (Market_data.messages md) ~f:(fun msg ->
-                  match Ws.parse_message msg with
-                  | Ws.Message.Trade trade_msg ->
-                    (* Convert WS trade to V3.My_trades.trade format *)
-                    let trade : V3.My_trades.trade = {
-                      symbol = trade_msg.symbol;
-                      id = trade_msg.trade_id;
-                      orderId = 0L;  (* Not available from public WS trade stream *)
-                      orderListId = (-1L);
-                      price = trade_msg.price;
-                      qty = trade_msg.quantity;
-                      quoteQty = "0";
-                      commission = "0";
-                      commissionAsset = "";
-                      time = trade_msg.trade_time;
-                      isBuyer = not trade_msg.is_buyer_maker;
-                      isMaker = false;
-                      isBestMatch = true;
-                    } in
-                    Pipe.write trade_writer [trade]
-                  | _ -> Deferred.unit
-                )
-              );
-              trade_reader
-            | Error err ->
-              Log.Global.error "Failed to connect trade stream for %s: %s" symbol err;
-              let reader, _writer = Pipe.create () in
-              reader
-          ) () in
-          (symbol, pipe)
-        )
-      )
+      Fluxum.Types.Symbol.Map.of_alist_exn
+        (List.map symbols ~f:(fun symbol ->
+           let name = sprintf "trades[%s]" symbol in
+           let pipe =
+             Auto_restart.pipe
+               ~name
+               ~create_pipe:(fun () ->
+                 Log.Global.info "Creating trade stream for %s" symbol;
+                 let streams = [Ws.Stream.Trade symbol] in
+                   Market_data.connect ~streams ()
+                   >>| function
+                   | Ok md ->
+                     (* Parse trade messages and convert to trade list *)
+                     let trade_reader, trade_writer = Pipe.create () in
+                       don't_wait_for
+                         (Pipe.iter (Market_data.messages md) ~f:(fun msg ->
+                            match Ws.parse_message msg with
+                            | Ws.Message.Trade trade_msg ->
+                              (* Convert WS trade to V3.My_trades.trade format *)
+                              let trade : V3.My_trades.trade =
+                                { symbol= trade_msg.symbol
+                                ; id= trade_msg.trade_id
+                                ; orderId= 0L
+                                ; (* Not available from public WS trade stream *)
+                                  orderListId= -1L
+                                ; price= trade_msg.price
+                                ; qty= trade_msg.quantity
+                                ; quoteQty= "0"
+                                ; commission= "0"
+                                ; commissionAsset= ""
+                                ; time= trade_msg.trade_time
+                                ; isBuyer= not trade_msg.is_buyer_maker
+                                ; isMaker= false
+                                ; isBestMatch= true }
+                              in
+                                Pipe.write trade_writer [trade]
+                            | _ -> Deferred.unit));
+                       trade_reader
+                   | Error err ->
+                     Log.Global.error
+                       "Failed to connect trade stream for %s: %s"
+                       symbol
+                       err;
+                     let reader, _writer = Pipe.create () in
+                       reader)
+               ()
+           in
+             (symbol, pipe)))
     in
-
     (* Ledger pipes - one per symbol *)
     let ledger =
-      Fluxum.Types.Symbol.Map.of_alist_exn (
-        List.map symbols ~f:(fun symbol ->
-          let init = Ledger.Entry.create ~symbol () in
-
-          (* Get order book and trade pipes for this symbol *)
-          let book_pipe = match Map.find order_books symbol with
-            | Some pipe -> pipe
-            | None ->
-              let reader, _writer = Pipe.create () in
-              reader
-          in
-
-          let _trade_pipe = match Map.find trades symbol with
-            | Some pipe -> pipe
-            | None ->
-              let reader, _writer = Pipe.create () in
-              reader
-          in
-
-          (* Create ledger entry pipe *)
-          let ledger_reader, ledger_writer = Pipe.create () in
-
-          (* Combine book and trade updates *)
-          let entry_ref = ref init in
-
-          don't_wait_for (
-            (* Update from book prices *)
-            Pipe.iter book_pipe ~f:(fun book_result ->
-              match book_result with
-              | Ok book ->
-                let spot = (Order_book.Book.best_bid book).price in
-                (match Float.(spot > 0.) with
-                 | true ->
-                   entry_ref := Ledger.Entry.update_spot !entry_ref spot;
-                   Pipe.write ledger_writer !entry_ref
-                 | false -> Deferred.unit)
-              | Error _ -> Deferred.unit
-            )
-          );
-
-          (symbol, ledger_reader)
-        )
-      )
+      Fluxum.Types.Symbol.Map.of_alist_exn
+        (List.map symbols ~f:(fun symbol ->
+           let init = Ledger.Entry.create ~symbol () in
+           (* Get order book and trade pipes for this symbol *)
+           let book_pipe =
+             match Map.find order_books symbol with
+             | Some pipe -> pipe
+             | None ->
+               let reader, _writer = Pipe.create () in
+                 reader
+           in
+           let _trade_pipe =
+             match Map.find trades symbol with
+             | Some pipe -> pipe
+             | None ->
+               let reader, _writer = Pipe.create () in
+                 reader
+           in
+           (* Create ledger entry pipe *)
+           let ledger_reader, ledger_writer = Pipe.create () in
+           (* Combine book and trade updates *)
+           let entry_ref = ref init in
+             don't_wait_for
+               ((* Update from book prices *)
+                Pipe.iter
+                  book_pipe
+                  ~f:(fun book_result ->
+                    match book_result with
+                    | Ok book ->
+                      let spot = (Order_book.Book.best_bid book).price in
+                        (match Float.(spot > 0.) with
+                         | true ->
+                           entry_ref := Ledger.Entry.update_spot !entry_ref spot;
+                           Pipe.write ledger_writer !entry_ref
+                         | false -> Deferred.unit)
+                    | Error _ -> Deferred.unit));
+             (symbol, ledger_reader)))
     in
-
     (* Order events pipe - placeholder *)
     let order_events_reader, _order_events_writer = Pipe.create () in
     let order_events_pipe = order_events_reader in
-
-    return {
-      symbols;
-      balance_pipe;
-      trades;
-      market_data;
-      order_books;
-      ledger;
-      order_events_pipe;
-    }
+      return
+        { symbols
+        ; balance_pipe
+        ; trades
+        ; market_data
+        ; order_books
+        ; ledger
+        ; order_events_pipe }
 end
 
 (** Session state management *)
 type t =
-  { events : Events.t;
-    mutable state : State.t;
-    state_changes_reader : State.t Pipe.Reader.t;
-    state_changes_writer : State.t Pipe.Writer.t;
-  }
+  { events: Events.t
+  ; mutable state: State.t
+  ; state_changes_reader: State.t Pipe.Reader.t
+  ; state_changes_writer: State.t Pipe.Writer.t }
 
 (** Create session *)
 let create
-    ~cfg:(module Cfg : Cfg.S)
-    ?(symbols : Fluxum.Types.Symbol.t list = [])
-    ?order_ids
-    ()
-  : t Deferred.t =
+      ~cfg:(module Cfg : Cfg.S)
+      ?(symbols : Fluxum.Types.Symbol.t list = [])
+      ?order_ids
+      ()
+  : t Deferred.t
+  =
   Log.Global.info "Session.create: symbols=%d" (List.length symbols);
-
   (* Create state change pipe *)
   let state_changes_reader, state_changes_writer = Pipe.create () in
-
-  (* Start in Connecting state and emit *)
-  don't_wait_for (Pipe.write state_changes_writer State.Connecting);
-
-  (* Create events *)
-  let%bind events = Events.create ~cfg:(module Cfg) ~symbols ?order_ids () in
-
-  (* Update state to Ready *)
-  let state = State.Ready in
-  don't_wait_for (Pipe.write state_changes_writer state);
-
-  return {
-    events;
-    state;
-    state_changes_reader;
-    state_changes_writer;
-  }
+    (* Start in Connecting state and emit *)
+    don't_wait_for (Pipe.write state_changes_writer State.Connecting);
+    (* Create events *)
+    let%bind events = Events.create ~cfg:(module Cfg) ~symbols ?order_ids () in
+    (* Update state to Ready *)
+    let state = State.Ready in
+      don't_wait_for (Pipe.write state_changes_writer state);
+      return {events; state; state_changes_reader; state_changes_writer}
 
 (** Get events *)
 let events t = t.events

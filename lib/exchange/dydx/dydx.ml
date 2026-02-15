@@ -8,7 +8,4 @@ module Session = Session
 module Unified_adapter = Unified_adapter
 module Fluxum_adapter = Fluxum_adapter
 
-let command =
-  Core.Command.group ~summary:"dYdX v4 Exchange Commands"
-    [ Ledger.command
-    ]
+let command = Core.Command.group ~summary:"dYdX v4 Exchange Commands" [Ledger.command]

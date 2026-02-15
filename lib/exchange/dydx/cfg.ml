@@ -15,5 +15,4 @@ module Testnet = struct
   let ws_url = "wss://indexer.v4testnet.dydx.exchange/v4/ws"
 end
 
-let or_default cfg_opt =
-  Option.value cfg_opt ~default:(module Production : S)
+let or_default cfg_opt = Option.value cfg_opt ~default:(module Production : S)

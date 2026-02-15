@@ -7,27 +7,33 @@
       open Backtest
 
       (* Load data *)
-      let%bind candles = Data_source.Csv.load_candles
-        ~symbol:"BTCUSD"
-        ~start:(Data_source.parse_time "2024-01-01")
-        ~end_:(Data_source.parse_time "2024-06-01")
-        ~interval:Data_source.Interval.hour_1
-        ~path:"./data/btcusd.csv"
+      let%bind candles =
+        Data_source.Csv.load_candles
+          ~symbol:"BTCUSD"
+          ~start:(Data_source.parse_time "2024-01-01")
+          ~end_:(Data_source.parse_time "2024-06-01")
+          ~interval:Data_source.Interval.hour_1
+          ~path:"./data/btcusd.csv"
 
       (* Configure backtest *)
-      let config = Engine.Config.create
-        ~initial_balance:10000.
-        ~slippage_pct:0.001
-        ~commission_pct:0.001
-        ()
+      let config =
+        Engine.Config.create
+          ~initial_balance:10000.
+          ~slippage_pct:0.001
+          ~commission_pct:0.001
+          ()
 
       (* Run backtest *)
-      let%bind result = Engine.run (module My_strategy) ~config ~candles ()
-
-      (* Print results *)
-      Result.print_summary result
-    ]}
-*)
+      let%bind result =
+        Engine.run
+          (module My_strategy)
+          ~config
+          ~candles
+          ()
+          (* Print results *)
+          Result.print_summary
+          result
+    ]} *)
 
 (** {1 Core Types} *)
 

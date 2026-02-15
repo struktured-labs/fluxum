@@ -1,9 +1,21 @@
 (library
  (name fluxum)
  (public_name fluxum)
- (modules :standard \ websocket_curl curl_ext consolidated_order_book consolidated_balance pool_intf amm_pricing consolidated_pools pool_common ws_health)
+ (modules
+  :standard
+  \
+  websocket_curl
+  curl_ext
+  consolidated_order_book
+  consolidated_balance
+  pool_intf
+  amm_pricing
+  consolidated_pools
+  pool_common
+  ws_health)
  (libraries core async csvfields yojson)
- (preprocess (pps ppx_jane ppx_deriving_yojson))
+ (preprocess
+  (pps ppx_jane ppx_deriving_yojson))
  (flags :standard -open Core -open Async))
 
 (library
@@ -11,7 +23,8 @@
  (public_name fluxum.pool_common)
  (modules pool_common)
  (libraries core fluxum pool_intf)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core))
 
 (library
@@ -19,7 +32,8 @@
  (public_name fluxum.pool_intf)
  (modules pool_intf)
  (libraries core async)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core))
 
 (library
@@ -27,7 +41,8 @@
  (public_name fluxum.amm_pricing)
  (modules amm_pricing)
  (libraries core async pool_intf fluxum)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core))
 
 (library
@@ -35,7 +50,8 @@
  (public_name fluxum.consolidated_pools)
  (modules consolidated_pools)
  (libraries core pool_intf amm_pricing)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core))
 
 (library
@@ -54,22 +70,37 @@
  (public_name fluxum.websocket_curl)
  (modules websocket_curl)
  (libraries core async curl curl_ext uri base64 digestif)
- (preprocess (pps ppx_jane)))
+ (preprocess
+  (pps ppx_jane)))
 
 (library
  (name ws_health)
  (public_name fluxum.ws_health)
  (modules ws_health)
  (libraries core async)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core -open Async))
 
 (library
  (name consolidated_order_book)
  (public_name fluxum.consolidated_order_book)
  (modules consolidated_order_book)
- (libraries core async fluxum gemini kraken hyperliquid bitrue binance coinbase mexc bybit okx)
- (preprocess (pps ppx_jane))
+ (libraries
+  core
+  async
+  fluxum
+  gemini
+  kraken
+  hyperliquid
+  bitrue
+  binance
+  coinbase
+  mexc
+  bybit
+  okx)
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core -open Async))
 
 (library
@@ -77,6 +108,6 @@
  (public_name fluxum.consolidated_balance)
  (modules consolidated_balance)
  (libraries core async fluxum gemini kraken mexc binance coinbase bitrue)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core -open Async))
-

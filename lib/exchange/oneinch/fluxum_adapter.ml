@@ -52,16 +52,15 @@
     - Phase 3: Transaction building with gas estimation (pending)
     - Phase 4: Swap execution and monitoring (pending)
 
-    @see <https://docs.1inch.io/docs/aggregation-protocol/api/> 1inch Aggregation API Documentation
-    @see <https://docs.1inch.io/docs/aggregation-protocol/introduction> 1inch Protocol Overview
-*)
+    @see <https://docs.1inch.io/docs/aggregation-protocol/api/>
+      1inch Aggregation API Documentation
+    @see <https://docs.1inch.io/docs/aggregation-protocol/introduction>
+      1inch Protocol Overview *)
 
 open Core
 open Async
-
 module Types = Fluxum.Types
 module Exchange_intf = Fluxum.Exchange_intf
-
 module V1 = Rest
 
 (* Suppress unused warnings *)
@@ -69,12 +68,10 @@ module V1 = Rest
 
 module Adapter = struct
   type t =
-    { cfg : (module Cfg.S)
-    ; symbols : (string * string) list  (* (base_token, quote_token) pairs *)
-    }
+    { cfg: (module Cfg.S)
+    ; symbols: (string * string) list (* (base_token, quote_token) pairs *) }
 
-  let create ~cfg ?(symbols = []) () =
-    { cfg; symbols }
+  let create ~cfg ?(symbols = []) () = {cfg; symbols}
 
   module Venue = struct
     let t = Types.Venue.OneInch
@@ -82,18 +79,18 @@ module Adapter = struct
 
   module Native = struct
     module Order = struct
-      type id = string  (* Transaction hash *)
+      type id = string (* Transaction hash *)
       type request = unit
       type response = Rest.Types.swap
       type status = unit
     end
 
     module Trade = struct
-      type t = unit  (* Trades are on-chain *)
+      type t = unit (* Trades are on-chain *)
     end
 
     module Balance = struct
-      type t = unit  (* Balances are on EVM, use RPC *)
+      type t = unit (* Balances are on EVM, use RPC *)
     end
 
     module Book = struct
@@ -110,7 +107,7 @@ module Adapter = struct
     end
 
     module Candle = struct
-      type t = unit  (* 1inch doesn't provide candles *)
+      type t = unit (* 1inch doesn't provide candles *)
     end
 
     module Symbol_info = struct
@@ -168,7 +165,8 @@ module Adapter = struct
       Note: 1inch is an EVM DEX aggregator - deposits/withdrawals happen on-chain *)
 
   let get_deposit_address (_ : t) ~currency:_ ?network:_ () =
-    Deferred.return (Error (`Api_error "1inch is an EVM DEX - use wallet address for deposits"))
+    Deferred.return
+      (Error (`Api_error "1inch is an EVM DEX - use wallet address for deposits"))
 
   let withdraw (_ : t) ~currency:_ ~amount:_ ~address:_ ?tag:_ ?network:_ () =
     Deferred.return (Error (`Api_error "1inch is an EVM DEX - use wallet for transfers"))
@@ -181,39 +179,43 @@ module Adapter = struct
 
   (* Public market data *)
   let get_symbols (t : t) () =
-    Rest.tokens t.cfg >>| function
+    Rest.tokens t.cfg
+    >>| function
     | Error _ as err -> err
     | Ok resp -> Ok (List.map resp.tokens ~f:snd)
 
   let get_ticker (t : t) ~symbol () =
     (* Parse symbol as "BASE-QUOTE" using token addresses *)
-    let (base_token, quote_token) = match String.lsplit2 symbol ~on:'-' with
+    let base_token, quote_token =
+      match String.lsplit2 symbol ~on:'-' with
       | Some ("ETH", "USDC") -> (Rest.Tokens.eth, Rest.Tokens.usdc)
       | Some ("ETH", "USDT") -> (Rest.Tokens.eth, Rest.Tokens.usdt)
       | Some ("WBTC", "USDC") -> (Rest.Tokens.wbtc, Rest.Tokens.usdc)
       | Some ("ETH", "DAI") -> (Rest.Tokens.eth, Rest.Tokens.dai)
       | _ ->
         (* Assume symbol is "baseAddr-quoteAddr" *)
-        match String.lsplit2 symbol ~on:'-' with
-        | Some (base, quote) -> (base, quote)
-        | None -> (symbol, Rest.Tokens.usdc)
+        (match String.lsplit2 symbol ~on:'-' with
+         | Some (base, quote) -> (base, quote)
+         | None -> (symbol, Rest.Tokens.usdc))
     in
     (* Get quote for 1 ETH worth *)
-    let amount = "1000000000000000000" in  (* 1 ETH in wei *)
-    Rest.quote t.cfg ~src:base_token ~dst:quote_token ~amount ()
+    let amount = "1000000000000000000" in
+      (* 1 ETH in wei *)
+      Rest.quote t.cfg ~src:base_token ~dst:quote_token ~amount ()
 
   let get_order_book (t : t) ~symbol ?limit:_ () =
-    let (base_token, quote_token) = match String.lsplit2 symbol ~on:'-' with
+    let base_token, quote_token =
+      match String.lsplit2 symbol ~on:'-' with
       | Some ("ETH", "USDC") -> (Rest.Tokens.eth, Rest.Tokens.usdc)
       | Some ("ETH", "USDT") -> (Rest.Tokens.eth, Rest.Tokens.usdt)
       | Some ("WBTC", "USDC") -> (Rest.Tokens.wbtc, Rest.Tokens.usdc)
       | _ ->
-        match String.lsplit2 symbol ~on:'-' with
-        | Some (base, quote) -> (base, quote)
-        | None -> (symbol, Rest.Tokens.usdc)
+        (match String.lsplit2 symbol ~on:'-' with
+         | Some (base, quote) -> (base, quote)
+         | None -> (symbol, Rest.Tokens.usdc))
     in
     let amount = "1000000000000000000" in
-    Rest.order_book t.cfg ~base_token ~quote_token ~amount
+      Rest.order_book t.cfg ~base_token ~quote_token ~amount
 
   let get_recent_trades (_ : t) ~symbol:_ ?limit:_ () =
     Deferred.return (Error (`Api_error "Recent trades are on EVM blockchain"))
@@ -221,11 +223,11 @@ module Adapter = struct
   module Streams = struct
     let trades (_ : t) =
       let r, _w = Pipe.create () in
-      Deferred.return r
+        Deferred.return r
 
     let book_updates (_ : t) =
       let r, _w = Pipe.create () in
-      Deferred.return r
+        Deferred.return r
   end
 
   module Normalize = struct
@@ -245,89 +247,93 @@ module Adapter = struct
       Error "1inch is a DEX aggregator - balances are on-chain, use wallet APIs"
 
     let book_update (() : Native.Book.update) : Types.Book_update.t =
-      { venue = Venue.t
-      ; symbol = ""
-      ; side = Types.Book_update.Side.Bid
-      ; levels = []
-      ; ts = None
-      ; is_snapshot = true
-      }
+      { venue= Venue.t
+      ; symbol= ""
+      ; side= Types.Book_update.Side.Bid
+      ; levels= []
+      ; ts= None
+      ; is_snapshot= true }
 
     let symbol_info (info : Native.Symbol_info.t) : Types.Symbol_info.t =
-      { venue = Venue.t
-      ; symbol = info.symbol
-      ; base_currency = info.symbol
-      ; quote_currency = "USD"
-      ; status = "active"
-      ; min_order_size = 0.
-      ; tick_size = None
-      ; quote_increment = None
-      }
+      { venue= Venue.t
+      ; symbol= info.symbol
+      ; base_currency= info.symbol
+      ; quote_currency= "USD"
+      ; status= "active"
+      ; min_order_size= 0.
+      ; tick_size= None
+      ; quote_increment= None }
 
     let ticker (quote : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       (* Calculate price from amounts and decimals *)
       let open Result.Let_syntax in
-      let%bind to_amount = Fluxum.Normalize_common.Float_conv.qty_of_string quote.toAmount in
+      let%bind to_amount =
+        Fluxum.Normalize_common.Float_conv.qty_of_string quote.toAmount
+      in
       let from_decimals = Float.of_int quote.fromToken.decimals in
       let to_decimals = Float.of_int quote.toToken.decimals in
-      let from_amount = Float.(10. ** from_decimals) in  (* 1 unit of from token *)
-      let price = to_amount /. Float.(10. ** to_decimals) /. (from_amount /. Float.(10. ** from_decimals)) in
+      let from_amount = Float.(10. ** from_decimals) in
+      (* 1 unit of from token *)
+      let price =
+        to_amount
+        /. Float.(10. ** to_decimals)
+        /. (from_amount /. Float.(10. ** from_decimals))
+      in
       let symbol = sprintf "%s-%s" quote.fromToken.symbol quote.toToken.symbol in
-      Ok ({ venue = Venue.t
-      ; symbol
-      ; last_price = price
-      ; bid_price = price
-      ; ask_price = price
-      ; high_24h = 0.
-      ; low_24h = 0.
-      ; volume_24h = 0.
-      ; quote_volume = None
-      ; price_change = None
-      ; price_change_pct = None
-      ; ts = None
-      } : Types.Ticker.t)
+        Ok
+          ({ venue= Venue.t
+           ; symbol
+           ; last_price= price
+           ; bid_price= price
+           ; ask_price= price
+           ; high_24h= 0.
+           ; low_24h= 0.
+           ; volume_24h= 0.
+           ; quote_volume= None
+           ; price_change= None
+           ; price_change_pct= None
+           ; ts= None }
+           : Types.Ticker.t)
 
-    let order_book ((sell_quote, buy_quote) : Native.Book.snapshot) : (Types.Order_book.t, string) Result.t =
+    let order_book ((sell_quote, buy_quote) : Native.Book.snapshot)
+      : (Types.Order_book.t, string) Result.t
+      =
       let open Result.Let_syntax in
-      let%bind sell_to_amt = Fluxum.Normalize_common.Float_conv.qty_of_string sell_quote.toAmount in
-      let%bind buy_to_amt = Fluxum.Normalize_common.Float_conv.qty_of_string buy_quote.toAmount in
+      let%bind sell_to_amt =
+        Fluxum.Normalize_common.Float_conv.qty_of_string sell_quote.toAmount
+      in
+      let%bind buy_to_amt =
+        Fluxum.Normalize_common.Float_conv.qty_of_string buy_quote.toAmount
+      in
       let from_dec = Float.of_int sell_quote.fromToken.decimals in
       let to_dec = Float.of_int sell_quote.toToken.decimals in
       let sell_price = sell_to_amt /. Float.(10. ** to_dec) in
       let buy_dec = Float.of_int buy_quote.toToken.decimals in
       let buy_price = Float.(10. ** buy_dec) /. buy_to_amt in
-      let _ = from_dec in  (* Suppress unused warning *)
-      let bid = { Types.Order_book.Price_level.
-        price = buy_price;
-        volume = 1.0;
-      } in
-      let ask = { Types.Order_book.Price_level.
-        price = sell_price;
-        volume = 1.0;
-      } in
-      Ok ({ venue = Venue.t
-      ; symbol = ""
-      ; bids = [bid]
-      ; asks = [ask]
-      ; ts = None
-      ; epoch = 0
-      } : Types.Order_book.t)
+      let _ = from_dec in
+      (* Suppress unused warning *)
+      let bid = {Types.Order_book.Price_level.price= buy_price; volume= 1.0} in
+      let ask = {Types.Order_book.Price_level.price= sell_price; volume= 1.0} in
+        Ok
+          ({venue= Venue.t; symbol= ""; bids= [bid]; asks= [ask]; ts= None; epoch= 0}
+           : Types.Order_book.t)
 
     let public_trade (() : Native.Public_trade.t) : Types.Public_trade.t =
-      { venue = Venue.t
-      ; symbol = ""
-      ; price = 0.
-      ; qty = 0.
-      ; side = None
-      ; trade_id = None
-      ; ts = None
-      }
+      { venue= Venue.t
+      ; symbol= ""
+      ; price= 0.
+      ; qty= 0.
+      ; side= None
+      ; trade_id= None
+      ; ts= None }
 
     let candle (_ : Native.Candle.t) : (Types.Candle.t, string) Result.t =
       Error "1inch doesn't provide candle data"
 
     (** Account operations normalization (stubs) *)
-    let deposit_address (_ : Native.Deposit_address.t) : (Types.Deposit_address.t, string) Result.t =
+    let deposit_address (_ : Native.Deposit_address.t)
+      : (Types.Deposit_address.t, string) Result.t
+      =
       Error "1inch is an EVM DEX - use wallet address"
 
     let deposit (_ : Native.Deposit.t) : (Types.Deposit.t, string) Result.t =
@@ -339,19 +345,18 @@ module Adapter = struct
     let error (e : Native.Error.t) : Types.Error.t =
       match e with
       | `Http (code, msg) ->
-        Types.Error.Exchange_specific { venue = Venue.t; code = Int.to_string code; message = msg }
+        Types.Error.Exchange_specific
+          {venue= Venue.t; code= Int.to_string code; message= msg}
       | `Json_parse msg ->
-        Types.Error.Exchange_specific { venue = Venue.t; code = "json"; message = msg }
+        Types.Error.Exchange_specific {venue= Venue.t; code= "json"; message= msg}
       | `Api_error msg ->
-        Types.Error.Exchange_specific { venue = Venue.t; code = "api"; message = msg }
-      | `Unauthorized ->
-        Types.Error.Auth_failed
+        Types.Error.Exchange_specific {venue= Venue.t; code= "api"; message= msg}
+      | `Unauthorized -> Types.Error.Auth_failed
   end
 end
 
 module Builder = struct
   module E = Adapter
 
-  let make_order_request ~symbol:_ ~side:_ ~kind:_ ~qty:_ =
-    ()
+  let make_order_request ~symbol:_ ~side:_ ~kind:_ ~qty:_ = ()
 end

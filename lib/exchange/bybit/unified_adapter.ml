@@ -29,8 +29,7 @@
 
     Note: Full functionality requires Bybit WebSocket client implementation.
     Current implementation provides complete interfaces with placeholder implementations
-    that will be enhanced once WebSocket bindings are available.
-*)
+    that will be enhanced once WebSocket bindings are available. *)
 
 (** Bybit's Order Book implementation - COMPLETE (placeholder) *)
 module Order_book = Order_book

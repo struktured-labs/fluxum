@@ -11,8 +11,7 @@
     5. Order response normalization (error paths + happy path)
     6. Trade normalization (error paths + happy path)
     7. Round-trip tests (verify no data loss)
-    8. Edge cases (precision limits, empty values, etc.)
-*)
+    8. Edge cases (precision limits, empty values, etc.) *)
 
 open Core
 
@@ -61,103 +60,109 @@ let assert_string_equal expected actual msg =
 
 let test_ticker_null_bid () =
   printf "\n[Normalize.ticker] Null bid field\n";
-  let json = `Assoc [
-    ("bid", `Null);
-    ("ask", `String "50000");
-    ("last", `String "49999");
-    ("volume", `Assoc [("BTCUSD", `String "100.5")])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
-  | Error msg ->
-    pass (sprintf "Correctly rejected null bid: %s" msg);
-    ()
-  | Ok _ ->
-    fail "Should reject null bid";
-    ()
+  let json =
+    `Assoc
+      [ ("bid", `Null)
+      ; ("ask", `String "50000")
+      ; ("last", `String "49999")
+      ; ("volume", `Assoc [("BTCUSD", `String "100.5")]) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
+    | Error msg ->
+      pass (sprintf "Correctly rejected null bid: %s" msg);
+      ()
+    | Ok _ ->
+      fail "Should reject null bid";
+      ()
 
 let test_ticker_malformed_float () =
   printf "\n[Normalize.ticker] Malformed float in bid\n";
-  let json = `Assoc [
-    ("bid", `String "not_a_number");
-    ("ask", `String "50000");
-    ("last", `String "49999");
-    ("volume", `Assoc [("BTCUSD", `String "100.5")])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
-  | Error msg ->
-    pass (sprintf "Correctly rejected malformed float: %s" msg);
-    ()
-  | Ok _ ->
-    fail "Should reject non-numeric bid";
-    ()
+  let json =
+    `Assoc
+      [ ("bid", `String "not_a_number")
+      ; ("ask", `String "50000")
+      ; ("last", `String "49999")
+      ; ("volume", `Assoc [("BTCUSD", `String "100.5")]) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
+    | Error msg ->
+      pass (sprintf "Correctly rejected malformed float: %s" msg);
+      ()
+    | Ok _ ->
+      fail "Should reject non-numeric bid";
+      ()
 
 let test_ticker_missing_field () =
   printf "\n[Normalize.ticker] Missing required field (ask)\n";
-  let json = `Assoc [
-    ("bid", `String "50000");
-    ("last", `String "49999");
-    ("volume", `Assoc [("BTCUSD", `String "100.5")])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
-  | Error msg ->
-    pass (sprintf "Correctly rejected missing ask: %s" msg);
-    ()
-  | Ok _ ->
-    fail "Should require ask field";
-    ()
+  let json =
+    `Assoc
+      [ ("bid", `String "50000")
+      ; ("last", `String "49999")
+      ; ("volume", `Assoc [("BTCUSD", `String "100.5")]) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
+    | Error msg ->
+      pass (sprintf "Correctly rejected missing ask: %s" msg);
+      ()
+    | Ok _ ->
+      fail "Should require ask field";
+      ()
 
 let test_ticker_empty_volume () =
   printf "\n[Normalize.ticker] Empty volume assoc\n";
-  let json = `Assoc [
-    ("bid", `String "49950.50");
-    ("ask", `String "50050.25");
-    ("last", `String "50000.00");
-    ("volume", `Assoc [])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
-  | Ok ticker ->
-    ignore (assert_float_equal 0.0 ticker.volume_24h "Empty volume defaults to 0");
-    ()
-  | Error msg ->
-    pass (sprintf "Accepted with default volume: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("bid", `String "49950.50")
+      ; ("ask", `String "50050.25")
+      ; ("last", `String "50000.00")
+      ; ("volume", `Assoc []) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
+    | Ok ticker ->
+      ignore (assert_float_equal 0.0 ticker.volume_24h "Empty volume defaults to 0");
+      ()
+    | Error msg ->
+      pass (sprintf "Accepted with default volume: %s" msg);
+      ()
 
 let test_ticker_valid_happy_path () =
   printf "\n[Normalize.ticker] Valid ticker succeeds\n";
-  let json = `Assoc [
-    ("bid", `String "49950.50");
-    ("ask", `String "50050.25");
-    ("last", `String "50000.00");
-    ("volume", `Assoc [("BTCUSD", `String "123.456")])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
-  | Ok ticker ->
-    ignore (assert_float_equal 49950.50 ticker.bid_price "Bid price parsed");
-    ignore (assert_float_equal 50050.25 ticker.ask_price "Ask price parsed");
-    ignore (assert_float_equal 50000.00 ticker.last_price "Last price parsed");
-    ignore (assert_float_equal 123.456 ticker.volume_24h "Volume parsed");
-    ignore (assert_string_equal "BTCUSD" ticker.symbol "Symbol parsed and uppercase");
-    ()
-  | Error msg ->
-    fail (sprintf "Valid ticker should succeed: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("bid", `String "49950.50")
+      ; ("ask", `String "50050.25")
+      ; ("last", `String "50000.00")
+      ; ("volume", `Assoc [("BTCUSD", `String "123.456")]) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
+    | Ok ticker ->
+      ignore (assert_float_equal 49950.50 ticker.bid_price "Bid price parsed");
+      ignore (assert_float_equal 50050.25 ticker.ask_price "Ask price parsed");
+      ignore (assert_float_equal 50000.00 ticker.last_price "Last price parsed");
+      ignore (assert_float_equal 123.456 ticker.volume_24h "Volume parsed");
+      ignore (assert_string_equal "BTCUSD" ticker.symbol "Symbol parsed and uppercase");
+      ()
+    | Error msg ->
+      fail (sprintf "Valid ticker should succeed: %s" msg);
+      ()
 
 let test_ticker_high_precision () =
   printf "\n[Normalize.ticker] High precision decimals\n";
-  let json = `Assoc [
-    ("bid", `String "49950.12345678");
-    ("ask", `String "50050.87654321");
-    ("last", `String "50000.00000001");
-    ("volume", `Assoc [("ETHUSD", `String "9876.54321")])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
-  | Ok ticker ->
-    ignore (assert_float_equal 49950.12345678 ticker.bid_price "High precision bid");
-    ignore (assert_float_equal 50050.87654321 ticker.ask_price "High precision ask");
-    ()
-  | Error msg ->
-    fail (sprintf "Should handle high precision: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("bid", `String "49950.12345678")
+      ; ("ask", `String "50050.87654321")
+      ; ("last", `String "50000.00000001")
+      ; ("volume", `Assoc [("ETHUSD", `String "9876.54321")]) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
+    | Ok ticker ->
+      ignore (assert_float_equal 49950.12345678 ticker.bid_price "High precision bid");
+      ignore (assert_float_equal 50050.87654321 ticker.ask_price "High precision ask");
+      ()
+    | Error msg ->
+      fail (sprintf "Should handle high precision: %s" msg);
+      ()
 
 (* ============================================================ *)
 (* Order Book Normalization Tests *)
@@ -165,115 +170,154 @@ let test_ticker_high_precision () =
 
 let test_order_book_missing_bids () =
   printf "\n[Normalize.order_book] Missing bids field\n";
-  let json = `Assoc [
-    ("asks", `List [
-      `Assoc [("price", `String "50100"); ("amount", `String "1.0"); ("timestamp", `String "0")]
-    ])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
-  | Error msg ->
-    pass (sprintf "Correctly rejected missing bids: %s" msg);
-    ()
-  | Ok _ ->
-    fail "Should require bids field";
-    ()
+  let json =
+    `Assoc
+      [ ( "asks"
+        , `List
+            [ `Assoc
+                [ ("price", `String "50100")
+                ; ("amount", `String "1.0")
+                ; ("timestamp", `String "0") ] ] ) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
+    | Error msg ->
+      pass (sprintf "Correctly rejected missing bids: %s" msg);
+      ()
+    | Ok _ ->
+      fail "Should require bids field";
+      ()
 
 let test_order_book_missing_asks () =
   printf "\n[Normalize.order_book] Missing asks field\n";
-  let json = `Assoc [
-    ("bids", `List [
-      `Assoc [("price", `String "49900"); ("amount", `String "2.5"); ("timestamp", `String "0")]
-    ])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
-  | Error msg ->
-    pass (sprintf "Correctly rejected missing asks: %s" msg);
-    ()
-  | Ok _ ->
-    fail "Should require asks field";
-    ()
+  let json =
+    `Assoc
+      [ ( "bids"
+        , `List
+            [ `Assoc
+                [ ("price", `String "49900")
+                ; ("amount", `String "2.5")
+                ; ("timestamp", `String "0") ] ] ) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
+    | Error msg ->
+      pass (sprintf "Correctly rejected missing asks: %s" msg);
+      ()
+    | Ok _ ->
+      fail "Should require asks field";
+      ()
 
 let test_order_book_empty_bids_asks () =
   printf "\n[Normalize.order_book] Empty bids and asks lists\n";
-  let json = `Assoc [
-    ("bids", `List []);
-    ("asks", `List [])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
-  | Ok book ->
-    ignore (assert_float_equal 0.0 (Float.of_int (List.length book.bids)) "Empty bids accepted");
-    ignore (assert_float_equal 0.0 (Float.of_int (List.length book.asks)) "Empty asks accepted");
-    ()
-  | Error msg ->
-    fail (sprintf "Should accept empty book: %s" msg);
-    ()
+  let json = `Assoc [("bids", `List []); ("asks", `List [])] in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
+    | Ok book ->
+      ignore
+        (assert_float_equal
+           0.0
+           (Float.of_int (List.length book.bids))
+           "Empty bids accepted");
+      ignore
+        (assert_float_equal
+           0.0
+           (Float.of_int (List.length book.asks))
+           "Empty asks accepted");
+      ()
+    | Error msg ->
+      fail (sprintf "Should accept empty book: %s" msg);
+      ()
 
 let test_order_book_malformed_price () =
   printf "\n[Normalize.order_book] Malformed price in level\n";
-  let json = `Assoc [
-    ("bids", `List [
-      `Assoc [("price", `String "invalid"); ("amount", `String "2.5"); ("timestamp", `String "0")]
-    ]);
-    ("asks", `List [])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
-  | Error msg ->
-    pass (sprintf "Correctly rejected malformed price: %s" msg);
-    ()
-  | Ok _ ->
-    fail "Should reject malformed price";
-    ()
+  let json =
+    `Assoc
+      [ ( "bids"
+        , `List
+            [ `Assoc
+                [ ("price", `String "invalid")
+                ; ("amount", `String "2.5")
+                ; ("timestamp", `String "0") ] ] )
+      ; ("asks", `List []) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
+    | Error msg ->
+      pass (sprintf "Correctly rejected malformed price: %s" msg);
+      ()
+    | Ok _ ->
+      fail "Should reject malformed price";
+      ()
 
 let test_order_book_zero_quantity () =
   printf "\n[Normalize.order_book] Zero quantity level\n";
-  let json = `Assoc [
-    ("bids", `List [
-      `Assoc [("price", `String "49900"); ("amount", `String "0.0"); ("timestamp", `String "0")]
-    ]);
-    ("asks", `List [
-      `Assoc [("price", `String "50100"); ("amount", `String "1.0"); ("timestamp", `String "0")]
-    ])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
-  | Ok book ->
-    (match List.hd book.bids with
-     | Some level -> ignore (assert_float_equal 0.0 level.volume "Zero volume accepted")
-     | None -> failwith "Expected non-empty bids");
-    ()
-  | Error msg ->
-    fail (sprintf "Should accept zero quantity: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ( "bids"
+        , `List
+            [ `Assoc
+                [ ("price", `String "49900")
+                ; ("amount", `String "0.0")
+                ; ("timestamp", `String "0") ] ] )
+      ; ( "asks"
+        , `List
+            [ `Assoc
+                [ ("price", `String "50100")
+                ; ("amount", `String "1.0")
+                ; ("timestamp", `String "0") ] ] ) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
+    | Ok book ->
+      (match List.hd book.bids with
+       | Some level -> ignore (assert_float_equal 0.0 level.volume "Zero volume accepted")
+       | None -> failwith "Expected non-empty bids");
+      ()
+    | Error msg ->
+      fail (sprintf "Should accept zero quantity: %s" msg);
+      ()
 
 let test_order_book_valid () =
   printf "\n[Normalize.order_book] Valid order book succeeds\n";
-  let json = `Assoc [
-    ("bids", `List [
-      `Assoc [("price", `String "49900"); ("amount", `String "2.5"); ("timestamp", `String "0")];
-      `Assoc [("price", `String "49850"); ("amount", `String "5.0"); ("timestamp", `String "0")]
-    ]);
-    ("asks", `List [
-      `Assoc [("price", `String "50100"); ("amount", `String "1.5"); ("timestamp", `String "0")];
-      `Assoc [("price", `String "50150"); ("amount", `String "3.0"); ("timestamp", `String "0")]
-    ])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
-  | Ok book ->
-    ignore (assert_float_equal 2.0 (Float.of_int (List.length book.bids)) "Two bid levels");
-    ignore (assert_float_equal 2.0 (Float.of_int (List.length book.asks)) "Two ask levels");
-    (match List.hd book.bids with
-     | Some level ->
-       ignore (assert_float_equal 49900.0 level.price "Bid price");
-       ignore (assert_float_equal 2.5 level.volume "Bid volume")
-     | None -> failwith "Expected non-empty bids");
-    (match List.hd book.asks with
-     | Some level ->
-       ignore (assert_float_equal 50100.0 level.price "Ask price");
-       ignore (assert_float_equal 1.5 level.volume "Ask volume")
-     | None -> failwith "Expected non-empty asks");
-    ()
-  | Error msg ->
-    fail (sprintf "Valid order book should succeed: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ( "bids"
+        , `List
+            [ `Assoc
+                [ ("price", `String "49900")
+                ; ("amount", `String "2.5")
+                ; ("timestamp", `String "0") ]
+            ; `Assoc
+                [ ("price", `String "49850")
+                ; ("amount", `String "5.0")
+                ; ("timestamp", `String "0") ] ] )
+      ; ( "asks"
+        , `List
+            [ `Assoc
+                [ ("price", `String "50100")
+                ; ("amount", `String "1.5")
+                ; ("timestamp", `String "0") ]
+            ; `Assoc
+                [ ("price", `String "50150")
+                ; ("amount", `String "3.0")
+                ; ("timestamp", `String "0") ] ] ) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
+    | Ok book ->
+      ignore
+        (assert_float_equal 2.0 (Float.of_int (List.length book.bids)) "Two bid levels");
+      ignore
+        (assert_float_equal 2.0 (Float.of_int (List.length book.asks)) "Two ask levels");
+      (match List.hd book.bids with
+       | Some level ->
+         ignore (assert_float_equal 49900.0 level.price "Bid price");
+         ignore (assert_float_equal 2.5 level.volume "Bid volume")
+       | None -> failwith "Expected non-empty bids");
+      (match List.hd book.asks with
+       | Some level ->
+         ignore (assert_float_equal 50100.0 level.price "Ask price");
+         ignore (assert_float_equal 1.5 level.volume "Ask volume")
+       | None -> failwith "Expected non-empty asks");
+      ()
+    | Error msg ->
+      fail (sprintf "Valid order book should succeed: %s" msg);
+      ()
 
 (* ============================================================ *)
 (* Public Trade Normalization Tests *)
@@ -281,126 +325,135 @@ let test_order_book_valid () =
 
 let test_public_trade_valid_buy () =
   printf "\n[Normalize.public_trade] Valid buy trade\n";
-  let json = `Assoc [
-    ("price", `String "50000");
-    ("amount", `String "1.5");
-    ("type", `String "buy");
-    ("timestampms", `Int 1234567890000);
-    ("tid", `Int 999888777)
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
-  | Ok trade ->
-    ignore (assert_float_equal 50000.0 trade.price "Trade price");
-    ignore (assert_float_equal 1.5 trade.qty "Trade quantity");
-    ()
-  | Error msg ->
-    fail (sprintf "Valid buy trade should succeed: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("price", `String "50000")
+      ; ("amount", `String "1.5")
+      ; ("type", `String "buy")
+      ; ("timestampms", `Int 1234567890000)
+      ; ("tid", `Int 999888777) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
+    | Ok trade ->
+      ignore (assert_float_equal 50000.0 trade.price "Trade price");
+      ignore (assert_float_equal 1.5 trade.qty "Trade quantity");
+      ()
+    | Error msg ->
+      fail (sprintf "Valid buy trade should succeed: %s" msg);
+      ()
 
 let test_public_trade_valid_sell () =
   printf "\n[Normalize.public_trade] Valid sell trade\n";
-  let json = `Assoc [
-    ("price", `String "49500.25");
-    ("amount", `String "0.75");
-    ("type", `String "sell");
-    ("timestampms", `Int 1234567890000);
-    ("tid", `Int 123456)
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
-  | Ok trade ->
-    ignore (assert_float_equal 49500.25 trade.price "Sell price");
-    ignore (assert_float_equal 0.75 trade.qty "Sell quantity");
-    ()
-  | Error msg ->
-    fail (sprintf "Valid sell trade should succeed: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("price", `String "49500.25")
+      ; ("amount", `String "0.75")
+      ; ("type", `String "sell")
+      ; ("timestampms", `Int 1234567890000)
+      ; ("tid", `Int 123456) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
+    | Ok trade ->
+      ignore (assert_float_equal 49500.25 trade.price "Sell price");
+      ignore (assert_float_equal 0.75 trade.qty "Sell quantity");
+      ()
+    | Error msg ->
+      fail (sprintf "Valid sell trade should succeed: %s" msg);
+      ()
 
 let test_public_trade_invalid_side () =
   printf "\n[Normalize.public_trade] Invalid side defaults to Buy\n";
-  let json = `Assoc [
-    ("price", `String "50000");
-    ("amount", `String "1.5");
-    ("type", `String "invalid_side");
-    ("timestampms", `Int 1234567890000);
-    ("tid", `Int 999888777)
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
-  | Ok trade ->
-    pass (sprintf "Accepted with default side: %s" (match trade.side with
-      | Some Fluxum.Types.Side.Buy -> "Buy"
-      | Some Sell -> "Sell"
-      | None -> "None"));
-    ()
-  | Error msg ->
-    fail (sprintf "Should accept with default side: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("price", `String "50000")
+      ; ("amount", `String "1.5")
+      ; ("type", `String "invalid_side")
+      ; ("timestampms", `Int 1234567890000)
+      ; ("tid", `Int 999888777) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
+    | Ok trade ->
+      pass
+        (sprintf
+           "Accepted with default side: %s"
+           (match trade.side with
+            | Some Fluxum.Types.Side.Buy -> "Buy"
+            | Some Sell -> "Sell"
+            | None -> "None"));
+      ()
+    | Error msg ->
+      fail (sprintf "Should accept with default side: %s" msg);
+      ()
 
 let test_public_trade_missing_timestamp () =
   printf "\n[Normalize.public_trade] Missing timestamp field\n";
-  let json = `Assoc [
-    ("price", `String "50000");
-    ("amount", `String "1.5");
-    ("type", `String "buy");
-    ("tid", `Int 999888777)
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
-  | Error msg ->
-    pass (sprintf "Correctly rejected missing timestamp: %s" msg);
-    ()
-  | Ok _ ->
-    fail "Should require timestamp field";
-    ()
+  let json =
+    `Assoc
+      [ ("price", `String "50000")
+      ; ("amount", `String "1.5")
+      ; ("type", `String "buy")
+      ; ("tid", `Int 999888777) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
+    | Error msg ->
+      pass (sprintf "Correctly rejected missing timestamp: %s" msg);
+      ()
+    | Ok _ ->
+      fail "Should require timestamp field";
+      ()
 
 let test_public_trade_malformed_price () =
   printf "\n[Normalize.public_trade] Malformed price\n";
-  let json = `Assoc [
-    ("price", `String "not_a_price");
-    ("amount", `String "1.5");
-    ("type", `String "buy");
-    ("timestampms", `Int 1234567890000);
-    ("tid", `Int 999)
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
-  | Error msg ->
-    pass (sprintf "Correctly rejected malformed price: %s" msg);
-    ()
-  | Ok _ ->
-    fail "Should reject malformed price";
-    ()
+  let json =
+    `Assoc
+      [ ("price", `String "not_a_price")
+      ; ("amount", `String "1.5")
+      ; ("type", `String "buy")
+      ; ("timestampms", `Int 1234567890000)
+      ; ("tid", `Int 999) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
+    | Error msg ->
+      pass (sprintf "Correctly rejected malformed price: %s" msg);
+      ()
+    | Ok _ ->
+      fail "Should reject malformed price";
+      ()
 
 let test_public_trade_zero_quantity () =
   printf "\n[Normalize.public_trade] Zero quantity trade\n";
-  let json = `Assoc [
-    ("price", `String "50000");
-    ("amount", `String "0.0");
-    ("type", `String "buy");
-    ("timestampms", `Int 1234567890000);
-    ("tid", `Int 999)
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
-  | Ok trade ->
-    ignore (assert_float_equal 0.0 trade.qty "Zero quantity accepted");
-    ()
-  | Error msg ->
-    fail (sprintf "Should accept zero quantity: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("price", `String "50000")
+      ; ("amount", `String "0.0")
+      ; ("type", `String "buy")
+      ; ("timestampms", `Int 1234567890000)
+      ; ("tid", `Int 999) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
+    | Ok trade ->
+      ignore (assert_float_equal 0.0 trade.qty "Zero quantity accepted");
+      ()
+    | Error msg ->
+      fail (sprintf "Should accept zero quantity: %s" msg);
+      ()
 
 let test_public_trade_negative_quantity () =
   printf "\n[Normalize.public_trade] Negative quantity trade\n";
-  let json = `Assoc [
-    ("price", `String "50000");
-    ("amount", `String "-1.5");
-    ("type", `String "buy");
-    ("timestampms", `Int 1234567890000);
-    ("tid", `Int 999)
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
-  | Ok _trade ->
-    fail "Should reject negative quantity"
-  | Error msg ->
-    (* Now correctly validates that quantities must be non-negative *)
-    pass (sprintf "Correctly rejected negative quantity: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("price", `String "50000")
+      ; ("amount", `String "-1.5")
+      ; ("type", `String "buy")
+      ; ("timestampms", `Int 1234567890000)
+      ; ("tid", `Int 999) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.public_trade json with
+    | Ok _trade -> fail "Should reject negative quantity"
+    | Error msg ->
+      (* Now correctly validates that quantities must be non-negative *)
+      pass (sprintf "Correctly rejected negative quantity: %s" msg);
+      ()
 
 (* ============================================================ *)
 (* Balance Normalization Tests *)
@@ -443,49 +496,57 @@ let test_balance_high_precision () =
 
 let test_ticker_round_trip () =
   printf "\n[Round-trip] Ticker normalize and verify\n";
-  let json = `Assoc [
-    ("bid", `String "49123.45");
-    ("ask", `String "49234.56");
-    ("last", `String "49180.00");
-    ("volume", `Assoc [("BTCUSD", `String "456.789")])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
-  | Ok ticker ->
-    ignore (assert_float_equal 49123.45 ticker.bid_price "Round-trip bid preserved");
-    ignore (assert_float_equal 49234.56 ticker.ask_price "Round-trip ask preserved");
-    ignore (assert_float_equal 49180.00 ticker.last_price "Round-trip last preserved");
-    ignore (assert_float_equal 456.789 ticker.volume_24h "Round-trip volume preserved");
-    ()
-  | Error msg ->
-    fail (sprintf "Round-trip ticker failed: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("bid", `String "49123.45")
+      ; ("ask", `String "49234.56")
+      ; ("last", `String "49180.00")
+      ; ("volume", `Assoc [("BTCUSD", `String "456.789")]) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
+    | Ok ticker ->
+      ignore (assert_float_equal 49123.45 ticker.bid_price "Round-trip bid preserved");
+      ignore (assert_float_equal 49234.56 ticker.ask_price "Round-trip ask preserved");
+      ignore (assert_float_equal 49180.00 ticker.last_price "Round-trip last preserved");
+      ignore (assert_float_equal 456.789 ticker.volume_24h "Round-trip volume preserved");
+      ()
+    | Error msg ->
+      fail (sprintf "Round-trip ticker failed: %s" msg);
+      ()
 
 let test_order_book_round_trip () =
   printf "\n[Round-trip] Order book normalize and verify\n";
-  let json = `Assoc [
-    ("bids", `List [
-      `Assoc [("price", `String "49123.45"); ("amount", `String "2.5"); ("timestamp", `String "0")]
-    ]);
-    ("asks", `List [
-      `Assoc [("price", `String "49234.56"); ("amount", `String "1.5"); ("timestamp", `String "0")]
-    ])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
-  | Ok book ->
-    (match List.hd book.bids with
-     | Some level ->
-       ignore (assert_float_equal 49123.45 level.price "Round-trip bid price preserved");
-       ignore (assert_float_equal 2.5 level.volume "Round-trip bid volume preserved")
-     | None -> failwith "Expected non-empty bids");
-    (match List.hd book.asks with
-     | Some level ->
-       ignore (assert_float_equal 49234.56 level.price "Round-trip ask price preserved");
-       ignore (assert_float_equal 1.5 level.volume "Round-trip ask volume preserved")
-     | None -> failwith "Expected non-empty asks");
-    ()
-  | Error msg ->
-    fail (sprintf "Round-trip order book failed: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ( "bids"
+        , `List
+            [ `Assoc
+                [ ("price", `String "49123.45")
+                ; ("amount", `String "2.5")
+                ; ("timestamp", `String "0") ] ] )
+      ; ( "asks"
+        , `List
+            [ `Assoc
+                [ ("price", `String "49234.56")
+                ; ("amount", `String "1.5")
+                ; ("timestamp", `String "0") ] ] ) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
+    | Ok book ->
+      (match List.hd book.bids with
+       | Some level ->
+         ignore (assert_float_equal 49123.45 level.price "Round-trip bid price preserved");
+         ignore (assert_float_equal 2.5 level.volume "Round-trip bid volume preserved")
+       | None -> failwith "Expected non-empty bids");
+      (match List.hd book.asks with
+       | Some level ->
+         ignore (assert_float_equal 49234.56 level.price "Round-trip ask price preserved");
+         ignore (assert_float_equal 1.5 level.volume "Round-trip ask volume preserved")
+       | None -> failwith "Expected non-empty asks");
+      ()
+    | Error msg ->
+      fail (sprintf "Round-trip order book failed: %s" msg);
+      ()
 
 (* ============================================================ *)
 (* Edge Cases and Stress Tests *)
@@ -493,116 +554,124 @@ let test_order_book_round_trip () =
 
 let test_ticker_very_large_numbers () =
   printf "\n[Edge] Very large numbers in ticker\n";
-  let json = `Assoc [
-    ("bid", `String "999999999.99");
-    ("ask", `String "1000000000.01");
-    ("last", `String "1000000000.00");
-    ("volume", `Assoc [("BTCUSD", `String "99999999.99")])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
-  | Ok ticker ->
-    ignore (assert_float_equal 999999999.99 ticker.bid_price "Large bid");
-    ignore (assert_float_equal 1000000000.01 ticker.ask_price "Large ask");
-    ()
-  | Error msg ->
-    fail (sprintf "Should handle large numbers: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("bid", `String "999999999.99")
+      ; ("ask", `String "1000000000.01")
+      ; ("last", `String "1000000000.00")
+      ; ("volume", `Assoc [("BTCUSD", `String "99999999.99")]) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
+    | Ok ticker ->
+      ignore (assert_float_equal 999999999.99 ticker.bid_price "Large bid");
+      ignore (assert_float_equal 1000000000.01 ticker.ask_price "Large ask");
+      ()
+    | Error msg ->
+      fail (sprintf "Should handle large numbers: %s" msg);
+      ()
 
 let test_ticker_very_small_numbers () =
   printf "\n[Edge] Very small numbers in ticker\n";
-  let json = `Assoc [
-    ("bid", `String "0.00000001");
-    ("ask", `String "0.00000002");
-    ("last", `String "0.000000015");
-    ("volume", `Assoc [("SHIBUSDT", `String "1000000000.0")])
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
-  | Ok ticker ->
-    ignore (assert_float_equal 0.00000001 ticker.bid_price ~tolerance:0.000000001 "Small bid");
-    ignore (assert_float_equal 0.00000002 ticker.ask_price ~tolerance:0.000000001 "Small ask");
-    ()
-  | Error msg ->
-    fail (sprintf "Should handle small numbers: %s" msg);
-    ()
+  let json =
+    `Assoc
+      [ ("bid", `String "0.00000001")
+      ; ("ask", `String "0.00000002")
+      ; ("last", `String "0.000000015")
+      ; ("volume", `Assoc [("SHIBUSDT", `String "1000000000.0")]) ]
+  in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.ticker json with
+    | Ok ticker ->
+      ignore
+        (assert_float_equal
+           0.00000001
+           ticker.bid_price
+           ~tolerance:0.000000001
+           "Small bid");
+      ignore
+        (assert_float_equal
+           0.00000002
+           ticker.ask_price
+           ~tolerance:0.000000001
+           "Small ask");
+      ()
+    | Error msg ->
+      fail (sprintf "Should handle small numbers: %s" msg);
+      ()
 
 let test_order_book_many_levels () =
   printf "\n[Edge] Order book with many levels\n";
   let create_level price amount =
-    `Assoc [
-      ("price", `String (Float.to_string price));
-      ("amount", `String (Float.to_string amount));
-      ("timestamp", `String "0")
-    ]
+    `Assoc
+      [ ("price", `String (Float.to_string price))
+      ; ("amount", `String (Float.to_string amount))
+      ; ("timestamp", `String "0") ]
   in
   let bids = List.init 100 ~f:(fun i -> create_level (50000.0 -. Float.of_int i) 1.0) in
   let asks = List.init 100 ~f:(fun i -> create_level (50100.0 +. Float.of_int i) 1.0) in
-  let json = `Assoc [
-    ("bids", `List bids);
-    ("asks", `List asks)
-  ] in
-  match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
-  | Ok book ->
-    ignore (assert_float_equal 100.0 (Float.of_int (List.length book.bids)) "100 bid levels");
-    ignore (assert_float_equal 100.0 (Float.of_int (List.length book.asks)) "100 ask levels");
-    ()
-  | Error msg ->
-    fail (sprintf "Should handle many levels: %s" msg);
-    ()
+  let json = `Assoc [("bids", `List bids); ("asks", `List asks)] in
+    match Gemini.Fluxum_adapter.Adapter.Normalize.order_book json with
+    | Ok book ->
+      ignore
+        (assert_float_equal 100.0 (Float.of_int (List.length book.bids)) "100 bid levels");
+      ignore
+        (assert_float_equal 100.0 (Float.of_int (List.length book.asks)) "100 ask levels");
+      ()
+    | Error msg ->
+      fail (sprintf "Should handle many levels: %s" msg);
+      ()
 
 (* ========== WebSocket Buffer Handling Tests ========== *)
 
 let test_websocket_garbage_prefix () =
   printf "\n[WebSocket] Garbage prefix handling\n";
-
   (* Test Case 1: Clean JSON with no garbage prefix *)
   let clean_json = {|{"type":"update","eventId":123,"price":"50000.50"}|} in
-  (try
-    let _json = Yojson.Safe.from_string clean_json in
-    pass "Clean JSON parses correctly"
-  with _ -> fail "Clean JSON should parse");
-
-  (* Test Case 2: Simulate what the fix does - find JSON start *)
-  let garbage_prefix = {|xxxx{"type":"update","eventId":124}|} in
-  let find_json_start s =
-    let rec find idx =
-      if idx >= String.length s then None
-      else match s.[idx] with
-      | '{' | '[' -> Some idx
-      | _ -> find (idx + 1)
+    (try
+       let _json = Yojson.Safe.from_string clean_json in
+         pass "Clean JSON parses correctly"
+     with
+     | _ -> fail "Clean JSON should parse");
+    (* Test Case 2: Simulate what the fix does - find JSON start *)
+    let garbage_prefix = {|xxxx{"type":"update","eventId":124}|} in
+    let find_json_start s =
+      let rec find idx =
+        if idx >= String.length s
+        then None
+        else (
+          match s.[idx] with
+          | '{' | '[' -> Some idx
+          | _ -> find (idx + 1))
+      in
+        find 0
     in
-    find 0
-  in
-  (match find_json_start garbage_prefix with
-   | Some 4 ->
-     let json_part = String.sub garbage_prefix ~pos:4 ~len:(String.length garbage_prefix - 4) in
-     (try
-       let _json = Yojson.Safe.from_string json_part in
-       pass "Garbage prefix skipped, JSON extracted at position 4"
-     with _ -> fail "JSON after garbage should parse")
-   | _ -> fail "Should find JSON start at position 4");
-
-  (* Test Case 3: Binary garbage (control characters) *)
-  let binary_garbage = "\x00\x01\x02" ^ {|{"type":"update","eventId":125}|} in
-  (match find_json_start binary_garbage with
-   | Some 3 ->
-     pass "Binary garbage prefix skipped at position 3"
-   | _ -> fail "Should find JSON start after binary garbage");
-
-  (* Test Case 4: No JSON in buffer *)
-  let no_json = "just some text without JSON" in
-  (match find_json_start no_json with
-   | None -> pass "Correctly detected no JSON in buffer"
-   | Some _ -> fail "Should not find JSON in text-only buffer");
-
-  (* Test Case 5: JSON array instead of object *)
-  let array_json = {|garbage[1,2,3]|} in
-  (match find_json_start array_json with
-   | Some 7 ->
-     pass "Array JSON detected after garbage at position 7"
-   | _ -> fail "Should find array JSON start");
-
-  printf "  ℹ This test validates the garbage prefix fix that resolves\n";
-  printf "    'Junk after end of JSON value' errors in production\n"
+      (match find_json_start garbage_prefix with
+       | Some 4 ->
+         let json_part =
+           String.sub garbage_prefix ~pos:4 ~len:(String.length garbage_prefix - 4)
+         in
+           (try
+              let _json = Yojson.Safe.from_string json_part in
+                pass "Garbage prefix skipped, JSON extracted at position 4"
+            with
+            | _ -> fail "JSON after garbage should parse")
+       | _ -> fail "Should find JSON start at position 4");
+      (* Test Case 3: Binary garbage (control characters) *)
+      let binary_garbage = "\x00\x01\x02" ^ {|{"type":"update","eventId":125}|} in
+        (match find_json_start binary_garbage with
+         | Some 3 -> pass "Binary garbage prefix skipped at position 3"
+         | _ -> fail "Should find JSON start after binary garbage");
+        (* Test Case 4: No JSON in buffer *)
+        let no_json = "just some text without JSON" in
+          (match find_json_start no_json with
+           | None -> pass "Correctly detected no JSON in buffer"
+           | Some _ -> fail "Should not find JSON in text-only buffer");
+          (* Test Case 5: JSON array instead of object *)
+          let array_json = {|garbage[1,2,3]|} in
+            (match find_json_start array_json with
+             | Some 7 -> pass "Array JSON detected after garbage at position 7"
+             | _ -> fail "Should find array JSON start");
+            printf "  ℹ This test validates the garbage prefix fix that resolves\n";
+            printf "    'Junk after end of JSON value' errors in production\n"
 
 (* ============================================================ *)
 (* Test Runner *)
@@ -613,7 +682,6 @@ let run_all_tests () =
   printf "══════════════════════════════════════════════════════════\n";
   printf "  Gemini Exchange Adapter - Comprehensive Unit Test Suite\n";
   printf "══════════════════════════════════════════════════════════\n";
-
   (* Ticker normalize tests *)
   printf "\n═══ Ticker Normalization Tests ═══\n";
   test_ticker_null_bid ();
@@ -622,7 +690,6 @@ let run_all_tests () =
   test_ticker_empty_volume ();
   test_ticker_valid_happy_path ();
   test_ticker_high_precision ();
-
   (* Order book tests *)
   printf "\n═══ Order Book Normalization Tests ═══\n";
   test_order_book_missing_bids ();
@@ -631,7 +698,6 @@ let run_all_tests () =
   test_order_book_malformed_price ();
   test_order_book_zero_quantity ();
   test_order_book_valid ();
-
   (* Public trade tests *)
   printf "\n═══ Public Trade Normalization Tests ═══\n";
   test_public_trade_valid_buy ();
@@ -641,7 +707,6 @@ let run_all_tests () =
   test_public_trade_malformed_price ();
   test_public_trade_zero_quantity ();
   test_public_trade_negative_quantity ();
-
   (* Balance tests *)
   printf "\n═══ Balance Normalization Tests ═══\n";
   test_balance_valid ();
@@ -649,28 +714,26 @@ let run_all_tests () =
   test_balance_negative_value ();
   test_balance_zero_values ();
   test_balance_high_precision ();
-
   (* Round-trip tests *)
   printf "\n═══ Round-Trip Tests ═══\n";
   test_ticker_round_trip ();
   test_order_book_round_trip ();
-
   (* Edge cases *)
   printf "\n═══ Edge Cases and Stress Tests ═══\n";
   test_ticker_very_large_numbers ();
   test_ticker_very_small_numbers ();
   test_order_book_many_levels ();
-
   (* WebSocket buffer tests *)
   printf "\n═══ WebSocket Buffer Handling Tests ═══\n";
   test_websocket_garbage_prefix ();
-
   printf "\n";
   printf "══════════════════════════════════════════════════════════\n";
-  printf "  Test Results: %d run, %d passed, %d failed\n"
-    !tests_run !tests_passed !tests_failed;
+  printf
+    "  Test Results: %d run, %d passed, %d failed\n"
+    !tests_run
+    !tests_passed
+    !tests_failed;
   printf "══════════════════════════════════════════════════════════\n";
-
   match !tests_failed with
   | 0 ->
     printf "\n✅ All tests passed!\n\n";

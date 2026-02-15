@@ -20,8 +20,7 @@
         ~reserve1_str:pool.reserve1
         ~fee_bps:30
         () in
-    ]}
-*)
+    ]} *)
 
 (** {1 Safe Integer Conversions} *)
 
@@ -57,43 +56,42 @@ module Constant_product : sig
       @param reserve0_str Reserve0 as string
       @param reserve1_str Reserve1 as string
       @param fee_bps Fee in basis points (e.g., 30 for 0.3%)
-      @param tvl_usd Total value locked in USD (optional, default 0)
-  *)
-  val normalize_pool :
-    venue:string ->
-    pool_id:string ->
-    token0_addr:string ->
-    token0_symbol:string ->
-    token0_decimals:int ->
-    token1_addr:string ->
-    token1_symbol:string ->
-    token1_decimals:int ->
-    reserve0_str:string ->
-    reserve1_str:string ->
-    fee_bps:int ->
-    ?tvl_usd:float ->
-    unit ->
-    (Pool_intf.Pool.t, string) Result.t
+      @param tvl_usd Total value locked in USD (optional, default 0) *)
+  val normalize_pool
+    :  venue:string
+    -> pool_id:string
+    -> token0_addr:string
+    -> token0_symbol:string
+    -> token0_decimals:int
+    -> token1_addr:string
+    -> token1_symbol:string
+    -> token1_decimals:int
+    -> reserve0_str:string
+    -> reserve1_str:string
+    -> fee_bps:int
+    -> ?tvl_usd:float
+    -> unit
+    -> (Pool_intf.Pool.t, string) Result.t
 
   (** Get spot price for token pair from reserves. *)
-  val spot_price_from_reserves :
-    reserve0:float ->
-    reserve1:float ->
-    token0_id:string ->
-    token1_id:string ->
-    token_in:string ->
-    token_out:string ->
-    (float, string) Result.t
+  val spot_price_from_reserves
+    :  reserve0:float
+    -> reserve1:float
+    -> token0_id:string
+    -> token1_id:string
+    -> token_in:string
+    -> token_out:string
+    -> (float, string) Result.t
 
   (** Parse reserves from strings and get spot price. *)
-  val spot_price :
-    reserve0_str:string ->
-    reserve1_str:string ->
-    token0_id:string ->
-    token1_id:string ->
-    token_in:string ->
-    token_out:string ->
-    (float, string) Result.t
+  val spot_price
+    :  reserve0_str:string
+    -> reserve1_str:string
+    -> token0_id:string
+    -> token1_id:string
+    -> token_in:string
+    -> token_out:string
+    -> (float, string) Result.t
 end
 
 (** {1 Concentrated Liquidity Pool Helpers} *)
@@ -109,13 +107,12 @@ module Concentrated : sig
       @param sqrt_price_x96 sqrtPriceX96 as string (Q64.96 format)
       @param decimals0 Token0 decimals
       @param decimals1 Token1 decimals
-      @return Price (token0 -> token1) or Error
-  *)
-  val price_from_sqrt_price_x96 :
-    sqrt_price_x96:string ->
-    decimals0:int ->
-    decimals1:int ->
-    (float, string) Result.t
+      @return Price (token0 -> token1) or Error *)
+  val price_from_sqrt_price_x96
+    :  sqrt_price_x96:string
+    -> decimals0:int
+    -> decimals1:int
+    -> (float, string) Result.t
 
   (** Parse liquidity string safely. *)
   val parse_liquidity : string -> (float, string) Result.t
@@ -155,16 +152,15 @@ module Price_based : sig
       @param price_str Current price as string
       @param base_volume_str Base volume as string
       @param quote_volume_str Quote volume as string
-      @param fee_bps Fee in basis points
-  *)
-  val normalize_pool :
-    venue:string ->
-    pool_id:string ->
-    base_symbol:string ->
-    quote_symbol:string ->
-    price_str:string ->
-    base_volume_str:string ->
-    quote_volume_str:string ->
-    fee_bps:int ->
-    (Pool_intf.Pool.t, string) Result.t
+      @param fee_bps Fee in basis points *)
+  val normalize_pool
+    :  venue:string
+    -> pool_id:string
+    -> base_symbol:string
+    -> quote_symbol:string
+    -> price_str:string
+    -> base_volume_str:string
+    -> quote_volume_str:string
+    -> fee_bps:int
+    -> (Pool_intf.Pool.t, string) Result.t
 end

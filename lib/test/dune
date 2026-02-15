@@ -3,14 +3,24 @@
  (modules test_consolidated_order_book)
  (libraries core async fluxum consolidated_order_book gemini kraken binance)
  (inline_tests)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core -open Async))
 
 (test
  (name test_balance)
  (modules test_balance)
- (libraries core async fluxum binance mexc coinbase bitrue consolidated_balance)
- (preprocess (pps ppx_jane))
+ (libraries
+  core
+  async
+  fluxum
+  binance
+  mexc
+  coinbase
+  bitrue
+  consolidated_balance)
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core -open Async))
 
 (library
@@ -18,19 +28,22 @@
  (modules test_websocket_curl)
  (libraries core async websocket_curl base64)
  (inline_tests)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core))
 
 (executable
  (name run_normalize_common_tests)
  (modules run_normalize_common_tests)
  (libraries core fluxum)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core))
 
 (test
  (name test_account_types)
  (modules test_account_types)
  (libraries core async fluxum)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core))

@@ -2,114 +2,134 @@
  (name kraken_market_data)
  (modules kraken_market_data)
  (libraries core yojson)
- (flags :standard -open Core)
-)
+ (flags :standard -open Core))
 
 (executable
  (name kraken_orderbook)
  (modules kraken_orderbook)
  (libraries core async kraken)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name kraken_orderbook_debug)
  (modules kraken_orderbook_debug)
  (libraries core async kraken)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name consolidated_orderbook)
  (modules consolidated_orderbook)
- (libraries core async consolidated_order_book gemini kraken hyperliquid bitrue binance coinbase)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
+ (libraries
+  core
+  async
+  consolidated_order_book
+  gemini
+  kraken
+  hyperliquid
+  bitrue
+  binance
+  coinbase)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name consolidated_orderbook_arb)
  (modules consolidated_orderbook_arb)
- (libraries core async consolidated_order_book gemini kraken hyperliquid bitrue binance coinbase)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
+ (libraries
+  core
+  async
+  consolidated_order_book
+  gemini
+  kraken
+  hyperliquid
+  bitrue
+  binance
+  coinbase)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name consolidated_orderbook_enhanced)
  (modules consolidated_orderbook_enhanced)
  (libraries core async consolidated_order_book gemini kraken)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name hyperliquid_orderbook)
  (modules hyperliquid_orderbook)
  (libraries core async hyperliquid)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name gemini_orderbook)
  (modules gemini_orderbook)
  (libraries core async gemini)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name mexc_orderbook)
  (modules mexc_orderbook)
  (libraries core async mexc)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name binance_orderbook)
  (modules binance_orderbook)
  (libraries core async binance)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name bitrue_orderbook)
  (modules bitrue_orderbook)
  (libraries core async bitrue)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name bitrue_orderbook_debug)
  (modules bitrue_orderbook_debug)
  (libraries core async bitrue)
- (preprocess (pps ppx_jane))
- (flags :standard -open Core -open Async)
-)
-
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
 
 (executable
  (name dydx_orderbook)
  (modules dydx_orderbook)
  (libraries core async dydx exchange_common)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core -open Async))
 
 (executable
  (name backtest_example)
  (modules backtest_example)
  (libraries core async backtest backtest_strategies)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core -open Async))
+
 (executable
  (name hyperliquid_testnet)
  (modules hyperliquid_testnet)
  (libraries core async hyperliquid)
- (preprocess (pps ppx_jane))
+ (preprocess
+  (pps ppx_jane))
  (flags :standard -open Core -open Async))

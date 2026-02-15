@@ -1,6 +1,5 @@
 open Core
 open Async
-
 module Cfg = Cfg
 module Rest = Rest
 module Signature = Signature
@@ -13,10 +12,11 @@ module Balance = struct
 
   let of_yojson = function
     | `Assoc pairs ->
-      Result.Ok (List.map pairs ~f:(fun (k, v) ->
-        match v with
-        | `String s -> (k, s)
-        | _ -> (k, Yojson.Safe.to_string v)))
+      Result.Ok
+        (List.map pairs ~f:(fun (k, v) ->
+           match v with
+           | `String s -> (k, s)
+           | _ -> (k, Yojson.Safe.to_string v)))
     | _ -> Result.Error "Expected object for balance"
 end
 
@@ -42,60 +42,56 @@ module Open_orders = struct
   (** Single order description *)
   module Order_descr = struct
     type t =
-      { pair : string
-      ; type_ : Common.Side.t [@key "type"]
-      ; ordertype : Common.Order_type.t
-      ; price : string
-      ; price2 : string
-      ; leverage : string
-      ; order : string
-      ; close : string
-      }
+      { pair: string
+      ; type_: Common.Side.t [@key "type"]
+      ; ordertype: Common.Order_type.t
+      ; price: string
+      ; price2: string
+      ; leverage: string
+      ; order: string
+      ; close: string }
     [@@deriving sexp, of_yojson]
   end
 
   (** Single order *)
   module Order = struct
     type t =
-      { refid : string option [@default None]
-      ; userref : int [@default 0]
-      ; status : string
-      ; reason : string option [@default None]
-      ; opentm : float
-      ; closetm : float [@default 0.0]
-      ; starttm : float [@default 0.0]
-      ; expiretm : float [@default 0.0]
-      ; descr : Order_descr.t
-      ; vol : string
-      ; vol_exec : string
-      ; cost : string
-      ; fee : string
-      ; price : string
-      ; stopprice : string [@default "0"]
-      ; limitprice : string [@default "0"]
-      ; misc : string
-      ; oflags : string
-      ; time_in_force : string [@default "gtc"]  (* gtc, gtd, ioc - added for GTD expiry orders *)
-      }
+      { refid: string option [@default None]
+      ; userref: int [@default 0]
+      ; status: string
+      ; reason: string option [@default None]
+      ; opentm: float
+      ; closetm: float [@default 0.0]
+      ; starttm: float [@default 0.0]
+      ; expiretm: float [@default 0.0]
+      ; descr: Order_descr.t
+      ; vol: string
+      ; vol_exec: string
+      ; cost: string
+      ; fee: string
+      ; price: string
+      ; stopprice: string [@default "0"]
+      ; limitprice: string [@default "0"]
+      ; misc: string
+      ; oflags: string
+      ; time_in_force: string [@default "gtc"]
+        (* gtc, gtd, ioc - added for GTD expiry orders *) }
     [@@deriving sexp, of_yojson]
   end
 
   (** Response is a map of order ID -> order *)
   module Orders_map = struct
-    type t =
-      { open_ : (string * Order.t) list [@key "open"]
-      }
-    [@@deriving sexp]
+    type t = {open_: (string * Order.t) list [@key "open"]} [@@deriving sexp]
 
     let of_yojson = function
-      | `Assoc [ ("open", `Assoc orders) ] ->
+      | `Assoc [("open", `Assoc orders)] ->
         let open_orders =
           List.map orders ~f:(fun (id, json) ->
             match Order.of_yojson json with
             | Result.Ok order -> (id, order)
             | Result.Error _ -> failwith "Failed to parse order")
         in
-        Result.Ok { open_ = open_orders }
+          Result.Ok {open_= open_orders}
       | _ -> Result.Error "Expected {\"open\": {...}}"
   end
 
@@ -103,10 +99,13 @@ module Open_orders = struct
     let name = "open-orders"
     let endpoint = "OpenOrders"
 
-    type request = { trades : bool [@default false] } [@@deriving sexp]
+    type request = {trades: bool [@default false]} [@@deriving sexp]
 
-    let request_to_params { trades } =
-      [ ("trades", match trades with true -> "true" | false -> "false") ]
+    let request_to_params {trades} =
+      [ ( "trades"
+        , match trades with
+          | true -> "true"
+          | false -> "false" ) ]
 
     type response = Orders_map.t [@@deriving sexp, of_yojson]
   end
@@ -118,10 +117,13 @@ module Open_orders = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let trades = bool_flag ~field_name:"trades" ~default:false
-          ~doc:"Include trade info in output"
+        let trades =
+          bool_flag
+            ~field_name:"trades"
+            ~default:false
+            ~doc:"Include trade info in output"
         in
-        { trades }]
+          {trades}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -134,55 +136,61 @@ module Add_order = struct
     let endpoint = "AddOrder"
 
     type request =
-      { pair : string
-      ; type_ : Common.Side.t
-      ; ordertype : Common.Order_type.t
-      ; volume : float
-      ; price : string option [@default None]
-      ; price2 : string option [@default None]
-      ; leverage : string option [@default None]
-      ; oflags : string option [@default None]
-      ; starttm : string option [@default None]
-      ; expiretm : string option [@default None]
-      ; timeinforce : string option [@default None]
-      }
+      { pair: string
+      ; type_: Common.Side.t
+      ; ordertype: Common.Order_type.t
+      ; volume: float
+      ; price: string option [@default None]
+      ; price2: string option [@default None]
+      ; leverage: string option [@default None]
+      ; oflags: string option [@default None]
+      ; starttm: string option [@default None]
+      ; expiretm: string option [@default None]
+      ; timeinforce: string option [@default None] }
     [@@deriving sexp]
 
     let request_to_params
-        { pair; type_; ordertype; volume; price; price2; leverage
-        ; oflags; starttm; expiretm; timeinforce } =
+          { pair
+          ; type_
+          ; ordertype
+          ; volume
+          ; price
+          ; price2
+          ; leverage
+          ; oflags
+          ; starttm
+          ; expiretm
+          ; timeinforce }
+      =
       let base =
         [ ("pair", pair)
         ; ("type", Common.Side.to_string type_)
         ; ("ordertype", Common.Order_type.to_string ordertype)
-        ; ("volume", Float.to_string volume)
-        ]
+        ; ("volume", Float.to_string volume) ]
       in
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      base
-      |> add_opt "price" price
-      |> add_opt "price2" price2
-      |> add_opt "leverage" leverage
-      |> add_opt "oflags" oflags
-      |> add_opt "starttm" starttm
-      |> add_opt "expiretm" expiretm
-      |> add_opt "timeinforce" timeinforce
+        base
+        |> add_opt "price" price
+        |> add_opt "price2" price2
+        |> add_opt "leverage" leverage
+        |> add_opt "oflags" oflags
+        |> add_opt "starttm" starttm
+        |> add_opt "expiretm" expiretm
+        |> add_opt "timeinforce" timeinforce
 
     (** Order description in response *)
     type order_descr_result =
-      { order : string [@default ""]
-      ; close : string [@default ""]
-      }
+      { order: string [@default ""]
+      ; close: string [@default ""] }
     [@@deriving sexp, of_yojson]
 
     (** Response contains order description and transaction IDs *)
     type order_result =
-      { descr : order_descr_result [@default { order = ""; close = "" }]
-      ; txid : string list [@default []]
-      }
+      { descr: order_descr_result [@default {order= ""; close= ""}]
+      ; txid: string list [@default []] }
     [@@deriving sexp, of_yojson]
 
     type response = order_result [@@deriving sexp, of_yojson]
@@ -197,27 +205,45 @@ module Add_order = struct
       [%map_open
         let pair = string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
         and type_ =
-          enum_flag ~field_name:"type_" ~type_name:"SIDE"
+          enum_flag
+            ~field_name:"type_"
+            ~type_name:"SIDE"
             ~of_string_opt:Common.Side.of_string_opt
             ~all:Common.Side.all
             ~to_string:Common.Side.to_string
             ~doc:"Order side (buy or sell)"
         and ordertype =
-          enum_flag ~field_name:"ordertype" ~type_name:"ORDER_TYPE"
+          enum_flag
+            ~field_name:"ordertype"
+            ~type_name:"ORDER_TYPE"
             ~of_string_opt:Common.Order_type.of_string_opt
             ~all:Common.Order_type.all
             ~to_string:Common.Order_type.to_string
             ~doc:"Order type (market, limit, etc.)"
         and volume = float_flag ~field_name:"volume" ~doc:"Order volume"
-        and price = string_flag_option ~field_name:"price" ~doc:"Limit price (for limit orders)"
-        and price2 = string_flag_option ~field_name:"price2" ~doc:"Secondary price (for stop orders)"
+        and price =
+          string_flag_option ~field_name:"price" ~doc:"Limit price (for limit orders)"
+        and price2 =
+          string_flag_option ~field_name:"price2" ~doc:"Secondary price (for stop orders)"
         and leverage = string_flag_option ~field_name:"leverage" ~doc:"Leverage amount"
-        and oflags = string_flag_option ~field_name:"oflags" ~doc:"Order flags (comma-separated)"
+        and oflags =
+          string_flag_option ~field_name:"oflags" ~doc:"Order flags (comma-separated)"
         and starttm = string_flag_option ~field_name:"starttm" ~doc:"Start time"
         and expiretm = string_flag_option ~field_name:"expiretm" ~doc:"Expiration time"
-        and timeinforce = string_flag_option ~field_name:"timeinforce" ~doc:"Time in force"
+        and timeinforce =
+          string_flag_option ~field_name:"timeinforce" ~doc:"Time in force"
         in
-        { pair; type_; ordertype; volume; price; price2; leverage; oflags; starttm; expiretm; timeinforce }]
+          { pair
+          ; type_
+          ; ordertype
+          ; volume
+          ; price
+          ; price2
+          ; leverage
+          ; oflags
+          ; starttm
+          ; expiretm
+          ; timeinforce }]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -229,15 +255,14 @@ module Cancel_order = struct
     let name = "cancel-order"
     let endpoint = "CancelOrder"
 
-    type request = { txid : string } [@@deriving sexp]
+    type request = {txid: string} [@@deriving sexp]
 
-    let request_to_params { txid } = [ ("txid", txid) ]
+    let request_to_params {txid} = [("txid", txid)]
 
     (** Response contains count of orders cancelled *)
     type cancel_result =
-      { count : int
-      ; pending : bool option [@default None]
-      }
+      { count: int
+      ; pending: bool option [@default None] }
     [@@deriving sexp, of_yojson]
 
     type response = cancel_result [@@deriving sexp, of_yojson]
@@ -250,9 +275,10 @@ module Cancel_order = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let txid = string_flag ~field_name:"txid" ~doc:"Transaction ID of order to cancel"
+        let txid =
+          string_flag ~field_name:"txid" ~doc:"Transaction ID of order to cancel"
         in
-        { txid }]
+          {txid}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -265,15 +291,16 @@ module Query_orders = struct
     let endpoint = "QueryOrders"
 
     type request =
-      { txids : string list
-      ; trades : bool [@default false]
-      }
+      { txids: string list
+      ; trades: bool [@default false] }
     [@@deriving sexp]
 
-    let request_to_params { txids; trades } =
+    let request_to_params {txids; trades} =
       [ ("txid", String.concat ~sep:"," txids)
-      ; ("trades", match trades with true -> "true" | false -> "false")
-      ]
+      ; ( "trades"
+        , match trades with
+          | true -> "true"
+          | false -> "false" ) ]
 
     (** Response is a map of order ID -> order (reuse Order from Open_orders) *)
     type orders_map = (string * Open_orders.Order.t) list [@@deriving sexp]
@@ -282,9 +309,9 @@ module Query_orders = struct
       | `Assoc pairs ->
         Result.Ok
           (List.map pairs ~f:(fun (id, json) ->
-            match Open_orders.Order.of_yojson json with
-            | Result.Ok order -> (id, order)
-            | Result.Error e -> failwith e))
+             match Open_orders.Order.of_yojson json with
+             | Result.Ok order -> (id, order)
+             | Result.Error e -> failwith e))
       | _ -> Result.Error "Expected object"
 
     type response = orders_map [@@deriving sexp, of_yojson]
@@ -297,12 +324,17 @@ module Query_orders = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let txids = string_list_flag ~field_name:"txids"
-          ~doc:"Transaction IDs to query (can specify multiple times)"
-        and trades = bool_flag ~field_name:"trades" ~default:false
-          ~doc:"Include trade info in output"
+        let txids =
+          string_list_flag
+            ~field_name:"txids"
+            ~doc:"Transaction IDs to query (can specify multiple times)"
+        and trades =
+          bool_flag
+            ~field_name:"trades"
+            ~default:false
+            ~doc:"Include trade info in output"
         in
-        { txids; trades }]
+          {txids; trades}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -315,17 +347,21 @@ module Closed_orders = struct
     let endpoint = "ClosedOrders"
 
     type request =
-      { trades : bool [@default false]
-      ; userref : int option [@default None]
-      ; start : int option [@default None]
-      ; end_ : int option [@default None]
-      ; ofs : int option [@default None]
-      ; closetime : string option [@default None]
-      }
+      { trades: bool [@default false]
+      ; userref: int option [@default None]
+      ; start: int option [@default None]
+      ; end_: int option [@default None]
+      ; ofs: int option [@default None]
+      ; closetime: string option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { trades; userref; start; end_; ofs; closetime } =
-      let base = [ ("trades", match trades with true -> "true" | false -> "false") ] in
+    let request_to_params {trades; userref; start; end_; ofs; closetime} =
+      let base =
+        [ ( "trades"
+          , match trades with
+            | true -> "true"
+            | false -> "false" ) ]
+      in
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, Int.to_string v)
@@ -334,40 +370,39 @@ module Closed_orders = struct
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      base
-      |> add_opt "userref" userref
-      |> add_opt "start" start
-      |> add_opt "end" end_
-      |> add_opt "ofs" ofs
-      |> add_opt_str "closetime" closetime
+        base
+        |> add_opt "userref" userref
+        |> add_opt "start" start
+        |> add_opt "end" end_
+        |> add_opt "ofs" ofs
+        |> add_opt_str "closetime" closetime
 
     (** Response has closed orders and count *)
     type closed_result =
-      { closed : (string * Open_orders.Order.t) list
-      ; count : int
-      }
+      { closed: (string * Open_orders.Order.t) list
+      ; count: int }
     [@@deriving sexp]
 
     let closed_result_of_yojson = function
       | `Assoc pairs ->
         let closed =
           List.find_map pairs ~f:(function
-            | ("closed", `Assoc orders) ->
+            | "closed", `Assoc orders ->
               Some
                 (List.map orders ~f:(fun (id, json) ->
-                  match Open_orders.Order.of_yojson json with
-                  | Result.Ok order -> (id, order)
-                  | Result.Error e -> failwith e))
+                   match Open_orders.Order.of_yojson json with
+                   | Result.Ok order -> (id, order)
+                   | Result.Error e -> failwith e))
             | _ -> None)
           |> Option.value ~default:[]
         in
         let count =
           List.find_map pairs ~f:(function
-            | ("count", `Int n) -> Some n
+            | "count", `Int n -> Some n
             | _ -> None)
           |> Option.value ~default:0
         in
-        Result.Ok { closed; count }
+          Result.Ok {closed; count}
       | _ -> Result.Error "Expected object"
 
     type response = closed_result [@@deriving sexp, of_yojson]
@@ -380,20 +415,23 @@ module Closed_orders = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let trades = bool_flag ~field_name:"trades" ~default:false
-          ~doc:"Include trade info in output"
-        and userref = int_flag_option ~field_name:"userref"
-          ~doc:"Filter by user reference ID"
-        and start = int_flag_option ~field_name:"start"
-          ~doc:"Starting timestamp or order ID"
-        and end_ = int_flag_option ~field_name:"end_"
-          ~doc:"Ending timestamp or order ID"
-        and ofs = int_flag_option ~field_name:"ofs"
-          ~doc:"Result offset"
-        and closetime = string_flag_option ~field_name:"closetime"
-          ~doc:"Which time to use for filtering (open, close, both)"
+        let trades =
+          bool_flag
+            ~field_name:"trades"
+            ~default:false
+            ~doc:"Include trade info in output"
+        and userref =
+          int_flag_option ~field_name:"userref" ~doc:"Filter by user reference ID"
+        and start =
+          int_flag_option ~field_name:"start" ~doc:"Starting timestamp or order ID"
+        and end_ = int_flag_option ~field_name:"end_" ~doc:"Ending timestamp or order ID"
+        and ofs = int_flag_option ~field_name:"ofs" ~doc:"Result offset"
+        and closetime =
+          string_flag_option
+            ~field_name:"closetime"
+            ~doc:"Which time to use for filtering (open, close, both)"
         in
-        { trades; userref; start; end_; ofs; closetime }]
+          {trades; userref; start; end_; ofs; closetime}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -403,38 +441,44 @@ end
 module Trades_history = struct
   module Trade = struct
     type t =
-      { ordertxid : string
-      ; pair : string
-      ; time : float
-      ; type_ : string [@key "type"]
-      ; ordertype : string
-      ; price : string
-      ; cost : string
-      ; fee : string
-      ; vol : string
-      ; margin : string
-      ; misc : string
-      }
+      { ordertxid: string
+      ; pair: string
+      ; time: float
+      ; type_: string [@key "type"]
+      ; ordertype: string
+      ; price: string
+      ; cost: string
+      ; fee: string
+      ; vol: string
+      ; margin: string
+      ; misc: string }
     [@@deriving sexp]
 
     let of_yojson = function
       | `Assoc pairs ->
         let get key = List.Assoc.find pairs key ~equal:String.equal in
-        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
-        let get_float key = match get key with Some (`Float f) -> f | _ -> 0.0 in
-        Result.Ok
-          { ordertxid = get_str "ordertxid"
-          ; pair = get_str "pair"
-          ; time = get_float "time"
-          ; type_ = get_str "type"
-          ; ordertype = get_str "ordertype"
-          ; price = get_str "price"
-          ; cost = get_str "cost"
-          ; fee = get_str "fee"
-          ; vol = get_str "vol"
-          ; margin = get_str "margin"
-          ; misc = get_str "misc"
-          }
+        let get_str key =
+          match get key with
+          | Some (`String s) -> s
+          | _ -> ""
+        in
+        let get_float key =
+          match get key with
+          | Some (`Float f) -> f
+          | _ -> 0.0
+        in
+          Result.Ok
+            { ordertxid= get_str "ordertxid"
+            ; pair= get_str "pair"
+            ; time= get_float "time"
+            ; type_= get_str "type"
+            ; ordertype= get_str "ordertype"
+            ; price= get_str "price"
+            ; cost= get_str "cost"
+            ; fee= get_str "fee"
+            ; vol= get_str "vol"
+            ; margin= get_str "margin"
+            ; misc= get_str "misc" }
       | _ -> Result.Error "Expected trade object"
   end
 
@@ -443,16 +487,20 @@ module Trades_history = struct
     let endpoint = "TradesHistory"
 
     type request =
-      { type_ : string option [@default None]
-      ; trades : bool [@default false]
-      ; start : int option [@default None]
-      ; end_ : int option [@default None]
-      ; ofs : int option [@default None]
-      }
+      { type_: string option [@default None]
+      ; trades: bool [@default false]
+      ; start: int option [@default None]
+      ; end_: int option [@default None]
+      ; ofs: int option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { type_; trades; start; end_; ofs } =
-      let base = [ ("trades", match trades with true -> "true" | false -> "false") ] in
+    let request_to_params {type_; trades; start; end_; ofs} =
+      let base =
+        [ ( "trades"
+          , match trades with
+            | true -> "true"
+            | false -> "false" ) ]
+      in
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, Int.to_string v)
@@ -461,38 +509,37 @@ module Trades_history = struct
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      base
-      |> add_opt_str "type" type_
-      |> add_opt "start" start
-      |> add_opt "end" end_
-      |> add_opt "ofs" ofs
+        base
+        |> add_opt_str "type" type_
+        |> add_opt "start" start
+        |> add_opt "end" end_
+        |> add_opt "ofs" ofs
 
     type trades_result =
-      { trades : (string * Trade.t) list
-      ; count : int
-      }
+      { trades: (string * Trade.t) list
+      ; count: int }
     [@@deriving sexp]
 
     let trades_result_of_yojson = function
       | `Assoc pairs ->
         let trades =
           List.find_map pairs ~f:(function
-            | ("trades", `Assoc trade_list) ->
+            | "trades", `Assoc trade_list ->
               Some
                 (List.filter_map trade_list ~f:(fun (id, json) ->
-                  match Trade.of_yojson json with
-                  | Result.Ok trade -> Some (id, trade)
-                  | Result.Error _ -> None))
+                   match Trade.of_yojson json with
+                   | Result.Ok trade -> Some (id, trade)
+                   | Result.Error _ -> None))
             | _ -> None)
           |> Option.value ~default:[]
         in
         let count =
           List.find_map pairs ~f:(function
-            | ("count", `Int n) -> Some n
+            | "count", `Int n -> Some n
             | _ -> None)
           |> Option.value ~default:0
         in
-        Result.Ok { trades; count }
+          Result.Ok {trades; count}
       | _ -> Result.Error "Expected trades object"
 
     type response = trades_result [@@deriving sexp, of_yojson]
@@ -505,18 +552,16 @@ module Trades_history = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let type_ = string_flag_option ~field_name:"type"
-          ~doc:"Trade type filter (all, any, closed, no position)"
-        and trades = bool_flag ~field_name:"trades" ~default:false
-          ~doc:"Include related trade IDs"
-        and start = int_flag_option ~field_name:"start"
-          ~doc:"Starting timestamp"
-        and end_ = int_flag_option ~field_name:"end"
-          ~doc:"Ending timestamp"
-        and ofs = int_flag_option ~field_name:"ofs"
-          ~doc:"Result offset"
-        in
-        { type_; trades; start; end_; ofs }]
+        let type_ =
+          string_flag_option
+            ~field_name:"type"
+            ~doc:"Trade type filter (all, any, closed, no position)"
+        and trades =
+          bool_flag ~field_name:"trades" ~default:false ~doc:"Include related trade IDs"
+        and start = int_flag_option ~field_name:"start" ~doc:"Starting timestamp"
+        and end_ = int_flag_option ~field_name:"end" ~doc:"Ending timestamp"
+        and ofs = int_flag_option ~field_name:"ofs" ~doc:"Result offset" in
+          {type_; trades; start; end_; ofs}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -526,35 +571,48 @@ end
 module Asset_pairs = struct
   module Pair_info = struct
     type t =
-      { altname : string
-      ; wsname : string option [@default None]
-      ; base : string
-      ; quote : string
-      ; pair_decimals : int
-      ; lot_decimals : int
-      ; lot_multiplier : int
-      ; ordermin : string option [@default None]
-      ; status : string [@default "online"]
-      }
+      { altname: string
+      ; wsname: string option [@default None]
+      ; base: string
+      ; quote: string
+      ; pair_decimals: int
+      ; lot_decimals: int
+      ; lot_multiplier: int
+      ; ordermin: string option [@default None]
+      ; status: string [@default "online"] }
     [@@deriving sexp]
 
     let of_yojson = function
       | `Assoc pairs ->
         let get key = List.Assoc.find pairs key ~equal:String.equal in
-        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
-        let get_str_opt key = match get key with Some (`String s) -> Some s | _ -> None in
-        let get_int key = match get key with Some (`Int i) -> i | _ -> 0 in
-        Result.Ok
-          { altname = get_str "altname"
-          ; wsname = get_str_opt "wsname"
-          ; base = get_str "base"
-          ; quote = get_str "quote"
-          ; pair_decimals = get_int "pair_decimals"
-          ; lot_decimals = get_int "lot_decimals"
-          ; lot_multiplier = get_int "lot_multiplier"
-          ; ordermin = get_str_opt "ordermin"
-          ; status = (match get_str_opt "status" with Some s -> s | None -> "online")
-          }
+        let get_str key =
+          match get key with
+          | Some (`String s) -> s
+          | _ -> ""
+        in
+        let get_str_opt key =
+          match get key with
+          | Some (`String s) -> Some s
+          | _ -> None
+        in
+        let get_int key =
+          match get key with
+          | Some (`Int i) -> i
+          | _ -> 0
+        in
+          Result.Ok
+            { altname= get_str "altname"
+            ; wsname= get_str_opt "wsname"
+            ; base= get_str "base"
+            ; quote= get_str "quote"
+            ; pair_decimals= get_int "pair_decimals"
+            ; lot_decimals= get_int "lot_decimals"
+            ; lot_multiplier= get_int "lot_multiplier"
+            ; ordermin= get_str_opt "ordermin"
+            ; status=
+                (match get_str_opt "status" with
+                 | Some s -> s
+                 | None -> "online") }
       | _ -> Result.Error "Expected pair info object"
   end
 
@@ -563,19 +621,16 @@ module Asset_pairs = struct
     let endpoint = "AssetPairs"
 
     type request =
-      { pair : string option [@default None]
-      ; info : string option [@default None]  (* "info", "leverage", "fees", "margin" *)
-      }
+      { pair: string option [@default None]
+      ; info: string option [@default None] (* "info", "leverage", "fees", "margin" *) }
     [@@deriving sexp]
 
-    let request_to_params { pair; info } =
+    let request_to_params {pair; info} =
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      []
-      |> add_opt "pair" pair
-      |> add_opt "info" info
+        [] |> add_opt "pair" pair |> add_opt "info" info
 
     type response = (string * Pair_info.t) list [@@deriving sexp]
 
@@ -587,7 +642,7 @@ module Asset_pairs = struct
             | Result.Ok info -> Some (name, info)
             | Result.Error _ -> None)
         in
-        Result.Ok parsed
+          Result.Ok parsed
       | _ -> Result.Error "Expected asset pairs object"
   end
 
@@ -598,12 +653,16 @@ module Asset_pairs = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let pair = string_flag_option ~field_name:"pair"
-          ~doc:"Specific pair to query (comma-separated for multiple)"
-        and info = string_flag_option ~field_name:"info"
-          ~doc:"Info level (info, leverage, fees, margin)"
+        let pair =
+          string_flag_option
+            ~field_name:"pair"
+            ~doc:"Specific pair to query (comma-separated for multiple)"
+        and info =
+          string_flag_option
+            ~field_name:"info"
+            ~doc:"Info level (info, leverage, fees, margin)"
         in
-        { pair; info }]
+          {pair; info}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -616,18 +675,18 @@ end
 (** Get ticker information - GET /0/public/Ticker *)
 module Ticker = struct
   module Ticker_data = struct
-    (** Ticker data for a trading pair - arrays of [price, whole_lot_volume, lot_volume] *)
+    (** Ticker data for a trading pair - arrays of [price, whole_lot_volume, lot_volume]
+    *)
     type t =
-      { a : string list  (** Ask [price, whole_lot_volume, lot_volume] *)
-      ; b : string list  (** Bid [price, whole_lot_volume, lot_volume] *)
-      ; c : string list  (** Last trade closed [price, lot_volume] *)
-      ; v : string list  (** Volume [today, last 24 hours] *)
-      ; p : string list  (** Volume weighted average price [today, last 24 hours] *)
-      ; t : int list     (** Number of trades [today, last 24 hours] *)
-      ; l : string list  (** Low [today, last 24 hours] *)
-      ; h : string list  (** High [today, last 24 hours] *)
-      ; o : string       (** Today's opening price *)
-      }
+      { a: string list (** Ask [price, whole_lot_volume, lot_volume] *)
+      ; b: string list (** Bid [price, whole_lot_volume, lot_volume] *)
+      ; c: string list (** Last trade closed [price, lot_volume] *)
+      ; v: string list (** Volume [today, last 24 hours] *)
+      ; p: string list (** Volume weighted average price [today, last 24 hours] *)
+      ; t: int list (** Number of trades [today, last 24 hours] *)
+      ; l: string list (** Low [today, last 24 hours] *)
+      ; h: string list (** High [today, last 24 hours] *)
+      ; o: string (** Today's opening price *) }
     [@@deriving sexp]
 
     let of_yojson = function
@@ -635,33 +694,42 @@ module Ticker = struct
         let get_list key =
           List.Assoc.find pairs key ~equal:String.equal
           |> Option.bind ~f:(function
-            | `List lst -> Some (List.filter_map lst ~f:(function `String s -> Some s | _ -> None))
+            | `List lst ->
+              Some
+                (List.filter_map lst ~f:(function
+                   | `String s -> Some s
+                   | _ -> None))
             | _ -> None)
           |> Option.value ~default:[]
         in
         let get_int_list key =
           List.Assoc.find pairs key ~equal:String.equal
           |> Option.bind ~f:(function
-            | `List lst -> Some (List.filter_map lst ~f:(function `Int i -> Some i | _ -> None))
+            | `List lst ->
+              Some
+                (List.filter_map lst ~f:(function
+                   | `Int i -> Some i
+                   | _ -> None))
             | _ -> None)
           |> Option.value ~default:[]
         in
         let get_str key =
           List.Assoc.find pairs key ~equal:String.equal
-          |> Option.bind ~f:(function `String s -> Some s | _ -> None)
+          |> Option.bind ~f:(function
+            | `String s -> Some s
+            | _ -> None)
           |> Option.value ~default:""
         in
-        Result.Ok
-          { a = get_list "a"
-          ; b = get_list "b"
-          ; c = get_list "c"
-          ; v = get_list "v"
-          ; p = get_list "p"
-          ; t = get_int_list "t"
-          ; l = get_list "l"
-          ; h = get_list "h"
-          ; o = get_str "o"
-          }
+          Result.Ok
+            { a= get_list "a"
+            ; b= get_list "b"
+            ; c= get_list "c"
+            ; v= get_list "v"
+            ; p= get_list "p"
+            ; t= get_int_list "t"
+            ; l= get_list "l"
+            ; h= get_list "h"
+            ; o= get_str "o" }
       | _ -> Result.Error "Expected ticker data object"
   end
 
@@ -669,9 +737,9 @@ module Ticker = struct
     let name = "ticker"
     let endpoint = "Ticker"
 
-    type request = { pair : string } [@@deriving sexp]
+    type request = {pair: string} [@@deriving sexp]
 
-    let request_to_params { pair } = [ ("pair", pair) ]
+    let request_to_params {pair} = [("pair", pair)]
 
     type response = (string * Ticker_data.t) list [@@deriving sexp]
 
@@ -683,20 +751,25 @@ module Ticker = struct
             | Result.Ok data -> Some (name, data)
             | Result.Error _ -> None)
         in
-        Result.Ok parsed
+          Result.Ok parsed
       | _ -> Result.Error "Expected ticker object"
   end
 
   include T
-  include Rest.Make_public_with_params (T) (struct
-    let params =
-      let open Command.Let_syntax in
-      let open Fluxum.Cli_args in
-      [%map_open
-        let pair = string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
-        in
-        { pair }]
-  end)
+
+  include
+    Rest.Make_public_with_params
+      (T)
+      (struct
+        let params =
+          let open Command.Let_syntax in
+          let open Fluxum.Cli_args in
+          [%map_open
+            let pair =
+              string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
+            in
+              {pair}]
+      end)
 end
 
 (** Get order book depth - GET /0/public/Depth *)
@@ -706,28 +779,26 @@ module Depth = struct
     let endpoint = "Depth"
 
     type request =
-      { pair : string
-      ; count : int option [@default None]
-      }
+      { pair: string
+      ; count: int option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { pair; count } =
-      let base = [ ("pair", pair) ] in
-      match count with
-      | Some n -> base @ [ ("count", Int.to_string n) ]
-      | None -> base
+    let request_to_params {pair; count} =
+      let base = [("pair", pair)] in
+        match count with
+        | Some n -> base @ [("count", Int.to_string n)]
+        | None -> base
 
     (** Level is [price, volume, timestamp] *)
     type level = string * string * int [@@deriving sexp]
 
     let level_of_yojson = function
-      | `List [ `String price; `String vol; `Int ts ] -> Ok (price, vol, ts)
+      | `List [`String price; `String vol; `Int ts] -> Ok (price, vol, ts)
       | json -> Error (sprintf "Invalid level: %s" (Yojson.Safe.to_string json))
 
     type depth_data =
-      { asks : level list
-      ; bids : level list
-      }
+      { asks: level list
+      ; bids: level list }
     [@@deriving sexp]
 
     let depth_data_of_yojson = function
@@ -736,14 +807,15 @@ module Depth = struct
           List.Assoc.find pairs key ~equal:String.equal
           |> Option.bind ~f:(function
             | `List lst ->
-              Some (List.filter_map lst ~f:(fun json ->
-                match level_of_yojson json with
-                | Ok l -> Some l
-                | Error _ -> None))
+              Some
+                (List.filter_map lst ~f:(fun json ->
+                   match level_of_yojson json with
+                   | Ok l -> Some l
+                   | Error _ -> None))
             | _ -> None)
           |> Option.value ~default:[]
         in
-        Result.Ok { asks = get_levels "asks"; bids = get_levels "bids" }
+          Result.Ok {asks= get_levels "asks"; bids= get_levels "bids"}
       | _ -> Result.Error "Expected depth data object"
 
     type response = (string * depth_data) list [@@deriving sexp]
@@ -756,21 +828,26 @@ module Depth = struct
             | Result.Ok data -> Some (name, data)
             | Result.Error _ -> None)
         in
-        Result.Ok parsed
+          Result.Ok parsed
       | _ -> Result.Error "Expected depth object"
   end
 
   include T
-  include Rest.Make_public_with_params (T) (struct
-    let params =
-      let open Command.Let_syntax in
-      let open Fluxum.Cli_args in
-      [%map_open
-        let pair = string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
-        and count = int_flag_option ~field_name:"count" ~doc:"Number of levels (max 500)"
-        in
-        { pair; count }]
-  end)
+
+  include
+    Rest.Make_public_with_params
+      (T)
+      (struct
+        let params =
+          let open Command.Let_syntax in
+          let open Fluxum.Cli_args in
+          [%map_open
+            let pair = string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
+            and count =
+              int_flag_option ~field_name:"count" ~doc:"Number of levels (max 500)"
+            in
+              {pair; count}]
+      end)
 end
 
 (** Get recent trades - GET /0/public/Trades *)
@@ -780,48 +857,55 @@ module Recent_trades = struct
     let endpoint = "Trades"
 
     type request =
-      { pair : string
-      ; since : string option [@default None]
-      ; count : int option [@default None]
-      }
+      { pair: string
+      ; since: string option [@default None]
+      ; count: int option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { pair; since; count } =
-      let base = [ ("pair", pair) ] in
+    let request_to_params {pair; since; count} =
+      let base = [("pair", pair)] in
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      base
-      |> add_opt "since" since
-      |> add_opt "count" (Option.map count ~f:Int.to_string)
+        base
+        |> add_opt "since" since
+        |> add_opt "count" (Option.map count ~f:Int.to_string)
 
     (** Trade is [price, volume, time, side, type, misc, trade_id] *)
     type trade =
-      { price : string
-      ; volume : string
-      ; time : float
-      ; side : string      (** "b" for buy, "s" for sell *)
-      ; order_type : string  (** "m" for market, "l" for limit *)
-      ; misc : string
-      ; trade_id : int
-      }
+      { price: string
+      ; volume: string
+      ; time: float
+      ; side: string (** "b" for buy, "s" for sell *)
+      ; order_type: string (** "m" for market, "l" for limit *)
+      ; misc: string
+      ; trade_id: int }
     [@@deriving sexp]
 
     let trade_of_yojson = function
-      | `List [ `String price; `String volume; `Float time; `String side;
-                `String order_type; `String misc; `Int trade_id ] ->
-        Ok { price; volume; time; side; order_type; misc; trade_id }
-      | `List [ `String price; `String volume; `Float time; `String side;
-                `String order_type; `String misc ] ->
+      | `List
+          [ `String price
+          ; `String volume
+          ; `Float time
+          ; `String side
+          ; `String order_type
+          ; `String misc
+          ; `Int trade_id ] -> Ok {price; volume; time; side; order_type; misc; trade_id}
+      | `List
+          [ `String price
+          ; `String volume
+          ; `Float time
+          ; `String side
+          ; `String order_type
+          ; `String misc ] ->
         (* Older format without trade_id *)
-        Ok { price; volume; time; side; order_type; misc; trade_id = 0 }
+        Ok {price; volume; time; side; order_type; misc; trade_id= 0}
       | json -> Error (sprintf "Invalid trade: %s" (Yojson.Safe.to_string json))
 
     type trades_result =
-      { trades : trade list
-      ; last : string
-      }
+      { trades: trade list
+      ; last: string }
     [@@deriving sexp]
 
     let trades_result_of_yojson pair_name = function
@@ -830,19 +914,22 @@ module Recent_trades = struct
           List.Assoc.find pairs pair_name ~equal:String.equal
           |> Option.bind ~f:(function
             | `List lst ->
-              Some (List.filter_map lst ~f:(fun json ->
-                match trade_of_yojson json with
-                | Ok t -> Some t
-                | Error _ -> None))
+              Some
+                (List.filter_map lst ~f:(fun json ->
+                   match trade_of_yojson json with
+                   | Ok t -> Some t
+                   | Error _ -> None))
             | _ -> None)
           |> Option.value ~default:[]
         in
         let last =
           List.Assoc.find pairs "last" ~equal:String.equal
-          |> Option.bind ~f:(function `String s -> Some s | _ -> None)
+          |> Option.bind ~f:(function
+            | `String s -> Some s
+            | _ -> None)
           |> Option.value ~default:""
         in
-        Result.Ok { trades; last }
+          Result.Ok {trades; last}
       | _ -> Result.Error "Expected trades result object"
 
     type response = (string * trade list) list * string [@@deriving sexp]
@@ -851,7 +938,9 @@ module Recent_trades = struct
       | `Assoc pairs ->
         let last =
           List.Assoc.find pairs "last" ~equal:String.equal
-          |> Option.bind ~f:(function `String s -> Some s | _ -> None)
+          |> Option.bind ~f:(function
+            | `String s -> Some s
+            | _ -> None)
           |> Option.value ~default:""
         in
         let trades =
@@ -859,32 +948,39 @@ module Recent_trades = struct
             match String.equal name "last" with
             | true -> None
             | false ->
-              match json with
-              | `List lst ->
-                let parsed = List.filter_map lst ~f:(fun j ->
-                  match trade_of_yojson j with
-                  | Ok t -> Some t
-                  | Error _ -> None)
-                in
-                Some (name, parsed)
-              | _ -> None)
+              (match json with
+               | `List lst ->
+                 let parsed =
+                   List.filter_map lst ~f:(fun j ->
+                     match trade_of_yojson j with
+                     | Ok t -> Some t
+                     | Error _ -> None)
+                 in
+                   Some (name, parsed)
+               | _ -> None))
         in
-        Result.Ok (trades, last)
+          Result.Ok (trades, last)
       | _ -> Result.Error "Expected trades object"
   end
 
   include T
-  include Rest.Make_public_with_params (T) (struct
-    let params =
-      let open Command.Let_syntax in
-      let open Fluxum.Cli_args in
-      [%map_open
-        let pair = string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
-        and since = string_flag_option ~field_name:"since" ~doc:"Return trades since timestamp"
-        and count = int_flag_option ~field_name:"count" ~doc:"Number of trades to return"
-        in
-        { pair; since; count }]
-  end)
+
+  include
+    Rest.Make_public_with_params
+      (T)
+      (struct
+        let params =
+          let open Command.Let_syntax in
+          let open Fluxum.Cli_args in
+          [%map_open
+            let pair = string_flag ~field_name:"pair" ~doc:"Trading pair (e.g., XETHZUSD)"
+            and since =
+              string_flag_option ~field_name:"since" ~doc:"Return trades since timestamp"
+            and count =
+              int_flag_option ~field_name:"count" ~doc:"Number of trades to return"
+            in
+              {pair; since; count}]
+      end)
 end
 
 (** Cancel all orders - POST /0/private/CancelAll *)
@@ -897,10 +993,7 @@ module Cancel_all = struct
 
     let request_to_params () = []
 
-    type response =
-      { count : int
-      }
-    [@@deriving sexp, of_yojson]
+    type response = {count: int} [@@deriving sexp, of_yojson]
   end
 
   include T
@@ -912,10 +1005,14 @@ module Websocket_token = struct
   module T = struct
     let name = "websocket-token"
     let endpoint = "GetWebSocketsToken"
+
     type request = unit [@@deriving sexp]
+
     let request_to_params () = []
-    type response = { token : string } [@@deriving sexp, of_yojson]
+
+    type response = {token: string} [@@deriving sexp, of_yojson]
   end
+
   include T
   include Rest.Make_no_arg (T)
 end
@@ -928,27 +1025,37 @@ end
 module Deposit_methods = struct
   module Deposit_method = struct
     type t =
-      { method_ : string [@key "method"]
-      ; limit : string [@default ""]
-      ; fee : string [@default "0"]
-      ; address_setup_fee : string option [@default None] [@key "address-setup-fee"]
-      ; gen_address : bool [@default false] [@key "gen-address"]
-      }
+      { method_: string [@key "method"]
+      ; limit: string [@default ""]
+      ; fee: string [@default "0"]
+      ; address_setup_fee: string option [@default None] [@key "address-setup-fee"]
+      ; gen_address: bool [@default false] [@key "gen-address"] }
     [@@deriving sexp]
 
     let of_yojson = function
       | `Assoc pairs ->
         let get key = List.Assoc.find pairs key ~equal:String.equal in
-        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
-        let get_str_opt key = match get key with Some (`String s) -> Some s | _ -> None in
-        let get_bool key = match get key with Some (`Bool b) -> b | _ -> false in
-        Result.Ok
-          { method_ = get_str "method"
-          ; limit = get_str "limit"
-          ; fee = get_str "fee"
-          ; address_setup_fee = get_str_opt "address-setup-fee"
-          ; gen_address = get_bool "gen-address"
-          }
+        let get_str key =
+          match get key with
+          | Some (`String s) -> s
+          | _ -> ""
+        in
+        let get_str_opt key =
+          match get key with
+          | Some (`String s) -> Some s
+          | _ -> None
+        in
+        let get_bool key =
+          match get key with
+          | Some (`Bool b) -> b
+          | _ -> false
+        in
+          Result.Ok
+            { method_= get_str "method"
+            ; limit= get_str "limit"
+            ; fee= get_str "fee"
+            ; address_setup_fee= get_str_opt "address-setup-fee"
+            ; gen_address= get_bool "gen-address" }
       | _ -> Result.Error "Expected deposit method object"
   end
 
@@ -956,20 +1063,21 @@ module Deposit_methods = struct
     let name = "deposit-methods"
     let endpoint = "DepositMethods"
 
-    type request = { asset : string } [@@deriving sexp]
+    type request = {asset: string} [@@deriving sexp]
 
-    let request_to_params { asset } = [ ("asset", asset) ]
+    let request_to_params {asset} = [("asset", asset)]
 
     type response = Deposit_method.t list [@@deriving sexp]
 
     let response_of_yojson = function
       | `List lst ->
-        let parsed = List.filter_map lst ~f:(fun json ->
-          match Deposit_method.of_yojson json with
-          | Result.Ok m -> Some m
-          | Result.Error _ -> None)
+        let parsed =
+          List.filter_map lst ~f:(fun json ->
+            match Deposit_method.of_yojson json with
+            | Result.Ok m -> Some m
+            | Result.Error _ -> None)
         in
-        Result.Ok parsed
+          Result.Ok parsed
       | _ -> Result.Error "Expected deposit methods array"
   end
 
@@ -980,9 +1088,8 @@ module Deposit_methods = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let asset = string_flag ~field_name:"asset" ~doc:"Asset name (e.g., XBT, ETH)"
-        in
-        { asset }]
+        let asset = string_flag ~field_name:"asset" ~doc:"Asset name (e.g., XBT, ETH)" in
+          {asset}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -992,25 +1099,35 @@ end
 module Deposit_addresses = struct
   module Deposit_address = struct
     type t =
-      { address : string
-      ; expiretm : string [@default "0"]
-      ; new_ : bool [@default false] [@key "new"]
-      ; tag : string option [@default None]
-      }
+      { address: string
+      ; expiretm: string [@default "0"]
+      ; new_: bool [@default false] [@key "new"]
+      ; tag: string option [@default None] }
     [@@deriving sexp]
 
     let of_yojson = function
       | `Assoc pairs ->
         let get key = List.Assoc.find pairs key ~equal:String.equal in
-        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
-        let get_str_opt key = match get key with Some (`String s) -> Some s | _ -> None in
-        let get_bool key = match get key with Some (`Bool b) -> b | _ -> false in
-        Result.Ok
-          { address = get_str "address"
-          ; expiretm = get_str "expiretm"
-          ; new_ = get_bool "new"
-          ; tag = get_str_opt "tag"
-          }
+        let get_str key =
+          match get key with
+          | Some (`String s) -> s
+          | _ -> ""
+        in
+        let get_str_opt key =
+          match get key with
+          | Some (`String s) -> Some s
+          | _ -> None
+        in
+        let get_bool key =
+          match get key with
+          | Some (`Bool b) -> b
+          | _ -> false
+        in
+          Result.Ok
+            { address= get_str "address"
+            ; expiretm= get_str "expiretm"
+            ; new_= get_bool "new"
+            ; tag= get_str_opt "tag" }
       | _ -> Result.Error "Expected deposit address object"
   end
 
@@ -1019,28 +1136,28 @@ module Deposit_addresses = struct
     let endpoint = "DepositAddresses"
 
     type request =
-      { asset : string
-      ; method_ : string
-      ; new_ : bool [@default false]
-      }
+      { asset: string
+      ; method_: string
+      ; new_: bool [@default false] }
     [@@deriving sexp]
 
-    let request_to_params { asset; method_; new_ } =
-      let base = [ ("asset", asset); ("method", method_) ] in
-      match new_ with
-      | true -> ("new", "true") :: base
-      | false -> base
+    let request_to_params {asset; method_; new_} =
+      let base = [("asset", asset); ("method", method_)] in
+        match new_ with
+        | true -> ("new", "true") :: base
+        | false -> base
 
     type response = Deposit_address.t list [@@deriving sexp]
 
     let response_of_yojson = function
       | `List lst ->
-        let parsed = List.filter_map lst ~f:(fun json ->
-          match Deposit_address.of_yojson json with
-          | Result.Ok a -> Some a
-          | Result.Error _ -> None)
+        let parsed =
+          List.filter_map lst ~f:(fun json ->
+            match Deposit_address.of_yojson json with
+            | Result.Ok a -> Some a
+            | Result.Error _ -> None)
         in
-        Result.Ok parsed
+          Result.Ok parsed
       | _ -> Result.Error "Expected deposit addresses array"
   end
 
@@ -1053,9 +1170,10 @@ module Deposit_addresses = struct
       [%map_open
         let asset = string_flag ~field_name:"asset" ~doc:"Asset name (e.g., XBT, ETH)"
         and method_ = string_flag ~field_name:"method" ~doc:"Deposit method/network"
-        and new_ = bool_flag ~field_name:"new" ~default:false ~doc:"Generate new address"
+        and new_ =
+          bool_flag ~field_name:"new" ~default:false ~doc:"Generate new address"
         in
-        { asset; method_; new_ }]
+          {asset; method_; new_}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -1065,39 +1183,53 @@ end
 module Deposit_status = struct
   module Deposit_entry = struct
     type t =
-      { method_ : string [@key "method"]
-      ; aclass : string [@default "currency"]
-      ; asset : string
-      ; refid : string
-      ; txid : string [@default ""]
-      ; info : string [@default ""]
-      ; amount : string
-      ; fee : string [@default "0"]
-      ; time : float
-      ; status : string
-      ; status_prop : string option [@default None] [@key "status-prop"]
-      }
+      { method_: string [@key "method"]
+      ; aclass: string [@default "currency"]
+      ; asset: string
+      ; refid: string
+      ; txid: string [@default ""]
+      ; info: string [@default ""]
+      ; amount: string
+      ; fee: string [@default "0"]
+      ; time: float
+      ; status: string
+      ; status_prop: string option [@default None] [@key "status-prop"] }
     [@@deriving sexp]
 
     let of_yojson = function
       | `Assoc pairs ->
         let get key = List.Assoc.find pairs key ~equal:String.equal in
-        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
-        let get_str_opt key = match get key with Some (`String s) -> Some s | _ -> None in
-        let get_float key = match get key with Some (`Float f) -> f | Some (`Int i) -> Float.of_int i | _ -> 0.0 in
-        Result.Ok
-          { method_ = get_str "method"
-          ; aclass = (match get_str "aclass" with "" -> "currency" | s -> s)
-          ; asset = get_str "asset"
-          ; refid = get_str "refid"
-          ; txid = get_str "txid"
-          ; info = get_str "info"
-          ; amount = get_str "amount"
-          ; fee = get_str "fee"
-          ; time = get_float "time"
-          ; status = get_str "status"
-          ; status_prop = get_str_opt "status-prop"
-          }
+        let get_str key =
+          match get key with
+          | Some (`String s) -> s
+          | _ -> ""
+        in
+        let get_str_opt key =
+          match get key with
+          | Some (`String s) -> Some s
+          | _ -> None
+        in
+        let get_float key =
+          match get key with
+          | Some (`Float f) -> f
+          | Some (`Int i) -> Float.of_int i
+          | _ -> 0.0
+        in
+          Result.Ok
+            { method_= get_str "method"
+            ; aclass=
+                (match get_str "aclass" with
+                 | "" -> "currency"
+                 | s -> s)
+            ; asset= get_str "asset"
+            ; refid= get_str "refid"
+            ; txid= get_str "txid"
+            ; info= get_str "info"
+            ; amount= get_str "amount"
+            ; fee= get_str "fee"
+            ; time= get_float "time"
+            ; status= get_str "status"
+            ; status_prop= get_str_opt "status-prop" }
       | _ -> Result.Error "Expected deposit entry object"
   end
 
@@ -1106,30 +1238,28 @@ module Deposit_status = struct
     let endpoint = "DepositStatus"
 
     type request =
-      { asset : string option [@default None]
-      ; method_ : string option [@default None]
-      }
+      { asset: string option [@default None]
+      ; method_: string option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { asset; method_ } =
+    let request_to_params {asset; method_} =
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      []
-      |> add_opt "asset" asset
-      |> add_opt "method" method_
+        [] |> add_opt "asset" asset |> add_opt "method" method_
 
     type response = Deposit_entry.t list [@@deriving sexp]
 
     let response_of_yojson = function
       | `List lst ->
-        let parsed = List.filter_map lst ~f:(fun json ->
-          match Deposit_entry.of_yojson json with
-          | Result.Ok e -> Some e
-          | Result.Error _ -> None)
+        let parsed =
+          List.filter_map lst ~f:(fun json ->
+            match Deposit_entry.of_yojson json with
+            | Result.Ok e -> Some e
+            | Result.Error _ -> None)
         in
-        Result.Ok parsed
+          Result.Ok parsed
       | _ -> Result.Error "Expected deposit status array"
   end
 
@@ -1141,9 +1271,10 @@ module Deposit_status = struct
       let open Fluxum.Cli_args in
       [%map_open
         let asset = string_flag_option ~field_name:"asset" ~doc:"Filter by asset"
-        and method_ = string_flag_option ~field_name:"method" ~doc:"Filter by deposit method"
+        and method_ =
+          string_flag_option ~field_name:"method" ~doc:"Filter by deposit method"
         in
-        { asset; method_ }]
+          {asset; method_}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -1156,22 +1287,15 @@ module Withdraw = struct
     let endpoint = "Withdraw"
 
     type request =
-      { asset : string
-      ; key : string  (** Withdrawal key name from account settings *)
-      ; amount : string
-      }
+      { asset: string
+      ; key: string (** Withdrawal key name from account settings *)
+      ; amount: string }
     [@@deriving sexp]
 
-    let request_to_params { asset; key; amount } =
-      [ ("asset", asset)
-      ; ("key", key)
-      ; ("amount", amount)
-      ]
+    let request_to_params {asset; key; amount} =
+      [("asset", asset); ("key", key); ("amount", amount)]
 
-    type response =
-      { refid : string
-      }
-    [@@deriving sexp, of_yojson]
+    type response = {refid: string} [@@deriving sexp, of_yojson]
   end
 
   include T
@@ -1181,11 +1305,12 @@ module Withdraw = struct
       let open Command.Let_syntax in
       let open Fluxum.Cli_args in
       [%map_open
-        let asset = string_flag ~field_name:"asset" ~doc:"Asset to withdraw (e.g., XBT, ETH)"
-        and key = string_flag ~field_name:"key" ~doc:"Withdrawal key name from account settings"
-        and amount = string_flag ~field_name:"amount" ~doc:"Amount to withdraw"
-        in
-        { asset; key; amount }]
+        let asset =
+          string_flag ~field_name:"asset" ~doc:"Asset to withdraw (e.g., XBT, ETH)"
+        and key =
+          string_flag ~field_name:"key" ~doc:"Withdrawal key name from account settings"
+        and amount = string_flag ~field_name:"amount" ~doc:"Amount to withdraw" in
+          {asset; key; amount}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -1198,36 +1323,34 @@ module Withdraw_info = struct
     let endpoint = "WithdrawInfo"
 
     type request =
-      { asset : string
-      ; key : string
-      ; amount : string
-      }
+      { asset: string
+      ; key: string
+      ; amount: string }
     [@@deriving sexp]
 
-    let request_to_params { asset; key; amount } =
-      [ ("asset", asset)
-      ; ("key", key)
-      ; ("amount", amount)
-      ]
+    let request_to_params {asset; key; amount} =
+      [("asset", asset); ("key", key); ("amount", amount)]
 
     type response =
-      { method_ : string [@key "method"]
-      ; limit : string
-      ; amount : string
-      ; fee : string
-      }
+      { method_: string [@key "method"]
+      ; limit: string
+      ; amount: string
+      ; fee: string }
     [@@deriving sexp]
 
     let response_of_yojson = function
       | `Assoc pairs ->
         let get key = List.Assoc.find pairs key ~equal:String.equal in
-        let get_str key = match get key with Some (`String s) -> s | _ -> "" in
-        Result.Ok
-          { method_ = get_str "method"
-          ; limit = get_str "limit"
-          ; amount = get_str "amount"
-          ; fee = get_str "fee"
-          }
+        let get_str key =
+          match get key with
+          | Some (`String s) -> s
+          | _ -> ""
+        in
+          Result.Ok
+            { method_= get_str "method"
+            ; limit= get_str "limit"
+            ; amount= get_str "amount"
+            ; fee= get_str "fee" }
       | _ -> Result.Error "Expected withdraw info object"
   end
 
@@ -1240,9 +1363,8 @@ module Withdraw_info = struct
       [%map_open
         let asset = string_flag ~field_name:"asset" ~doc:"Asset to withdraw"
         and key = string_flag ~field_name:"key" ~doc:"Withdrawal key name"
-        and amount = string_flag ~field_name:"amount" ~doc:"Amount to withdraw"
-        in
-        { asset; key; amount }]
+        and amount = string_flag ~field_name:"amount" ~doc:"Amount to withdraw" in
+          {asset; key; amount}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -1252,41 +1374,55 @@ end
 module Withdraw_status = struct
   module Withdrawal_entry = struct
     type t =
-      { method_ : string [@key "method"]
-      ; aclass : string [@default "currency"]
-      ; asset : string
-      ; refid : string
-      ; txid : string [@default ""]
-      ; info : string [@default ""]
-      ; amount : string
-      ; fee : string [@default "0"]
-      ; time : float
-      ; status : string
-      ; status_prop : string option [@default None] [@key "status-prop"]
-      ; key : string [@default ""]
-      }
+      { method_: string [@key "method"]
+      ; aclass: string [@default "currency"]
+      ; asset: string
+      ; refid: string
+      ; txid: string [@default ""]
+      ; info: string [@default ""]
+      ; amount: string
+      ; fee: string [@default "0"]
+      ; time: float
+      ; status: string
+      ; status_prop: string option [@default None] [@key "status-prop"]
+      ; key: string [@default ""] }
     [@@deriving sexp]
 
     let of_yojson = function
       | `Assoc pairs ->
         let get key = List.Assoc.find pairs key ~equal:String.equal in
-        let get_str k = match get k with Some (`String s) -> s | _ -> "" in
-        let get_str_opt k = match get k with Some (`String s) -> Some s | _ -> None in
-        let get_float k = match get k with Some (`Float f) -> f | Some (`Int i) -> Float.of_int i | _ -> 0.0 in
-        Result.Ok
-          { method_ = get_str "method"
-          ; aclass = (match get_str "aclass" with "" -> "currency" | s -> s)
-          ; asset = get_str "asset"
-          ; refid = get_str "refid"
-          ; txid = get_str "txid"
-          ; info = get_str "info"
-          ; amount = get_str "amount"
-          ; fee = get_str "fee"
-          ; time = get_float "time"
-          ; status = get_str "status"
-          ; status_prop = get_str_opt "status-prop"
-          ; key = get_str "key"
-          }
+        let get_str k =
+          match get k with
+          | Some (`String s) -> s
+          | _ -> ""
+        in
+        let get_str_opt k =
+          match get k with
+          | Some (`String s) -> Some s
+          | _ -> None
+        in
+        let get_float k =
+          match get k with
+          | Some (`Float f) -> f
+          | Some (`Int i) -> Float.of_int i
+          | _ -> 0.0
+        in
+          Result.Ok
+            { method_= get_str "method"
+            ; aclass=
+                (match get_str "aclass" with
+                 | "" -> "currency"
+                 | s -> s)
+            ; asset= get_str "asset"
+            ; refid= get_str "refid"
+            ; txid= get_str "txid"
+            ; info= get_str "info"
+            ; amount= get_str "amount"
+            ; fee= get_str "fee"
+            ; time= get_float "time"
+            ; status= get_str "status"
+            ; status_prop= get_str_opt "status-prop"
+            ; key= get_str "key" }
       | _ -> Result.Error "Expected withdrawal entry object"
   end
 
@@ -1295,30 +1431,28 @@ module Withdraw_status = struct
     let endpoint = "WithdrawStatus"
 
     type request =
-      { asset : string option [@default None]
-      ; method_ : string option [@default None]
-      }
+      { asset: string option [@default None]
+      ; method_: string option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { asset; method_ } =
+    let request_to_params {asset; method_} =
       let add_opt key = function
         | None -> Fun.id
         | Some v -> List.cons (key, v)
       in
-      []
-      |> add_opt "asset" asset
-      |> add_opt "method" method_
+        [] |> add_opt "asset" asset |> add_opt "method" method_
 
     type response = Withdrawal_entry.t list [@@deriving sexp]
 
     let response_of_yojson = function
       | `List lst ->
-        let parsed = List.filter_map lst ~f:(fun json ->
-          match Withdrawal_entry.of_yojson json with
-          | Result.Ok e -> Some e
-          | Result.Error _ -> None)
+        let parsed =
+          List.filter_map lst ~f:(fun json ->
+            match Withdrawal_entry.of_yojson json with
+            | Result.Ok e -> Some e
+            | Result.Error _ -> None)
         in
-        Result.Ok parsed
+          Result.Ok parsed
       | _ -> Result.Error "Expected withdrawal status array"
   end
 
@@ -1330,9 +1464,10 @@ module Withdraw_status = struct
       let open Fluxum.Cli_args in
       [%map_open
         let asset = string_flag_option ~field_name:"asset" ~doc:"Filter by asset"
-        and method_ = string_flag_option ~field_name:"method" ~doc:"Filter by withdrawal method"
+        and method_ =
+          string_flag_option ~field_name:"method" ~doc:"Filter by withdrawal method"
         in
-        { asset; method_ }]
+          {asset; method_}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -1342,26 +1477,32 @@ end
 module Withdraw_addresses = struct
   module Withdraw_address = struct
     type t =
-      { address : string
-      ; asset : string
-      ; method_ : string [@key "method"]
-      ; key : string
-      ; verified : bool [@default false]
-      }
+      { address: string
+      ; asset: string
+      ; method_: string [@key "method"]
+      ; key: string
+      ; verified: bool [@default false] }
     [@@deriving sexp]
 
     let of_yojson = function
       | `Assoc pairs ->
         let get k = List.Assoc.find pairs k ~equal:String.equal in
-        let get_str k = match get k with Some (`String s) -> s | _ -> "" in
-        let get_bool k = match get k with Some (`Bool b) -> b | _ -> false in
-        Result.Ok
-          { address = get_str "address"
-          ; asset = get_str "asset"
-          ; method_ = get_str "method"
-          ; key = get_str "key"
-          ; verified = get_bool "verified"
-          }
+        let get_str k =
+          match get k with
+          | Some (`String s) -> s
+          | _ -> ""
+        in
+        let get_bool k =
+          match get k with
+          | Some (`Bool b) -> b
+          | _ -> false
+        in
+          Result.Ok
+            { address= get_str "address"
+            ; asset= get_str "asset"
+            ; method_= get_str "method"
+            ; key= get_str "key"
+            ; verified= get_bool "verified" }
       | _ -> Result.Error "Expected withdraw address object"
   end
 
@@ -1370,32 +1511,29 @@ module Withdraw_addresses = struct
     let endpoint = "WithdrawAddresses"
 
     type request =
-      { asset : string option [@default None]
-      ; method_ : string option [@default None]
-      ; key : string option [@default None]
-      }
+      { asset: string option [@default None]
+      ; method_: string option [@default None]
+      ; key: string option [@default None] }
     [@@deriving sexp]
 
-    let request_to_params { asset; method_; key } =
+    let request_to_params {asset; method_; key} =
       let add_opt k = function
         | None -> Fun.id
         | Some v -> List.cons (k, v)
       in
-      []
-      |> add_opt "asset" asset
-      |> add_opt "method" method_
-      |> add_opt "key" key
+        [] |> add_opt "asset" asset |> add_opt "method" method_ |> add_opt "key" key
 
     type response = Withdraw_address.t list [@@deriving sexp]
 
     let response_of_yojson = function
       | `List lst ->
-        let parsed = List.filter_map lst ~f:(fun json ->
-          match Withdraw_address.of_yojson json with
-          | Result.Ok a -> Some a
-          | Result.Error _ -> None)
+        let parsed =
+          List.filter_map lst ~f:(fun json ->
+            match Withdraw_address.of_yojson json with
+            | Result.Ok a -> Some a
+            | Result.Error _ -> None)
         in
-        Result.Ok parsed
+          Result.Ok parsed
       | _ -> Result.Error "Expected withdraw addresses array"
   end
 
@@ -1408,9 +1546,8 @@ module Withdraw_addresses = struct
       [%map_open
         let asset = string_flag_option ~field_name:"asset" ~doc:"Filter by asset"
         and method_ = string_flag_option ~field_name:"method" ~doc:"Filter by method"
-        and key = string_flag_option ~field_name:"key" ~doc:"Filter by key name"
-        in
-        { asset; method_; key }]
+        and key = string_flag_option ~field_name:"key" ~doc:"Filter by key name" in
+          {asset; method_; key}]
   end
 
   include Rest.Make_with_params (T) (Params)
@@ -1420,82 +1557,103 @@ end
 
 (** Get account balances - returns raw JSON *)
 let balances (module Cfg : Cfg.S) () =
-  Balances.post (module Cfg) () >>| function
+  Balances.post (module Cfg) ()
+  >>| function
   | `Ok balance ->
-    let json =
-      `Assoc (List.map balance ~f:(fun (k, v) -> (k, `String v)))
-    in
-    `Ok json
-  | #Rest.Error.post as e -> (e :> [ `Ok of Yojson.Safe.t | Rest.Error.post ])
+    let json = `Assoc (List.map balance ~f:(fun (k, v) -> (k, `String v))) in
+      `Ok json
+  | #Rest.Error.post as e -> (e :> [`Ok of Yojson.Safe.t | Rest.Error.post])
 
 (** Get open orders *)
 let open_orders ?(trades = false) (module Cfg : Cfg.S) () =
-  Open_orders.post (module Cfg) { trades } >>| function
-  | `Ok { open_ } ->
+  Open_orders.post (module Cfg) {trades}
+  >>| function
+  | `Ok {open_} ->
     let orders_json =
       `Assoc
         (List.map open_ ~f:(fun (id, _order) ->
-          (* For backwards compat, return simplified version *)
-          (id, `String "order")))
+           (* For backwards compat, return simplified version *)
+           (id, `String "order")))
     in
-    `Ok (`Assoc [ ("open", orders_json) ])
-  | #Rest.Error.post as e -> (e :> [ `Ok of Yojson.Safe.t | Rest.Error.post ])
+      `Ok (`Assoc [("open", orders_json)])
+  | #Rest.Error.post as e -> (e :> [`Ok of Yojson.Safe.t | Rest.Error.post])
 
 (** Add order *)
-let add_order ?price ?price2 ?leverage ?oflags ?(starttm = "0") ?(expiretm = "0")
-    ?timeinforce (module Cfg : Cfg.S) ~pair ~type_ ~ordertype ~volume () =
-  let starttm = match String.equal starttm "0" with true -> None | false -> Some starttm in
-  let expiretm = match String.equal expiretm "0" with true -> None | false -> Some expiretm in
+let add_order
+      ?price
+      ?price2
+      ?leverage
+      ?oflags
+      ?(starttm = "0")
+      ?(expiretm = "0")
+      ?timeinforce
+      (module Cfg : Cfg.S)
+      ~pair
+      ~type_
+      ~ordertype
+      ~volume
+      ()
+  =
+  let starttm =
+    match String.equal starttm "0" with
+    | true -> None
+    | false -> Some starttm
+  in
+  let expiretm =
+    match String.equal expiretm "0" with
+    | true -> None
+    | false -> Some expiretm
+  in
   (* Parse string type_ and ordertype to enums *)
   let type_enum = Common.Side.of_string type_ in
   let ordertype_enum = Common.Order_type.of_string ordertype in
-  Add_order.post (module Cfg)
-    { pair
-    ; type_ = type_enum
-    ; ordertype = ordertype_enum
-    ; volume
-    ; price
-    ; price2
-    ; leverage
-    ; oflags
-    ; starttm
-    ; expiretm
-    ; timeinforce
-    }
-  >>| function
-  | `Ok result ->
-    `Ok
-      (`Assoc
-        [ ("txid", `List (List.map result.txid ~f:(fun s -> `String s)))
-        ; ("descr", `Assoc [ ("order", `String result.descr.order)
-                           ; ("close", `String result.descr.close) ])
-        ])
-  | #Rest.Error.post as e -> (e :> [ `Ok of Yojson.Safe.t | Rest.Error.post ])
+    Add_order.post
+      (module Cfg)
+      { pair
+      ; type_= type_enum
+      ; ordertype= ordertype_enum
+      ; volume
+      ; price
+      ; price2
+      ; leverage
+      ; oflags
+      ; starttm
+      ; expiretm
+      ; timeinforce }
+    >>| function
+    | `Ok result ->
+      `Ok
+        (`Assoc
+            [ ("txid", `List (List.map result.txid ~f:(fun s -> `String s)))
+            ; ( "descr"
+              , `Assoc
+                  [ ("order", `String result.descr.order)
+                  ; ("close", `String result.descr.close) ] ) ])
+    | #Rest.Error.post as e -> (e :> [`Ok of Yojson.Safe.t | Rest.Error.post])
 
 (** Cancel order *)
 let cancel_order (module Cfg : Cfg.S) ~txid () =
-  Cancel_order.post (module Cfg) { txid } >>| function
-  | `Ok result ->
-    `Ok (`Assoc [ ("count", `Int result.count) ])
-  | #Rest.Error.post as e -> (e :> [ `Ok of Yojson.Safe.t | Rest.Error.post ])
+  Cancel_order.post (module Cfg) {txid}
+  >>| function
+  | `Ok result -> `Ok (`Assoc [("count", `Int result.count)])
+  | #Rest.Error.post as e -> (e :> [`Ok of Yojson.Safe.t | Rest.Error.post])
 
 (** Cancel multiple orders *)
 let cancel_orders (module Cfg : Cfg.S) ~txids () =
   (* Kraken CancelOrder accepts comma-separated txids *)
   let txid = String.concat ~sep:"," txids in
-  cancel_order (module Cfg) ~txid ()
+    cancel_order (module Cfg) ~txid ()
 
 (** Query orders *)
 let query_orders ?(trades = false) (module Cfg : Cfg.S) ~txids () =
-  Query_orders.post (module Cfg) { txids; trades } >>| function
+  Query_orders.post (module Cfg) {txids; trades}
+  >>| function
   | `Ok orders ->
     let orders_json =
-      `Assoc
-        (List.map orders ~f:(fun (id, _order) ->
-          (id, `String "order")))
+      `Assoc (List.map orders ~f:(fun (id, _order) -> (id, `String "order")))
     in
-    `Ok orders_json
-  | #Rest.Error.post as e -> (e :> [ `Ok of Yojson.Safe.t | Rest.Error.post ])
+      `Ok orders_json
+  | #Rest.Error.post as e -> (e :> [`Ok of Yojson.Safe.t | Rest.Error.post])
 
 (** Get closed orders *)
 let closed_orders ?(trades = false) ?(userref = "") (module Cfg : Cfg.S) () =
@@ -1504,14 +1662,13 @@ let closed_orders ?(trades = false) ?(userref = "") (module Cfg : Cfg.S) () =
     | true -> None
     | false -> Some (Int.of_string userref)
   in
-  Closed_orders.post (module Cfg)
-    { trades; userref; start = None; end_ = None; ofs = None; closetime = None }
-  >>| function
-  | `Ok { closed; count } ->
-    let closed_json =
-      `Assoc
-        (List.map closed ~f:(fun (id, _order) ->
-          (id, `String "order")))
-    in
-    `Ok (`Assoc [ ("closed", closed_json); ("count", `Int count) ])
-  | #Rest.Error.post as e -> (e :> [ `Ok of Yojson.Safe.t | Rest.Error.post ])
+    Closed_orders.post
+      (module Cfg)
+      {trades; userref; start= None; end_= None; ofs= None; closetime= None}
+    >>| function
+    | `Ok {closed; count} ->
+      let closed_json =
+        `Assoc (List.map closed ~f:(fun (id, _order) -> (id, `String "order")))
+      in
+        `Ok (`Assoc [("closed", closed_json); ("count", `Int count)])
+    | #Rest.Error.post as e -> (e :> [`Ok of Yojson.Safe.t | Rest.Error.post])
