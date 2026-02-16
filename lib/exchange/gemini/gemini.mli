@@ -72,6 +72,8 @@ module V1 : sig
     (** The type of a reject reason. *)
     type t =
       [ `Invalid_quantity
+      | `Invalid_price
+      | `Exceeds_price_limits
       | `Insufficient_funds
       | `Self_cross_prevented
       | `Immediate_or_cancel_would_post

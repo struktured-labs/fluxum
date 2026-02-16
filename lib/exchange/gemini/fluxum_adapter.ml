@@ -411,6 +411,8 @@ module Adapter = struct
       let%bind kind = order_kind r.type_ r.price r.options in
       let reason_to_status = function
         | Some `Invalid_quantity -> Types.Order_status.Rejected "invalid_quantity"
+        | Some `Invalid_price -> Types.Order_status.Rejected "invalid_price"
+        | Some `Exceeds_price_limits -> Types.Order_status.Rejected "exceeds_price_limits"
         | Some `Insufficient_funds -> Types.Order_status.Rejected "insufficient_funds"
         | Some `Self_cross_prevented -> Types.Order_status.Rejected "self_cross_prevented"
         | Some `Immediate_or_cancel_would_post ->

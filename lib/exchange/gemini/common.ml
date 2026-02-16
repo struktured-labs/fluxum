@@ -543,6 +543,8 @@ module Reject_reason = struct
   module T = struct
     type t =
       [ `Invalid_quantity
+      | `Invalid_price
+      | `Exceeds_price_limits
       | `Insufficient_funds
       | `Self_cross_prevented
       | `Immediate_or_cancel_would_post
@@ -552,6 +554,8 @@ module Reject_reason = struct
 
     let to_string = function
       | `Invalid_quantity -> "InvalidQuantity"
+      | `Invalid_price -> "InvalidPrice"
+      | `Exceeds_price_limits -> "ExceedsPriceLimits"
       | `Insufficient_funds -> "InsufficientFunds"
       | `Self_cross_prevented -> "SelfCrossPrevented"
       | `Immediate_or_cancel_would_post -> "ImmediateOrCancelWouldPost"
