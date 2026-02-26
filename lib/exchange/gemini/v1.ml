@@ -621,7 +621,8 @@ module T = struct
       ; destination: string option [@default None] (** Destination address *)
       ; purpose: string option [@default None]
       ; feeAmount: Decimal_string.t option [@default None] (** Fee charged *)
-      ; feeCurrency: Currency.Enum_or_string.t option [@default None] }
+      ; feeCurrency: Currency.Enum_or_string.t option [@default None]
+      ; withdrawalId: string option [@default None] (** Gemini withdrawal ID, present on Withdrawal type *) }
     [@@deriving sexp, yojson]
 
     module T = struct

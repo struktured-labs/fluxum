@@ -165,7 +165,8 @@ let make_test_transfer
     ; destination
     ; purpose= None
     ; feeAmount= fee_amount
-    ; feeCurrency= None }
+    ; feeCurrency= None
+    ; withdrawalId= None }
 
 let test_deposit_completed () =
   printf "\n=== Deposit: Completed BTC Deposit ===\n";

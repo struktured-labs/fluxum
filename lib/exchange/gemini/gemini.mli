@@ -461,7 +461,8 @@ module V1 : sig
       ; destination: string option
       ; purpose: string option
       ; feeAmount: Decimal_string.t option
-      ; feeCurrency: Currency.Enum_or_string.t option }
+      ; feeCurrency: Currency.Enum_or_string.t option
+      ; withdrawalId: string option }
     [@@deriving sexp, yojson]
 
     type request =
