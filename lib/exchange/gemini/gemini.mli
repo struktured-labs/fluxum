@@ -426,6 +426,8 @@ module V1 : sig
     type response =
       { address: string
       ; amount: Decimal_string.t
+      ; currency: string option
+      ; fee: Decimal_string.t option
       ; withdrawalId: string
       ; message: string option
       ; txHash: string option }
@@ -442,7 +444,8 @@ module V1 : sig
   module Transfers : sig
     type transfer_type =
       [ `Deposit
-      | `Withdrawal ]
+      | `Withdrawal
+      | `Reward ]
     [@@deriving sexp]
 
     type transfer =

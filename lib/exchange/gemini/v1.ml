@@ -537,6 +537,8 @@ module T = struct
       type response =
         { address: string
         ; amount: Decimal_string.t
+        ; currency: string option [@default None] (** Currency withdrawn *)
+        ; fee: Decimal_string.t option [@default None] (** Withdrawal fee *)
         ; withdrawalId: string (** Gemini's withdrawal ID *)
         ; message: string option [@default None] (** Status message *)
         ; txHash: string option [@default None] (** Blockchain tx hash *) }
@@ -587,20 +589,23 @@ module T = struct
   module Transfers = struct
     type transfer_type =
       [ `Deposit
-      | `Withdrawal ]
+      | `Withdrawal
+      | `Reward ]
     [@@deriving sexp]
 
     let transfer_type_of_yojson json =
       match json with
       | `String "Deposit" -> Ok `Deposit
       | `String "Withdrawal" -> Ok `Withdrawal
+      | `String "Reward" -> Ok `Reward
       | _ -> Error "Unknown transfer type"
 
     let transfer_type_to_yojson t =
       `String
         (match t with
          | `Deposit -> "Deposit"
-         | `Withdrawal -> "Withdrawal")
+         | `Withdrawal -> "Withdrawal"
+         | `Reward -> "Reward")
 
     type transfer =
       { type_: transfer_type [@key "type"]

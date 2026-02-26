@@ -306,7 +306,7 @@ module Adapter = struct
             List.filter transfers ~f:(fun tr ->
               match tr.V1.Transfers.type_ with
               | `Deposit -> true
-              | `Withdrawal -> false)
+              | `Withdrawal | `Reward -> false)
           in
             Ok deposits
         | #Rest.Error.post as e -> Error e)
@@ -325,7 +325,7 @@ module Adapter = struct
             List.filter_map transfers ~f:(fun tr ->
               match tr.V1.Transfers.type_ with
               | `Withdrawal -> Some (Native.Withdrawal.Transfer tr)
-              | `Deposit -> None)
+              | `Deposit | `Reward -> None)
           in
             Ok withdrawals
         | #Rest.Error.post as e -> Error e)
