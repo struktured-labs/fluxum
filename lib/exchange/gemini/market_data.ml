@@ -440,7 +440,7 @@ module T = struct
         let event_id = update.event_id in
         let timestamp =
           Option.(
-            first_some update.timestamp update.timestamp
+            first_some update.timestamp update.timestampms
             |> value ~default:(Time_float.now ()))
         in
           Array.fold

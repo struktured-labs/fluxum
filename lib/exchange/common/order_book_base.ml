@@ -80,33 +80,54 @@ struct
     let update_time t = t.update_time
     let metadata t = t.metadata
 
+    (** Apply a single level update to bid and ask maps *)
+    let apply_level_to_maps ~bids ~asks ~side ~price ~size =
+      match Float.(equal zero size) with
+      | true ->
+        (match side with
+         | `Bid -> (Map.remove bids price, asks)
+         | `Ask -> (bids, Map.remove asks price))
+      | false ->
+        let data = Price_level.create ~price ~volume:size in
+        (match side with
+         | `Bid -> (Map.set bids ~key:price ~data, asks)
+         | `Ask -> (bids, Map.set asks ~key:price ~data))
+
     (** Set a price level (size=0 removes the level) *)
-    let set ?timestamp ?(metadata = Config.default_metadata ()) t ~side ~price ~size =
+    let set ?timestamp ?metadata t ~side ~price ~size =
       let update_time =
         match timestamp with
         | Some ts -> ts
         | None -> Core_unix.gettimeofday ()
       in
-      let epoch = t.epoch + 1 in
-        match Float.(equal zero size) with
-        | true ->
-          (* Remove price level *)
-          (match side with
-           | `Bid -> {t with bids= Map.remove t.bids price; epoch; update_time; metadata}
-           | `Ask -> {t with asks= Map.remove t.asks price; epoch; update_time; metadata})
-        | false ->
-          (* Add/update price level *)
-          let data = Price_level.create ~price ~volume:size in
-            (match side with
-             | `Bid ->
-               {t with bids= Map.set t.bids ~key:price ~data; epoch; update_time; metadata}
-             | `Ask ->
-               {t with asks= Map.set t.asks ~key:price ~data; epoch; update_time; metadata})
+      let metadata = match metadata with
+        | Some m -> m
+        | None -> Config.default_metadata ()
+      in
+      let bids, asks = apply_level_to_maps ~bids:t.bids ~asks:t.asks ~side ~price ~size in
+      { t with bids; asks; epoch = t.epoch + 1; update_time; metadata }
 
-    (** Set multiple levels at once (more efficient) *)
+    (** Set multiple levels at once.
+
+        More efficient than repeated [set] calls: computes timestamp and metadata
+        once, applies all level updates to the maps, then constructs a single
+        new record. Avoids N-1 intermediate record copies and N-1 redundant
+        [gettimeofday] syscalls. *)
     let set_many ?timestamp ?metadata t levels =
-      List.fold levels ~init:t ~f:(fun acc (side, price, size) ->
-        set ?timestamp ?metadata acc ~side ~price ~size)
+      let update_time =
+        match timestamp with
+        | Some ts -> ts
+        | None -> Core_unix.gettimeofday ()
+      in
+      let metadata = match metadata with
+        | Some m -> m
+        | None -> Config.default_metadata ()
+      in
+      let bids, asks =
+        List.fold levels ~init:(t.bids, t.asks) ~f:(fun (bids, asks) (side, price, size) ->
+          apply_level_to_maps ~bids ~asks ~side ~price ~size)
+      in
+      { t with bids; asks; epoch = t.epoch + List.length levels; update_time; metadata }
 
     (** Get best bid (highest bid price) *)
     let best_bid t =
@@ -177,45 +198,34 @@ struct
     (** Get asks as association list (price, level) *)
     let asks_alist t = Map.to_alist t.asks
 
-    (** Calculate VWAP for buying (consuming asks) *)
-    let vwap_buy t ~volume =
-      let rec accumulate remaining acc_cost levels =
-        match levels with
-        | [] ->
-          (match Float.(remaining > 0.) with
-           | true -> None (* Insufficient liquidity *)
-           | false -> Some (acc_cost /. volume))
-        | level :: rest ->
-          (match Float.(remaining <= level.Price_level.volume) with
-           | true ->
-             let cost = remaining *. level.price in
-               Some ((acc_cost +. cost) /. volume)
-           | false ->
-             let cost = level.volume *. level.price in
-               accumulate (remaining -. level.volume) (acc_cost +. cost) rest)
-      in
-      let levels = best_n_asks t ~n:100 () in
-        accumulate volume 0. levels
-
-    (** Calculate VWAP for selling (consuming bids) *)
-    let vwap_sell t ~volume =
-      let rec accumulate remaining acc_cost levels =
-        match levels with
-        | [] ->
+    (** Accumulate cost across a sequence of price levels until target volume is met *)
+    let vwap_accumulate ~volume seq =
+      let rec go remaining acc_cost seq =
+        match Sequence.next seq with
+        | None ->
           (match Float.(remaining > 0.) with
            | true -> None
            | false -> Some (acc_cost /. volume))
-        | level :: rest ->
+        | Some ((_key, level), rest) ->
           (match Float.(remaining <= level.Price_level.volume) with
            | true ->
              let cost = remaining *. level.price in
-               Some ((acc_cost +. cost) /. volume)
+             Some ((acc_cost +. cost) /. volume)
            | false ->
              let cost = level.volume *. level.price in
-               accumulate (remaining -. level.volume) (acc_cost +. cost) rest)
+             go (remaining -. level.volume) (acc_cost +. cost) rest)
       in
-      let levels = best_n_bids t ~n:100 () in
-        accumulate volume 0. levels
+      go volume 0. seq
+
+    (** Calculate VWAP for buying (consuming asks).
+        Operates directly on the map sequence - no intermediate list allocation. *)
+    let vwap_buy t ~volume =
+      Map.to_sequence t.asks |> vwap_accumulate ~volume
+
+    (** Calculate VWAP for selling (consuming bids).
+        Operates directly on the map sequence - no intermediate list allocation. *)
+    let vwap_sell t ~volume =
+      Map.to_sequence t.bids |> vwap_accumulate ~volume
 
     (** Get total volume up to N levels deep *)
     let total_volume_n t ~side ~n =
