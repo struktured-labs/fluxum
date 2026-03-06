@@ -291,6 +291,7 @@ module Currency = struct
       | `Sand
       | `Shib
       | `Sky
+      | `Sui
       | `Storj
       | `Sushi
       | `Ton
@@ -421,6 +422,7 @@ module Symbol = struct
       | `Sklusd
       | `Skyusd
       | `Solusd
+      | `Suiusd
       | `Storjusd
       | `Sushiusd
       | `Tonusd
