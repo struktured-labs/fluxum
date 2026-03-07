@@ -46,16 +46,16 @@ let connect (module Cfg : Cfg.S) ~(symbol : Symbol.t) () : (t, string) Result.t 
                  | false ->
                    Log.Global.info "Gemini: Receive loop ending (inactive)";
                    Pipe.close t.message_writer;
-                   return ()
+                   Websocket_curl.close ws
                  | true ->
                    let%bind msg_opt = Websocket_curl.receive ws in
                      (match msg_opt with
                       | None ->
-                        (* Connection closed *)
+                        (* Connection closed — clean up curl handle to prevent leak *)
                         Log.Global.info "Gemini: Connection closed by server";
                         t.active <- false;
                         Pipe.close t.message_writer;
-                        return ()
+                        Websocket_curl.close ws
                       | Some payload ->
                         receive_count := !receive_count + 1;
                         (match !receive_count mod 50 = 0 with

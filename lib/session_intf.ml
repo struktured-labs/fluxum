@@ -31,6 +31,7 @@ module Auto_restart = struct
       Log.Global.info "auto_restart_pipe[%s]: connected, relaying" name;
       Pipe.transfer source_pipe writer ~f:Fn.id
       >>= fun () ->
+      Pipe.close_read source_pipe;
       Log.Global.info "auto_restart_pipe[%s]: EOF detected, restarting in 1s" name;
       after (Time_float_unix.Span.of_sec 1.0) >>= fun () -> restart_loop ()
     in

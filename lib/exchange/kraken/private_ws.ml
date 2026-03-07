@@ -42,7 +42,7 @@ let connect ~cfg:(module Cfg : Cfg.S) ()
                 | None ->
                   Log.Global.info "Kraken Private WS: connection closed";
                   Pipe.close writer;
-                  return ()
+                  Websocket_curl.close ws
                 | Some payload ->
                   (match Ws.parse_message payload with
                    | Ok (Ws.Private msg) -> Pipe.write writer msg >>= receive_loop

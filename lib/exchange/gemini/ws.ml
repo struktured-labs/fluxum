@@ -76,7 +76,7 @@ module type CHANNEL_CLIENT_INTERNAL = sig
     (module Cfg.S) ->
     ?query:Sexp.t list ->
     ?uri_args:uri_args ->
-    ?nonce:int Inf_pipe.Reader.t ->
+    ?nonce:Nonce.reader ->
     unit ->
     [ `Ok of response | Error.t ] Pipe.Reader.t Deferred.t
 end
@@ -180,7 +180,7 @@ module Impl (Channel : CHANNEL) :
             Log.Global.error "[WS_%s] Connection closed (buffer: %d bytes)"
               Channel.name (Buffer.length buf);
             Pipe.close w;
-            return ()
+            Websocket_curl.close ws
           | Some s ->
             (* Skip empty frames (keepalive/heartbeat) *)
             (match String.length s with

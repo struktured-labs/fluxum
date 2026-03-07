@@ -45,15 +45,15 @@ let connect ~(subscriptions : subscription list) ?(url = Ws.Endpoint.public_url)
              match t.active with
              | false ->
                Pipe.close t.message_writer;
-               return ()
+               Websocket_curl.close ws
              | true ->
                let%bind msg_opt = Websocket_curl.receive ws in
                  (match msg_opt with
                   | None ->
-                    (* Connection closed *)
+                    (* Connection closed — clean up curl handle to prevent leak *)
                     t.active <- false;
                     Pipe.close t.message_writer;
-                    return ()
+                    Websocket_curl.close ws
                   | Some payload ->
                     let%bind () = Pipe.write t.message_writer payload in
                       receive_loop ())
