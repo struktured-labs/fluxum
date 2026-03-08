@@ -200,42 +200,29 @@ module Currency = struct
       | `Zec
       | `Bch
       | `Ltc
-      | `Luna
       | `Xrp
       | `Xtz
-      | `Ust
       | `Link
       | `Aave
       | `Crv
       | `Inj
-      | `Matic
       | `Ftm
       | `Cube
       | `Chz
       | `Dot
-      | `Rare
       | `Qnt
       | `Skl
       | `Sol
       | `Fet
       | `Imx
-      | `Index
       | `Rndr
       | `Gala
-      | `Rbn
-      | `Mpl
-      | `Metis
       | `Moodeng
-      | `Lqty
-      | `Jam
-      | `Fida
-      | `Zbc
       | `Ali
       | `Eul
       | `Iotx
       | `Avax
       | `Pepe
-      | `Ern
       | `Amp
       | `Ctx
       | `Pnut
@@ -256,11 +243,13 @@ module Currency = struct
       | `Comp
       | `Dai
       | `Drift
+      | `Efil
       | `Ens
       | `Eur
       | `Fartcoin
       | `Fil
       | `Floki
+      | `Gbp
       | `Gmt
       | `Goat
       | `Grt
@@ -289,12 +278,14 @@ module Currency = struct
       | `Rlusd
       | `Samo
       | `Sand
+      | `Sgd
       | `Shib
       | `Sky
       | `Sui
       | `Storj
       | `Sushi
       | `Ton
+      | `Trx
       | `Uma
       | `Uni
       | `Usd1
@@ -309,7 +300,10 @@ module Currency = struct
     [@@deriving sexp, enumerate, equal, compare]
   end
 
-  module Enum = Json.Enum (T)
+  module Enum = Json.Enum_with_overrides (struct
+    include T
+    let overrides = [`Twoz, "2z"]
+  end)
   include Enum
   include (Json.Make (Enum) : Json.S with type t := t)
 end
@@ -326,21 +320,31 @@ module Symbol = struct
           `Btcusd
       | `Ethusd
       | `Ethbtc
-      | (* ZEC cross pairs *)
+      | (* ZEC *)
           `Zecusd
-      | `Zecbtc
-      | `Zeceth
-      | `Zecbch
-      | `Zecltc
       | (* LTC cross pairs *)
           `Ltcusd
       | `Ltcbtc
       | `Ltceth
-      | `Ltcbch
-      | (* BCH cross pairs *)
+      | (* BCH *)
           `Bchusd
-      | `Bchbtc
-      | `Bcheth
+      | (* Cross pairs *)
+          `Btceur
+      | `Btcgbp
+      | `Btcsgd
+      | `Dogebtc
+      | `Dogeeth
+      | `Efilfil
+      | `Etheur
+      | `Ethgbp
+      | `Ethsgd
+      | `Gusdgbp
+      | `Gusdsgd
+      | `Jitosolsol
+      | `Linkbtc
+      | `Linketh
+      | `Solbtc
+      | `Soleth
       | (* Alt USD pairs *)
           `Twozusd
       | `Aaveusd
@@ -369,7 +373,7 @@ module Symbol = struct
       | `Driftusd
       | `Elonusd
       | `Ensusd
-      | `Ernusd
+      | `Eulusd
       | `Eurusd
       | `Fartcoinusd
       | `Fetusd
@@ -386,7 +390,6 @@ module Symbol = struct
       | `Imxusd
       | `Injusd
       | `Iotxusd
-      | `Jamusd
       | `Jitosolusd
       | `Jtousd
       | `Jupusd
@@ -396,10 +399,8 @@ module Symbol = struct
       | `Linksusd
       | `Lptusd
       | `Lrcusd
-      | `Lunausd
       | `Manausd
       | `Maskusd
-      | `Maticusd
       | `Mewusd
       | `Monusd
       | `Moodengusd
@@ -413,7 +414,6 @@ module Symbol = struct
       | `Pumpusd
       | `Pythusd
       | `Qntusd
-      | `Rareusd
       | `Rlusdusd
       | `Rndrusd
       | `Samousd
@@ -427,6 +427,7 @@ module Symbol = struct
       | `Sushiusd
       | `Tonusd
       | `Trumpusd
+      | `Trxusd
       | `Umausd
       | `Uniusd
       | `Usd1usd
@@ -439,14 +440,16 @@ module Symbol = struct
       | `Wlfiusd
       | `Xrpusd
       | `Xtzusd
-      | `Yfiusd
-      | `Zbcusd ]
+      | `Yfiusd ]
     [@@deriving sexp, enumerate, equal, compare]
   end
 
   include T
   module Map = Map.Make (T)
-  module Enum = Json.Enum (T)
+  module Enum = Json.Enum_with_overrides (struct
+    include T
+    let overrides = [`Twozusd, "2zusd"]
+  end)
   include Enum
 
   let currency_pair_of_string s =
