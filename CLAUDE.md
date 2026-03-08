@@ -119,6 +119,8 @@ module F = Fluxum.Make(E)(E.Builder)
 
 7. **Native OCaml Where Possible**: Avoid external dependencies when stdlib/Core suffices
 
+8. **Never Remove Stale Symbols or Currencies**: Delisted trading pairs and currencies must be kept in enum types for backward compatibility — historical trades, ledger entries, and order records reference them. Only add new entries; never remove old ones.
+
 ### File Conventions
 
 - Files use `-open Core -open Async` (see dune flags)
