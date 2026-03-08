@@ -202,27 +202,40 @@ module Currency = struct
       | `Ltc
       | `Xrp
       | `Xtz
+      | `Ust
       | `Link
       | `Aave
       | `Crv
       | `Inj
+      | `Matic
       | `Ftm
       | `Cube
       | `Chz
       | `Dot
+      | `Rare
       | `Qnt
       | `Skl
       | `Sol
       | `Fet
       | `Imx
+      | `Index
       | `Rndr
       | `Gala
+      | `Rbn
+      | `Mpl
+      | `Metis
       | `Moodeng
+      | `Lqty
+      | `Jam
+      | `Fida
+      | `Zbc
       | `Ali
       | `Eul
       | `Iotx
       | `Avax
+      | `Luna
       | `Pepe
+      | `Ern
       | `Amp
       | `Ctx
       | `Pnut
@@ -320,14 +333,21 @@ module Symbol = struct
           `Btcusd
       | `Ethusd
       | `Ethbtc
-      | (* ZEC *)
+      | (* ZEC cross pairs *)
           `Zecusd
+      | `Zecbtc
+      | `Zeceth
+      | `Zecbch
+      | `Zecltc
       | (* LTC cross pairs *)
           `Ltcusd
       | `Ltcbtc
       | `Ltceth
-      | (* BCH *)
+      | `Ltcbch
+      | (* BCH cross pairs *)
           `Bchusd
+      | `Bchbtc
+      | `Bcheth
       | (* Cross pairs *)
           `Btceur
       | `Btcgbp
@@ -373,6 +393,7 @@ module Symbol = struct
       | `Driftusd
       | `Elonusd
       | `Ensusd
+      | `Ernusd
       | `Eulusd
       | `Eurusd
       | `Fartcoinusd
@@ -390,6 +411,7 @@ module Symbol = struct
       | `Imxusd
       | `Injusd
       | `Iotxusd
+      | `Jamusd
       | `Jitosolusd
       | `Jtousd
       | `Jupusd
@@ -399,8 +421,10 @@ module Symbol = struct
       | `Linksusd
       | `Lptusd
       | `Lrcusd
+      | `Lunausd
       | `Manausd
       | `Maskusd
+      | `Maticusd
       | `Mewusd
       | `Monusd
       | `Moodengusd
@@ -414,6 +438,7 @@ module Symbol = struct
       | `Pumpusd
       | `Pythusd
       | `Qntusd
+      | `Rareusd
       | `Rlusdusd
       | `Rndrusd
       | `Samousd
@@ -440,7 +465,8 @@ module Symbol = struct
       | `Wlfiusd
       | `Xrpusd
       | `Xtzusd
-      | `Yfiusd ]
+      | `Yfiusd
+      | `Zbcusd ]
     [@@deriving sexp, enumerate, equal, compare]
   end
 
