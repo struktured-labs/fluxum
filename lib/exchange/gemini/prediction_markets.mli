@@ -290,6 +290,74 @@ module Positions : sig
   val command : string * Command.t
 end
 
+(** {1 Volume Metrics} *)
+
+module Positions_volume : sig
+  type entry =
+    { symbol: string
+    ; outcome: Outcome.t
+    ; total_buy_quantity: Decimal_string.t
+    ; total_sell_quantity: Decimal_string.t
+    ; total_buy_volume: Decimal_string.t
+    ; total_sell_volume: Decimal_string.t
+    ; contract_metadata: Contract_metadata.t option }
+  [@@deriving sexp, of_yojson]
+
+  val post
+    :  (module Cfg.S)
+    -> Nonce.reader
+    -> unit
+    -> [`Ok of entry list | Rest.Error.post] Deferred.t
+
+  val command : string * Command.t
+end
+
+(** {1 Market Data for Prediction Instruments} *)
+
+module Trades : sig
+  type trade =
+    { timestamp: int64
+    ; timestampms: int64
+    ; tid: int64
+    ; price: Decimal_string.t
+    ; amount: Decimal_string.t
+    ; exchange: string
+    ; side: string
+    ; broken: bool }
+  [@@deriving sexp, of_yojson]
+
+  val get
+    :  (module Cfg.S)
+    -> instrument_symbol:string
+    -> ?limit:int
+    -> ?since:int64
+    -> unit
+    -> [`Ok of trade list | Rest.Error.get] Deferred.t
+
+  val command : string * Command.t
+end
+
+module Ticker : sig
+  type t =
+    { symbol: string
+    ; open_: Decimal_string.t
+    ; high: Decimal_string.t
+    ; low: Decimal_string.t
+    ; close: Decimal_string.t
+    ; changes: Decimal_string.t list
+    ; bid: Decimal_string.t
+    ; ask: Decimal_string.t }
+  [@@deriving sexp, of_yojson]
+
+  val get
+    :  (module Cfg.S)
+    -> instrument_symbol:string
+    -> unit
+    -> [`Ok of t | Rest.Error.get] Deferred.t
+
+  val command : string * Command.t
+end
+
 (** {1 Order Book for Prediction Contracts} *)
 
 module Book_snapshot : sig

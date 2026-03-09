@@ -865,6 +865,180 @@ module Positions = struct
   include Rest.Make_no_arg (T)
 end
 
+(** {1 Volume Metrics} *)
+
+module Positions_volume = struct
+  module T = struct
+    let name = "positions-volume"
+    let path = base_path @ ["positions"; "volume"]
+
+    type request = unit [@@deriving sexp, to_yojson]
+
+    type entry =
+      { symbol: string
+      ; outcome: Outcome.t
+      ; total_buy_quantity: Decimal_string.t [@key "totalBuyQuantity"] [@default "0"]
+      ; total_sell_quantity: Decimal_string.t [@key "totalSellQuantity"] [@default "0"]
+      ; total_buy_volume: Decimal_string.t [@key "totalBuyVolume"] [@default "0"]
+      ; total_sell_volume: Decimal_string.t [@key "totalSellVolume"] [@default "0"]
+      ; contract_metadata: Contract_metadata.t option
+            [@default None] [@key "contractMetadata"] }
+    [@@deriving sexp, of_yojson]
+
+    type response = entry list [@@deriving sexp, of_yojson]
+  end
+
+  include T
+  include Rest.Make_no_arg (T)
+
+  let command =
+    let open Command.Let_syntax in
+    ( "positions-volume"
+    , Command.async
+        ~summary:"Get prediction market volume metrics per position"
+        [%map_open
+          let config = Cfg.param in
+            fun () ->
+              let config = Cfg.or_default config in
+                Nonce.File.(pipe ~init:default_filename) ()
+                >>= fun nonce ->
+                post config nonce ()
+                >>= function
+                | `Ok entries ->
+                  List.iter entries ~f:(fun e ->
+                    printf "%s %s  buy_qty=%s sell_qty=%s  buy_vol=%s sell_vol=%s\n"
+                      e.symbol
+                      (Outcome.to_string e.outcome)
+                      e.total_buy_quantity
+                      e.total_sell_quantity
+                      e.total_buy_volume
+                      e.total_sell_volume);
+                  printf "(%d entries)\n" (List.length entries);
+                  Deferred.unit
+                | #Rest.Error.post as err ->
+                  failwiths ~here:[%here] "positions volume failed" err Rest.Error.sexp_of_post] )
+end
+
+(** {1 Market Data for Prediction Instruments} *)
+
+module Trades = struct
+  type trade =
+    { timestamp: int64 [@encoding `number]
+    ; timestampms: int64 [@encoding `number]
+    ; tid: int64 [@encoding `number]
+    ; price: Decimal_string.t
+    ; amount: Decimal_string.t
+    ; exchange: string [@default "gemini"]
+    ; side: string [@key "type"]
+    ; broken: bool [@default false] }
+  [@@deriving sexp, of_yojson]
+
+  type response = trade list [@@deriving sexp]
+
+  let response_of_yojson json =
+    match json with
+    | `List items ->
+      let trades =
+        List.filter_map items ~f:(fun item ->
+          match trade_of_yojson item with
+          | Ok t -> Some t
+          | Error e ->
+            Log.Global.debug "skipping trade parse error: %s" e;
+            None)
+      in
+        Ok trades
+    | _ -> Error "expected JSON array of trades"
+
+  let get (module Cfg : Cfg.S) ~instrument_symbol ?limit ?since () =
+    let query =
+      List.filter_opt
+        [ Option.map limit ~f:(fun n -> ("limit_trades", [Int.to_string n]))
+        ; Option.map since ~f:(fun ts -> ("since", [Int64.to_string ts])) ]
+    in
+    let path = sprintf "/v1/trades/%s" instrument_symbol in
+    let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path ~query () in
+      http_get uri
+      >>| function
+      | `Ok json -> parse_json_response json response_of_yojson
+      | #Rest.Error.get as e -> e
+
+  let command =
+    let open Command.Let_syntax in
+    ( "trades"
+    , Command.async
+        ~summary:"Get recent prediction market trades"
+        [%map_open
+          let env = cfg_param_public
+          and symbol =
+            flag "-symbol" (required string)
+              ~doc:"STRING instrument symbol (e.g., GEMI-BTC100K-YES)"
+          and limit =
+            flag "-limit" (optional int) ~doc:"INT max trades to return (default: 50)"
+          in
+            fun () ->
+              let config = public_config_of_env env in
+                get config ~instrument_symbol:symbol ?limit ()
+                >>= function
+                | `Ok trades ->
+                  List.iter trades ~f:(fun t ->
+                    printf "%Ld  %s  %s @ %s  qty=%s%s\n"
+                      t.timestampms
+                      t.side
+                      symbol
+                      t.price
+                      t.amount
+                      (match t.broken with true -> "  [BROKEN]" | false -> ""));
+                  printf "(%d trades)\n" (List.length trades);
+                  Deferred.unit
+                | #Rest.Error.get as err ->
+                  failwiths ~here:[%here] "trades failed" err Rest.Error.sexp_of_get] )
+end
+
+module Ticker = struct
+  type t =
+    { symbol: string
+    ; open_: Decimal_string.t [@key "open"]
+    ; high: Decimal_string.t
+    ; low: Decimal_string.t
+    ; close: Decimal_string.t
+    ; changes: Decimal_string.t list [@default []]
+    ; bid: Decimal_string.t
+    ; ask: Decimal_string.t }
+  [@@deriving sexp, of_yojson]
+
+  let get (module Cfg : Cfg.S) ~instrument_symbol () =
+    let path = sprintf "/v2/ticker/%s" instrument_symbol in
+    let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path () in
+      http_get uri
+      >>| function
+      | `Ok json -> parse_json_response json of_yojson
+      | #Rest.Error.get as e -> e
+
+  let command =
+    let open Command.Let_syntax in
+    ( "ticker"
+    , Command.async
+        ~summary:"Get prediction market ticker (24h summary)"
+        [%map_open
+          let env = cfg_param_public
+          and symbol =
+            flag "-symbol" (required string)
+              ~doc:"STRING instrument symbol (e.g., GEMI-BTC100K-YES)"
+          in
+            fun () ->
+              let config = public_config_of_env env in
+                get config ~instrument_symbol:symbol ()
+                >>= function
+                | `Ok t ->
+                  printf "=== %s Ticker ===\n" t.symbol;
+                  printf "  bid: %s  ask: %s  last: %s\n" t.bid t.ask t.close;
+                  printf "  open: %s  high: %s  low: %s\n" t.open_ t.high t.low;
+                  printf "  24h changes: %d data points\n" (List.length t.changes);
+                  Deferred.unit
+                | #Rest.Error.get as err ->
+                  failwiths ~here:[%here] "ticker failed" err Rest.Error.sexp_of_get] )
+end
+
 (** {1 Order Book for Prediction Contracts} *)
 
 module Book_snapshot = struct
@@ -988,5 +1162,8 @@ let command : string * Command.t =
       ; Active_orders.command
       ; Order_history.command
       ; Positions.command
+      ; Positions_volume.command
+      ; Trades.command
+      ; Ticker.command
       ; Orderbook.command
       ; Book_snapshot.command ] )
