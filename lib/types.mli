@@ -692,6 +692,8 @@ module Prediction_order : sig
     ; avg_execution_price: Price.t option
     ; status: string
     ; event_ticker: string option
+    ; contract_name: string option
+    ; contract_id: string option
     ; created_at: Time_float_unix.t option
     ; updated_at: Time_float_unix.t option }
   [@@deriving sexp, compare, equal, fields]
@@ -706,7 +708,8 @@ module Prediction_position : sig
     ; qty: Qty.t
     ; avg_price: Price.t (** Average entry price (0.00-1.00) *)
     ; event_ticker: string option
-    ; contract_name: string option }
+    ; contract_name: string option
+    ; contract_id: string option }
   [@@deriving sexp, compare, equal, fields]
 end
 

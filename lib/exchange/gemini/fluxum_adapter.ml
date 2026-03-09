@@ -817,6 +817,7 @@ module Adapter = struct
         | Some s ->
           Fluxum.Normalize_common.Float_conv.of_string s |> Result.map ~f:Option.some
       in
+      let parse_time s = try Some (Time_float_unix.of_string s) with _ -> None in
         Ok
           ({ venue= Venue.t
            ; id= Int64.to_string r.order_id
@@ -830,8 +831,10 @@ module Adapter = struct
            ; avg_execution_price
            ; status= r.status
            ; event_ticker= Option.bind r.contract_metadata ~f:(fun m -> m.event_ticker)
-           ; created_at= None
-           ; updated_at= None }
+           ; contract_name= Option.bind r.contract_metadata ~f:(fun m -> m.contract_name)
+           ; contract_id= Option.bind r.contract_metadata ~f:(fun m -> m.contract_id)
+           ; created_at= Option.bind r.created_at ~f:parse_time
+           ; updated_at= Option.bind r.updated_at ~f:parse_time }
            : Types.Prediction_order.t)
 
     let prediction_position (p : Prediction_markets.Positions.position)
@@ -848,6 +851,7 @@ module Adapter = struct
            ; avg_price
            ; event_ticker= Option.bind p.contract_metadata ~f:(fun m -> m.event_ticker)
            ; contract_name= Option.bind p.contract_metadata ~f:(fun m -> m.contract_name)
+           ; contract_id= Option.bind p.contract_metadata ~f:(fun m -> m.contract_id)
            }
            : Types.Prediction_position.t)
 
@@ -1000,7 +1004,12 @@ module Adapter = struct
          | Error err -> Error (`Normalize_error err))
       | #Rest.Error.get as e -> Error e)
 
-  let prediction_place_order (t : t) request =
+  let prediction_place_order (t : t) (request : Prediction_markets.Place_order.request) =
+    match Float.of_string_opt request.price with
+    | Some p when Float.(p < 0.0 || p > 1.0) ->
+      return (Error (`Normalize_error
+        (sprintf "prediction price %s out of range [0.00, 1.00]" request.price)))
+    | _ ->
     Exchange_common.Rate_limiter.with_rate_limit_retry t.rate_limiter ~f:(fun () ->
       Prediction_markets.Place_order.post t.cfg t.nonce request
       >>| function
