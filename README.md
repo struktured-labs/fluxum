@@ -14,7 +14,7 @@ A high-performance, multi-venue cryptocurrency trading library built with OCaml,
 - **Normalized Types**: Exchange-agnostic `Types.Order`, `Types.Trade`, `Types.Balance`, etc. via `Exchange_intf.S`
 - **Rate Limiting**: Built-in rate limiter with retry logic
 - **CLI Interface**: Comprehensive command-line tools for every exchange and protocol
-- **1,500+ Unit Tests**: Full test suite across all adapters
+- **1,600+ Unit Tests**: Full test suite across all adapters
 
 ## Supported Centralized Exchanges
 
@@ -61,27 +61,30 @@ Plus: Gate.io, KuCoin, HTX, Poloniex, Bitfinex (pool adapters)
 
 ## Gemini Prediction Markets
 
-Full support for Gemini's CFTC-regulated binary event contracts:
+Full support for Gemini's CFTC-regulated binary event contracts (13 CLI commands):
 
 ```bash
-# List active prediction events
+# Browse events and categories
 dune exec fluxum -- gemini prediction-markets events
+dune exec fluxum -- gemini prediction-markets event -event-ticker BTC100K
+dune exec fluxum -- gemini prediction-markets categories
 
-# Get event details
-dune exec fluxum -- gemini prediction-markets event BTC100K
+# Market data
+dune exec fluxum -- gemini prediction-markets ticker -symbol GEMI-BTC100K-YES
+dune exec fluxum -- gemini prediction-markets trades -symbol GEMI-BTC100K-YES -limit 50
+dune exec fluxum -- gemini prediction-markets book-snapshot -symbol GEMI-BTC100K-YES -limit 5
+dune exec fluxum -- gemini prediction-markets orderbook -symbol GEMI-BTC100K-YES
 
-# Stream live order book for a contract
-dune exec fluxum -- gemini prediction-markets orderbook -symbol GEMI-WOGOLD26-NOR
-
-# REST book snapshot
-dune exec fluxum -- gemini prediction-markets book-snapshot -symbol GEMI-WOGOLD26-NOR -limit 5
-
-# Place an order (requires API credentials)
+# Trading (requires API credentials)
 dune exec fluxum -- gemini prediction-markets order \
   -symbol GEMI-BTC100K-YES -side buy -quantity 10 -price 0.65 -outcome yes
+dune exec fluxum -- gemini prediction-markets cancel -order-id 12345
 
-# Query positions
+# Portfolio
+dune exec fluxum -- gemini prediction-markets active-orders
+dune exec fluxum -- gemini prediction-markets order-history
 dune exec fluxum -- gemini prediction-markets positions
+dune exec fluxum -- gemini prediction-markets positions-volume
 ```
 
 ## Installation
@@ -266,7 +269,7 @@ dune build @lib/exchange/common/test/runtest
 timeout 30 dune exec examples/kraken_orderbook.exe
 ```
 
-1,500+ test assertions across all exchanges with 100% pass rate.
+1,600+ test assertions across all exchanges with 100% pass rate.
 
 ## Configuration
 
@@ -300,7 +303,7 @@ export ETH_RPC_URL="https://mainnet.infura.io/v3/your-key"
 
 - [x] 14 CEX adapters with unified interface
 - [x] 20+ DeFi pool integrations
-- [x] Gemini prediction markets
+- [x] Gemini prediction markets (13 endpoints, 104 unit tests)
 - [x] Uniswap V3 swap execution
 - [x] Ethereum ABI/RLP/transaction library
 - [x] WebSocket auto-reconnect sessions
@@ -309,4 +312,5 @@ export ETH_RPC_URL="https://mainnet.infura.io/v3/your-key"
 - [x] Backtesting framework
 - [ ] Order execution algorithms (TWAP, VWAP, Iceberg)
 - [ ] Portfolio management module
+- [ ] Prediction market settlement/payout tracking (pending Gemini API)
 - [ ] Cross-chain DEX aggregation

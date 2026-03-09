@@ -28,7 +28,7 @@ Fluxum provides exchange-agnostic trading abstractions built on Jane Street Core
 
 ### Core Layer (`lib/`)
 
-- **types.ml**: Normalized types (Venue, Symbol, Side, Order, Trade, Balance, Book_update, Error)
+- **types.ml**: Normalized types (Venue, Symbol, Side, Order, Trade, Balance, Book_update, Prediction_event/contract/order/position, Error)
 - **exchange_intf.ml**: Module signature `S` that all exchange adapters must implement
 - **fluxum.ml**: `Fluxum.Make` functor - wraps native exchange operations and normalizes results
 - **order_book_intf.ml**: Interface for order book implementations (sorted bid/ask levels, market pricing, TUI rendering)
@@ -48,10 +48,12 @@ Each exchange follows this structure:
 - `unified_adapter.ml`: Combines order_book, ledger, session
 
 **Implementation status:**
-- Gemini: Complete (REST + WebSocket, reference implementation)
+- Gemini: Complete (REST + WebSocket + Prediction Markets, reference implementation)
 - Kraken: Complete (REST + WebSocket v2, full unified interfaces)
-- Binance: Partial (WebSocket order book only)
-- Coinbase/MEXC: Stubs
+- Binance: Complete (REST + WebSocket, order book, trading)
+- OKX/Bybit: Complete (REST + WebSocket, order book)
+- Hyperliquid: Complete (REST + WebSocket, order book, trading)
+- MEXC/Coinbase/Bitstamp/Bitrue/dYdX: Partial to complete
 
 ### Adding a New Exchange
 
