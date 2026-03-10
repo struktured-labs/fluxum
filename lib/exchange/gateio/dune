@@ -4,12 +4,14 @@
  (libraries
   core
   async
+  core_unix.command_unix
   cohttp
   cohttp-async
   cryptokit
   yojson
   ppx_deriving_yojson.runtime
   fluxum
+  exchange_common
   pool_intf
   amm_pricing
   pool_common)

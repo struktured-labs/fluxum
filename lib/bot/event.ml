@@ -80,6 +80,9 @@ module Venue = struct
     | Aave -> Other "Aave"
     | Compound -> Other "Compound"
     | Uniswap_v3 -> Other "Uniswap_v3"
+    | Kalshi -> Other "Kalshi"
+    | Gateio -> Other "Gateio"
+    | Kucoin -> Other "Kucoin"
 
   let to_fluxum_venue : t -> Fluxum.Types.Venue.t option = function
     | Gemini -> Some Gemini

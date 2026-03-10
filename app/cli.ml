@@ -16,6 +16,9 @@ let dydx_command = Dydx.command
 let jupiter_command = Jupiter.command
 let oneinch_command = Oneinch.command
 let uniswapv3_command = Uniswapv3.command
+let kalshi_command = Kalshi.command
+let gateio_command = Gateio.command
+let kucoin_command = Kucoin.command
 
 (* Gemini adapter helpers *)
 let get_gemini_balances cfg =
@@ -2102,6 +2105,9 @@ let command =
     ; ("jupiter", jupiter_command)
     ; ("1inch", oneinch_command)
     ; ("uniswapv3", uniswapv3_command)
+    ; ("kalshi", kalshi_command)
+    ; ("gateio", gateio_command)
+    ; ("kucoin", kucoin_command)
     ; ("api", api_command)
     ; ("backtest", backtest_command)
     ; ("bot", bot_command)

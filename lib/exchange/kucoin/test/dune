@@ -1,7 +1,7 @@
 (test
  (name run_tests)
  (modules run_tests)
- (libraries core kucoin)
+ (libraries core kucoin fluxum)
  (preprocess
   (pps ppx_jane))
  (flags :standard -open Core))

@@ -11,3 +11,9 @@ module Cfg = Cfg
 module Types = Types
 module Rest = Rest
 module Pool_adapter = Pool_adapter
+module Fluxum_adapter = Fluxum_adapter
+
+let command : Command.t =
+  Command.group
+    ~summary:"KuCoin Command System"
+    [ Fluxum_adapter.command ]

@@ -19,6 +19,9 @@ module Venue = struct
     | Aave (** Aave - DeFi lending (planned) *)
     | Compound (** Compound - DeFi lending (planned) *)
     | Uniswap_v3 (** Uniswap V3 - Concentrated liquidity DEX *)
+    | Kalshi (** Kalshi - CFTC-regulated prediction market exchange *)
+    | Gateio (** Gate.io - Global CEX *)
+    | Kucoin (** KuCoin - Global CEX *)
   [@@deriving sexp, compare, equal]
 
   let to_string = function
@@ -39,6 +42,9 @@ module Venue = struct
     | Aave -> "Aave"
     | Compound -> "Compound"
     | Uniswap_v3 -> "Uniswap V3"
+    | Kalshi -> "Kalshi"
+    | Gateio -> "Gate.io"
+    | Kucoin -> "KuCoin"
 
   let is_defi = function
     | Dydx | Jupiter | OneInch | Gmx | Aave | Compound | Uniswap_v3 -> true
@@ -51,7 +57,10 @@ module Venue = struct
     | Okx
     | Hyperliquid
     | Bitrue
-    | Bitstamp -> false
+    | Bitstamp
+    | Kalshi
+    | Gateio
+    | Kucoin -> false
 end
 
 module Symbol = struct

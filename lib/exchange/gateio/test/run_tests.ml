@@ -154,6 +154,142 @@ let test_error_types () =
     let err_str = Gateio.Rest.Error.to_string json_err in
       test_assert "JSON error to_string" (String.is_substring err_str ~substring:"JSON")
 
+let test_normalization () =
+  printf "\n[Normalization]\n";
+  (* Ticker normalization *)
+  let native_ticker : Gateio.Types.ticker =
+    { currency_pair= "BTC_USDT"
+    ; last= "67500.50"
+    ; lowest_ask= "67501.00"
+    ; highest_bid= "67500.00"
+    ; high_24h= "68000.00"
+    ; low_24h= "66000.00"
+    ; base_volume= "1234.5678"
+    ; quote_volume= "83333333.00" }
+  in
+  (match Gateio.Fluxum_adapter.Adapter.Normalize.ticker native_ticker ~symbol:"BTC_USDT" with
+   | Ok t ->
+     test_assert "Ticker normalize: venue"
+       (Fluxum.Types.Venue.equal t.venue Gateio);
+     test_assert "Ticker normalize: symbol"
+       (String.equal t.symbol "BTC_USDT");
+     test_assert "Ticker normalize: last_price"
+       (Float.(=) t.last_price 67500.50);
+     test_assert "Ticker normalize: bid"
+       (Float.(=) t.bid_price 67500.00);
+     test_assert "Ticker normalize: ask"
+       (Float.(=) t.ask_price 67501.00);
+     test_assert "Ticker normalize: high"
+       (Float.(=) t.high_24h 68000.00);
+     test_assert "Ticker normalize: low"
+       (Float.(=) t.low_24h 66000.00);
+     test_assert "Ticker normalize: volume"
+       (Float.(=) t.volume_24h 1234.5678);
+     test_assert "Ticker normalize: quote_volume"
+       (Option.is_some t.quote_volume)
+   | Error e -> fail (sprintf "Ticker normalization failed: %s" e));
+  (* Balance normalization *)
+  let native_balance : Gateio.Types.balance =
+    { currency= "eth"; available= "10.5"; locked= "2.3" }
+  in
+  (match Gateio.Fluxum_adapter.Adapter.Normalize.balance native_balance with
+   | Ok b ->
+     test_assert "Balance normalize: venue"
+       (Fluxum.Types.Venue.equal b.venue Gateio);
+     test_assert "Balance normalize: currency uppercase"
+       (String.equal b.currency "ETH");
+     test_assert "Balance normalize: total"
+       (Float.(=) b.total 12.8);
+     test_assert "Balance normalize: available"
+       (Float.(=) b.available 10.5);
+     test_assert "Balance normalize: locked"
+       (Float.(=) b.locked 2.3)
+   | Error e -> fail (sprintf "Balance normalization failed: %s" e));
+  (* Trade normalization *)
+  let native_trade : Gateio.Types.trade =
+    { id= 123456L; create_time= 1699000000L; side= "buy"
+    ; amount= "0.5"; price= "50000.00" }
+  in
+  (match Gateio.Fluxum_adapter.Adapter.Normalize.public_trade native_trade ~symbol:"BTC_USDT" with
+   | Ok t ->
+     test_assert "Trade normalize: venue"
+       (Fluxum.Types.Venue.equal t.venue Gateio);
+     test_assert "Trade normalize: price"
+       (Float.(=) t.price 50000.00);
+     test_assert "Trade normalize: qty"
+       (Float.(=) t.qty 0.5);
+     test_assert "Trade normalize: side is Buy"
+       (match t.side with Some Buy -> true | _ -> false);
+     test_assert "Trade normalize: trade_id"
+       (Option.equal String.equal t.trade_id (Some "123456"));
+     test_assert "Trade normalize: has timestamp"
+       (Option.is_some t.ts)
+   | Error e -> fail (sprintf "Trade normalization failed: %s" e));
+  (* Sell trade *)
+  let sell_trade : Gateio.Types.trade =
+    { id= 789L; create_time= 1699000001L; side= "sell"
+    ; amount= "1.0"; price= "50100.00" }
+  in
+  (match Gateio.Fluxum_adapter.Adapter.Normalize.public_trade sell_trade ~symbol:"BTC_USDT" with
+   | Ok t ->
+     test_assert "Sell trade: side is Sell"
+       (match t.side with Some Sell -> true | _ -> false)
+   | Error e -> fail (sprintf "Sell trade normalization failed: %s" e));
+  (* Order response normalization *)
+  let native_order : Gateio.Types.order_response =
+    { id= "order-42"; text= ""; currency_pair= "ETH_USDT"
+    ; type_= "limit"; account= "spot"; side= "buy"
+    ; amount= "5.0"; price= "2000.00"
+    ; time_in_force= "gtc"; status= "open" }
+  in
+  (match Gateio.Fluxum_adapter.Adapter.Normalize.order_response native_order with
+   | Ok o ->
+     test_assert "Order normalize: venue"
+       (Fluxum.Types.Venue.equal o.venue Gateio);
+     test_assert "Order normalize: id"
+       (String.equal o.id "order-42");
+     test_assert "Order normalize: symbol"
+       (String.equal o.symbol "ETH_USDT");
+     test_assert "Order normalize: side is Buy"
+       (Fluxum.Types.Side.equal o.side Buy);
+     test_assert "Order normalize: qty"
+       (Float.(=) o.qty 5.0);
+     test_assert "Order normalize: status is New"
+       (match o.status with Fluxum.Types.Order_status.New -> true | _ -> false);
+     test_assert "Order normalize: kind is Limit"
+       (match o.kind with Fluxum.Types.Order_kind.Basic (Limit p) -> Float.(=) p 2000.0 | _ -> false)
+   | Error e -> fail (sprintf "Order normalization failed: %s" e));
+  (* Closed order -> Filled status *)
+  let closed_order : Gateio.Types.order_response =
+    { native_order with status= "closed"; side= "sell" }
+  in
+  (match Gateio.Fluxum_adapter.Adapter.Normalize.order_response closed_order with
+   | Ok o ->
+     test_assert "Closed order -> Filled"
+       (match o.status with Fluxum.Types.Order_status.Filled -> true | _ -> false);
+     test_assert "Sell side"
+       (Fluxum.Types.Side.equal o.side Sell)
+   | Error e -> fail (sprintf "Closed order normalization failed: %s" e));
+  (* Error normalization *)
+  let open Gateio.Fluxum_adapter.Adapter.Normalize in
+  test_assert "HTTP error -> Exchange_specific"
+    (match error (`Http (429, "rate limited")) with
+     | Fluxum.Types.Error.Exchange_specific {code= "429"; _} -> true
+     | _ -> false);
+  test_assert "JSON error -> Exchange_specific"
+    (match error (`Json_parse "bad") with
+     | Fluxum.Types.Error.Exchange_specific {code= "json"; _} -> true
+     | _ -> false);
+  test_assert "Network error -> Exchange_specific"
+    (match error (`Network "timeout") with
+     | Fluxum.Types.Error.Exchange_specific {code= "network"; _} -> true
+     | _ -> false);
+  (* Invalid numeric string *)
+  test_assert "Bad float returns Error"
+    (match Gateio.Fluxum_adapter.Adapter.Normalize.float_of_string_safe "abc" with
+     | Error _ -> true
+     | Ok _ -> false)
+
 let () =
   printf "===========================================\n";
   printf "Gate.io Unit Tests\n";
@@ -162,6 +298,7 @@ let () =
   test_types ();
   test_rest_signature ();
   test_error_types ();
+  test_normalization ();
   printf "\n===========================================\n";
   printf "Test Summary\n";
   printf "===========================================\n";

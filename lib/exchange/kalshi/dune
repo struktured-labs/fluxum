@@ -1,0 +1,23 @@
+(library
+ (name kalshi)
+ (public_name fluxum.kalshi)
+ (flags :standard -w -39 -open Core -open Async)
+ (preprocess
+  (pps ppx_jane ppx_deriving_yojson))
+ (synopsis "Kalshi Prediction Market REST Client for OCaml")
+ (library_flags -linkall)
+ (libraries
+  async
+  core_unix.command_unix
+  cohttp
+  cohttp-async
+  logs
+  uri
+  yojson
+  mirage-crypto
+  mirage-crypto-pk
+  mirage-crypto-rng
+  x509
+  base64
+  fluxum
+  exchange_common))

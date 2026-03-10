@@ -111,6 +111,30 @@ module Configs = struct
     ; initial_backoff_sec= 1.0
     ; max_backoff_sec= 30.0
     ; backoff_multiplier= 2.0 }
+
+  (** Kalshi: Rate limits vary by tier, conservative default *)
+  let kalshi =
+    { requests_per_second= 10.0
+    ; burst_size= 20
+    ; initial_backoff_sec= 1.0
+    ; max_backoff_sec= 30.0
+    ; backoff_multiplier= 2.0 }
+
+  (** Gate.io: 900 requests/min for spot *)
+  let gateio =
+    { requests_per_second= 10.0
+    ; burst_size= 30
+    ; initial_backoff_sec= 1.0
+    ; max_backoff_sec= 30.0
+    ; backoff_multiplier= 2.0 }
+
+  (** KuCoin: 30 requests/3s for management, 100 requests/10s for market *)
+  let kucoin =
+    { requests_per_second= 10.0
+    ; burst_size= 20
+    ; initial_backoff_sec= 1.0
+    ; max_backoff_sec= 30.0
+    ; backoff_multiplier= 2.0 }
 end
 
 (** Rate limiter state *)

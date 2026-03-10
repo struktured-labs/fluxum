@@ -45,6 +45,9 @@ module Venue : sig
     | Aave (** Aave - DeFi lending (planned) *)
     | Compound (** Compound - DeFi lending (planned) *)
     | Uniswap_v3 (** Uniswap V3 - Concentrated liquidity DEX *)
+    | Kalshi (** Kalshi - CFTC-regulated prediction market exchange *)
+    | Gateio (** Gate.io - Global CEX *)
+    | Kucoin (** KuCoin - Global CEX *)
   [@@deriving sexp, compare, equal]
 
   (** Human-readable exchange name *)

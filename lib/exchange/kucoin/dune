@@ -4,6 +4,7 @@
  (libraries
   core
   core_unix.uuid
+  core_unix.command_unix
   async
   cohttp
   cohttp-async
@@ -11,6 +12,7 @@
   yojson
   ppx_deriving_yojson.runtime
   fluxum
+  exchange_common
   pool_intf
   amm_pricing
   pool_common)
