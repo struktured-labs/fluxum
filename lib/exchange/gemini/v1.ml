@@ -435,7 +435,7 @@ module T = struct
         ; available: Decimal_string.t
         ; available_for_withdrawal: Decimal_string.t [@key "availableForWithdrawal"]
         ; type_: string [@key "type"] }
-      [@@deriving yojson, sexp]
+      [@@deriving yojson, sexp] [@@yojson.allow_extra_fields]
 
       type response = balance list [@@deriving of_yojson, sexp]
     end
