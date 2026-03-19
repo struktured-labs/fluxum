@@ -434,7 +434,8 @@ module T = struct
         ; amount: Decimal_string.t
         ; available: Decimal_string.t
         ; available_for_withdrawal: Decimal_string.t [@key "availableForWithdrawal"]
-        ; type_: string [@key "type"] }
+        ; type_: string [@key "type"]
+        ; timestamp: string option [@default None] [@key "_timestamp"] }
       [@@deriving yojson, sexp]
 
       type response = balance list [@@deriving of_yojson, sexp]
@@ -477,40 +478,41 @@ module T = struct
 
     (** Custom post that handles currency in path *)
     let post (module Cfg : Cfg.S) (nonce : Nonce.reader) (request : request) =
-      let path = ["v1"; "deposit"; String.lowercase request.currency; "newAddress"] in
-      let payload = request_to_yojson request in
-        Nonce.Request.make ~nonce ~request:(Path.to_string path) ~payload ()
-        >>= fun nonce_request ->
-        Nonce.Request.to_yojson nonce_request
-        |> Yojson.Safe.pretty_to_string
-        |> (fun s ->
-        Log.Global.info "deposit address request as json:\n %s" s;
-        return @@ Auth.of_payload s)
-        >>= fun payload_str ->
-        let headers = Auth.to_headers (module Cfg) payload_str in
-        let uri =
-          Uri.make ~scheme:"https" ~host:Cfg.api_host ~path:(Path.to_string path) ()
-        in
-          Cohttp_async.Client.post ~headers uri
-          >>= fun (response, body) ->
-          match Cohttp.Response.status response with
-          | `OK ->
-            Cohttp_async.Body.to_string body
-            >>| fun s ->
-            Log.Global.debug "deposit address response:\n %s" s;
-            let yojson = Yojson.Safe.from_string s in
-              (Rest.Response.parse yojson response_of_yojson
-                :> [`Ok of response | Rest.Error.post])
-          | `Not_found -> return `Not_found
-          | `Bad_request -> Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
-          | `Unauthorized -> Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
-          | `Service_unavailable ->
-            Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
-          | (code : Cohttp.Code.status_code) ->
-            Cohttp_async.Body.to_string body
-            >>| fun b ->
-            let msg = sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) b in
-              `Service_unavailable msg
+      Nonce.enqueue nonce (fun () ->
+        let path = ["v1"; "deposit"; String.lowercase request.currency; "newAddress"] in
+        let payload = request_to_yojson request in
+          Nonce.Request.make ~nonce ~request:(Path.to_string path) ~payload ()
+          >>= fun nonce_request ->
+          Nonce.Request.to_yojson nonce_request
+          |> Yojson.Safe.pretty_to_string
+          |> (fun s ->
+          Log.Global.info "deposit address request as json:\n %s" s;
+          return @@ Auth.of_payload s)
+          >>= fun payload_str ->
+          let headers = Auth.to_headers (module Cfg) payload_str in
+          let uri =
+            Uri.make ~scheme:"https" ~host:Cfg.api_host ~path:(Path.to_string path) ()
+          in
+            Cohttp_async.Client.post ~headers uri
+            >>= fun (response, body) ->
+            match Cohttp.Response.status response with
+            | `OK ->
+              Cohttp_async.Body.to_string body
+              >>| fun s ->
+              Log.Global.debug "deposit address response:\n %s" s;
+              let yojson = Yojson.Safe.from_string s in
+                (Rest.Response.parse yojson response_of_yojson
+                  :> [`Ok of response | Rest.Error.post])
+            | `Not_found -> return `Not_found
+            | `Bad_request -> Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
+            | `Unauthorized -> Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
+            | `Service_unavailable ->
+              Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
+            | (code : Cohttp.Code.status_code) ->
+              Cohttp_async.Body.to_string body
+              >>| fun b ->
+              let msg = sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) b in
+                `Service_unavailable msg)
   end
 
   (** Withdraw crypto - POST /v1/withdraw/{currency} *)
@@ -549,40 +551,41 @@ module T = struct
 
     (** Custom post that handles currency in path *)
     let post (module Cfg : Cfg.S) (nonce : Nonce.reader) (request : request) =
-      let path = ["v1"; "withdraw"; String.lowercase request.currency] in
-      let payload = request_to_yojson request in
-        Nonce.Request.make ~nonce ~request:(Path.to_string path) ~payload ()
-        >>= fun nonce_request ->
-        Nonce.Request.to_yojson nonce_request
-        |> Yojson.Safe.pretty_to_string
-        |> (fun s ->
-        Log.Global.info "withdraw request as json:\n %s" s;
-        return @@ Auth.of_payload s)
-        >>= fun payload_str ->
-        let headers = Auth.to_headers (module Cfg) payload_str in
-        let uri =
-          Uri.make ~scheme:"https" ~host:Cfg.api_host ~path:(Path.to_string path) ()
-        in
-          Cohttp_async.Client.post ~headers uri
-          >>= fun (response, body) ->
-          match Cohttp.Response.status response with
-          | `OK ->
-            Cohttp_async.Body.to_string body
-            >>| fun s ->
-            Log.Global.debug "withdraw response:\n %s" s;
-            let yojson = Yojson.Safe.from_string s in
-              (Rest.Response.parse yojson response_of_yojson
-                :> [`Ok of response | Rest.Error.post])
-          | `Not_found -> return `Not_found
-          | `Bad_request -> Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
-          | `Unauthorized -> Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
-          | `Service_unavailable ->
-            Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
-          | (code : Cohttp.Code.status_code) ->
-            Cohttp_async.Body.to_string body
-            >>| fun b ->
-            let msg = sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) b in
-              `Service_unavailable msg
+      Nonce.enqueue nonce (fun () ->
+        let path = ["v1"; "withdraw"; String.lowercase request.currency] in
+        let payload = request_to_yojson request in
+          Nonce.Request.make ~nonce ~request:(Path.to_string path) ~payload ()
+          >>= fun nonce_request ->
+          Nonce.Request.to_yojson nonce_request
+          |> Yojson.Safe.pretty_to_string
+          |> (fun s ->
+          Log.Global.info "withdraw request as json:\n %s" s;
+          return @@ Auth.of_payload s)
+          >>= fun payload_str ->
+          let headers = Auth.to_headers (module Cfg) payload_str in
+          let uri =
+            Uri.make ~scheme:"https" ~host:Cfg.api_host ~path:(Path.to_string path) ()
+          in
+            Cohttp_async.Client.post ~headers uri
+            >>= fun (response, body) ->
+            match Cohttp.Response.status response with
+            | `OK ->
+              Cohttp_async.Body.to_string body
+              >>| fun s ->
+              Log.Global.debug "withdraw response:\n %s" s;
+              let yojson = Yojson.Safe.from_string s in
+                (Rest.Response.parse yojson response_of_yojson
+                  :> [`Ok of response | Rest.Error.post])
+            | `Not_found -> return `Not_found
+            | `Bad_request -> Cohttp_async.Body.to_string body >>| fun b -> `Bad_request b
+            | `Unauthorized -> Cohttp_async.Body.to_string body >>| fun b -> `Unauthorized b
+            | `Service_unavailable ->
+              Cohttp_async.Body.to_string body >>| fun b -> `Service_unavailable b
+            | (code : Cohttp.Code.status_code) ->
+              Cohttp_async.Body.to_string body
+              >>| fun b ->
+              let msg = sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) b in
+                `Service_unavailable msg)
   end
 
   (** Get transfers (deposits and withdrawals) - POST /v1/transfers *)
@@ -676,17 +679,17 @@ module T = struct
 
       type response =
         { last_updated_ms: Timestamp.Ms.t
-        ; web_maker_fee_bps: Int_number.t
-        ; web_taker_fee_bps: Int_number.t
-        ; web_auction_fee_bps: Int_number.t option [@default None]
-        ; api_maker_fee_bps: Int_number.t
-        ; api_taker_fee_bps: Int_number.t
-        ; api_auction_fee_bps: Int_number.t option [@default None]
-        ; fix_maker_fee_bps: Int_number.t
-        ; fix_taker_fee_bps: Int_number.t
-        ; fix_auction_fee_bps: Int_number.t option [@default None]
-        ; block_maker_fee_bps: Int_number.t
-        ; block_taker_fee_bps: Int_number.t
+        ; web_maker_fee_bps: Decimal_number.t
+        ; web_taker_fee_bps: Decimal_number.t
+        ; web_auction_fee_bps: Decimal_number.t option [@default None]
+        ; api_maker_fee_bps: Decimal_number.t
+        ; api_taker_fee_bps: Decimal_number.t
+        ; api_auction_fee_bps: Decimal_number.t option [@default None]
+        ; fix_maker_fee_bps: Decimal_number.t
+        ; fix_taker_fee_bps: Decimal_number.t
+        ; fix_auction_fee_bps: Decimal_number.t option [@default None]
+        ; block_maker_fee_bps: Decimal_number.t
+        ; block_taker_fee_bps: Decimal_number.t
         ; date: string (* TODO use strict date type *)
         ; notional_30d_volume: Decimal_number.t
         ; notional_1d_volume: notional_1d_volume list }

@@ -336,7 +336,8 @@ module V1 : sig
       ; amount: Decimal_string.t
       ; available: Decimal_string.t
       ; available_for_withdrawal: Decimal_string.t
-      ; type_: string }
+      ; type_: string
+      ; timestamp: string option }
     [@@deriving sexp, yojson]
 
     (* A list of balances, one for each supported currency. *)
@@ -366,17 +367,17 @@ module V1 : sig
 
     type response =
       { last_updated_ms: Timestamp.Ms.t
-      ; web_maker_fee_bps: Int_number.t
-      ; web_taker_fee_bps: Int_number.t
-      ; web_auction_fee_bps: Int_number.t option
-      ; api_maker_fee_bps: Int_number.t
-      ; api_taker_fee_bps: Int_number.t
-      ; api_auction_fee_bps: Int_number.t option
-      ; fix_maker_fee_bps: Int_number.t
-      ; fix_taker_fee_bps: Int_number.t
-      ; fix_auction_fee_bps: Int_number.t option
-      ; block_maker_fee_bps: Int_number.t
-      ; block_taker_fee_bps: Int_number.t
+      ; web_maker_fee_bps: Decimal_number.t
+      ; web_taker_fee_bps: Decimal_number.t
+      ; web_auction_fee_bps: Decimal_number.t option
+      ; api_maker_fee_bps: Decimal_number.t
+      ; api_taker_fee_bps: Decimal_number.t
+      ; api_auction_fee_bps: Decimal_number.t option
+      ; fix_maker_fee_bps: Decimal_number.t
+      ; fix_taker_fee_bps: Decimal_number.t
+      ; fix_auction_fee_bps: Decimal_number.t option
+      ; block_maker_fee_bps: Decimal_number.t
+      ; block_taker_fee_bps: Decimal_number.t
       ; date: string (* TODO use strict date type *)
       ; notional_30d_volume: Decimal_number.t
       ; notional_1d_volume: notional_1d_volume list }

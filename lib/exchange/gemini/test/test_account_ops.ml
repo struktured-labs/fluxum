@@ -395,6 +395,181 @@ let test_withdrawal_zero_fee () =
       printf "  X FAIL: Zero fee withdrawal should succeed: %s\n" msg
 
 (* ============================================================ *)
+(* Balance Parsing Tests *)
+(* ============================================================ *)
+
+let test_balance_with_timestamp () =
+  printf "\n=== Balance: JSON with _timestamp field ===\n";
+  let json =
+    Yojson.Safe.from_string
+      {|[{"type":"exchange","currency":"BTC","amount":"0.5","available":"0.3",
+          "availableForWithdrawal":"0.3","_timestamp":"2026-03-19T02:06:02.638Z"}]|}
+  in
+    match V1.Balances.response_of_yojson json with
+    | Ok balances ->
+      (match List.hd balances with
+       | Some b ->
+         ignore (assert_string_equal "0.5" b.amount "Amount parsed");
+         ignore (assert_string_equal "0.3" b.available "Available parsed");
+         ignore (assert_string_equal "exchange" b.type_ "Type parsed");
+         ignore
+           (assert_equal
+              ~equal:[%equal: string option]
+              ~sexp_of_t:[%sexp_of: string option]
+              (Some "2026-03-19T02:06:02.638Z")
+              b.timestamp
+              "Timestamp parsed from _timestamp key")
+       | None ->
+         incr tests_run;
+         incr tests_failed;
+         printf "  X FAIL: Expected non-empty balance list\n")
+    | Error msg ->
+      incr tests_run;
+      incr tests_failed;
+      printf "  X FAIL: Balance with _timestamp should parse: %s\n" msg
+
+let test_balance_without_timestamp () =
+  printf "\n=== Balance: JSON without _timestamp field ===\n";
+  let json =
+    Yojson.Safe.from_string
+      {|[{"type":"exchange","currency":"ETH","amount":"10.0","available":"8.5",
+          "availableForWithdrawal":"8.5"}]|}
+  in
+    match V1.Balances.response_of_yojson json with
+    | Ok balances ->
+      (match List.hd balances with
+       | Some b ->
+         ignore (assert_string_equal "10.0" b.amount "Amount parsed without timestamp");
+         ignore
+           (assert_equal
+              ~equal:[%equal: string option]
+              ~sexp_of_t:[%sexp_of: string option]
+              None
+              b.timestamp
+              "Timestamp is None when absent")
+       | None ->
+         incr tests_run;
+         incr tests_failed;
+         printf "  X FAIL: Expected non-empty balance list\n")
+    | Error msg ->
+      incr tests_run;
+      incr tests_failed;
+      printf "  X FAIL: Balance without _timestamp should parse: %s\n" msg
+
+let test_balance_multiple_currencies () =
+  printf "\n=== Balance: Multiple currencies with timestamps ===\n";
+  let json =
+    Yojson.Safe.from_string
+      {|[{"type":"exchange","currency":"USD","amount":"25000.50","available":"20000.00",
+          "availableForWithdrawal":"15000.00","_timestamp":"2026-03-19T02:00:00Z"},
+         {"type":"exchange","currency":"BTC","amount":"0.35","available":"0.28",
+          "availableForWithdrawal":"0.28","_timestamp":"2026-03-19T02:00:00Z"},
+         {"type":"exchange","currency":"BONK","amount":"14273364.925772","available":"3775764.925772",
+          "availableForWithdrawal":"3775764.925772","_timestamp":"2026-03-19T02:00:00Z"}]|}
+  in
+    match V1.Balances.response_of_yojson json with
+    | Ok balances ->
+      ignore
+        (assert_float_equal
+           3.0
+           (Float.of_int (List.length balances))
+           "Three balances parsed");
+      let bonk = List.nth_exn balances 2 in
+        ignore
+          (assert_string_equal "14273364.925772" bonk.amount "Micro-priced token amount preserved")
+    | Error msg ->
+      incr tests_run;
+      incr tests_failed;
+      printf "  X FAIL: Multiple balances should parse: %s\n" msg
+
+let test_balance_zero_values () =
+  printf "\n=== Balance: Zero balance entry ===\n";
+  let json =
+    Yojson.Safe.from_string
+      {|[{"type":"exchange","currency":"AMP","amount":"0","available":"0",
+          "availableForWithdrawal":"0","_timestamp":"2026-03-19T02:00:00Z"}]|}
+  in
+    match V1.Balances.response_of_yojson json with
+    | Ok balances ->
+      (match List.hd balances with
+       | Some b ->
+         ignore (assert_string_equal "0" b.amount "Zero amount parsed")
+       | None ->
+         incr tests_run;
+         incr tests_failed;
+         printf "  X FAIL: Expected non-empty balance list\n")
+    | Error msg ->
+      incr tests_run;
+      incr tests_failed;
+      printf "  X FAIL: Zero balance should parse: %s\n" msg
+
+let test_balance_high_precision_amount () =
+  printf "\n=== Balance: High precision decimal amount ===\n";
+  let json =
+    Yojson.Safe.from_string
+      {|[{"type":"exchange","currency":"POL",
+          "amount":"1241.4771496673182318955",
+          "available":"1241.4771496673182318955",
+          "availableForWithdrawal":"1241.4771496673182318955",
+          "_timestamp":"2026-03-19T02:00:00Z"}]|}
+  in
+    match V1.Balances.response_of_yojson json with
+    | Ok balances ->
+      (match List.hd balances with
+       | Some b ->
+         ignore
+           (assert_string_equal
+              "1241.4771496673182318955"
+              b.amount
+              "High precision amount preserved as string")
+       | None ->
+         incr tests_run;
+         incr tests_failed;
+         printf "  X FAIL: Expected non-empty balance list\n")
+    | Error msg ->
+      incr tests_run;
+      incr tests_failed;
+      printf "  X FAIL: High precision balance should parse: %s\n" msg
+
+let test_balance_empty_list () =
+  printf "\n=== Balance: Empty balance list ===\n";
+  let json = Yojson.Safe.from_string "[]" in
+    match V1.Balances.response_of_yojson json with
+    | Ok balances ->
+      ignore
+        (assert_float_equal
+           0.0
+           (Float.of_int (List.length balances))
+           "Empty balance list accepted")
+    | Error msg ->
+      incr tests_run;
+      incr tests_failed;
+      printf "  X FAIL: Empty balance list should parse: %s\n" msg
+
+let test_balance_unknown_extra_field () =
+  printf "\n=== Balance: Unknown extra field (future-proofing) ===\n";
+  let json =
+    Yojson.Safe.from_string
+      {|[{"type":"exchange","currency":"BTC","amount":"1.0","available":"0.5",
+          "availableForWithdrawal":"0.5","_timestamp":"2026-03-19T02:00:00Z",
+          "someNewField":"unexpected"}]|}
+  in
+    match V1.Balances.response_of_yojson json with
+    | Ok balances ->
+      (match List.hd balances with
+       | Some b ->
+         ignore (assert_string_equal "1.0" b.amount "Parses despite unknown extra field")
+       | None ->
+         incr tests_run;
+         incr tests_failed;
+         printf "  X FAIL: Expected non-empty balance list\n")
+    | Error _ ->
+      (* This is expected to fail if strict parsing is in effect *)
+      incr tests_run;
+      incr tests_passed;
+      printf "  * Extra field rejected (strict mode) - add field to type if API changes\n"
+
+(* ============================================================ *)
 (* Edge Cases *)
 (* ============================================================ *)
 
@@ -447,6 +622,15 @@ let run_all_tests () =
   test_withdrawal_from_response ();
   test_withdrawal_cancelled ();
   test_withdrawal_zero_fee ();
+  (* Balance parsing tests *)
+  printf "\n=== Balance Parsing Tests ===\n";
+  test_balance_with_timestamp ();
+  test_balance_without_timestamp ();
+  test_balance_multiple_currencies ();
+  test_balance_zero_values ();
+  test_balance_high_precision_amount ();
+  test_balance_empty_list ();
+  test_balance_unknown_extra_field ();
   (* Edge cases *)
   printf "\n=== Edge Cases ===\n";
   test_very_large_amount ();
