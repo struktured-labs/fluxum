@@ -12,6 +12,7 @@ module Ledger = Ledger
 module Session = Session
 module Unified_adapter = Unified_adapter
 module Unified_cmd = Unified_cmd
+module Private_ws = Private_ws
 module Fluxum_adapter = Fluxum_adapter
 
 let command : Command.t =
