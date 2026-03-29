@@ -17,7 +17,7 @@ let connect ~cfg:(module Cfg : Cfg.S) ()
   (* Step 1: Get WebSocket token from REST API *)
   V1.Websocket_token.post (module Cfg) ()
   >>= function
-  | `Ok {token} ->
+  | `Ok {token; _} ->
     Log.Global.info "Kraken Private WS: obtained token";
     (* Step 2: Connect to private WS endpoint *)
     let url = Ws.Endpoint.private_url in

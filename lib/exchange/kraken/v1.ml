@@ -1010,7 +1010,7 @@ module Websocket_token = struct
 
     let request_to_params () = []
 
-    type response = {token: string} [@@deriving sexp, of_yojson]
+    type response = {token: string; expires: int [@default 900]} [@@deriving sexp, of_yojson]
   end
 
   include T
