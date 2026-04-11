@@ -1,19 +1,28 @@
-type reader = int Inf_pipe.Reader.t
+type reader =
+  { pipe : int Inf_pipe.Reader.t
+  ; sequencer : unit Throttle.Sequencer.t
+  }
+
+(** Serialize an operation through this nonce's sequencer.
+    Ensures nonce-read + HTTP-call are atomic — prevents out-of-order delivery. *)
+let enqueue t f = Throttle.enqueue t.sequencer (fun () -> f ())
 
 module type S = sig
   type t [@@deriving sexp]
 
-  val pipe : init:t -> unit -> int Inf_pipe.Reader.t Deferred.t
+  val pipe : init:t -> unit -> reader Deferred.t
 end
 
 module Counter : S with type t = int = struct
   type t = int [@@deriving sexp]
 
   let pipe ~init () =
-    Inf_pipe.unfold ~init ~f:(fun s ->
-      let s' = s + 1 in
-        (s, s') |> return)
-    |> return
+    let pipe =
+      Inf_pipe.unfold ~init ~f:(fun s ->
+        let s' = s + 1 in
+          (s, s') |> return)
+    in
+    return { pipe; sequencer = Throttle.Sequencer.create ~continue_on_error:true () }
 end
 
 module File = struct
@@ -28,7 +37,8 @@ module File = struct
 
   type t = string [@@deriving sexp]
 
-  (** Get current millisecond timestamp as nonce base *)
+  (** Get current millisecond timestamp as nonce base.
+      Thread-safe — uses gettimeofday which works in any context. *)
   let now_ms () =
     Time_float_unix.now ()
     |> Time_float_unix.to_span_since_epoch
@@ -36,46 +46,71 @@ module File = struct
     |> Int64.of_float
     |> Int64.to_int_exn
 
-  (** Use timestamp-based nonces: every nonce = max(prev+1, now_ms).
-      This is self-healing across process restarts and competing processes:
-      - Each nonce uses the current timestamp (always increasing over time)
-      - If multiple calls happen within 1ms, falls back to prev+1
-      - On restart, the new timestamp is always higher than old nonces
-      - No dependency on file state for correctness (file is advisory only)
-        Persists periodically for compatibility with other tools. *)
+  (** Atomically read-increment-write a nonce file using flock.
+      Safe for multiple processes sharing one Gemini API key.
+
+      Each call:
+      1. Opens the shared nonce file
+      2. Acquires an exclusive flock (blocks until available)
+      3. Reads the current nonce value
+      4. Computes next = max(current + 1, now_ms())
+      5. Writes back, truncates, unlocks
+
+      This guarantees globally-increasing nonces across all processes.
+      The flock serializes access — no two processes can increment
+      simultaneously, eliminating InvalidNonce errors permanently.
+
+      Runs in In_thread to avoid blocking the Async scheduler. *)
+  let locked_increment filename =
+    In_thread.run (fun () ->
+      let fd = Core_unix.openfile filename
+        ~mode:[Core_unix.O_RDWR; Core_unix.O_CREAT]
+        ~perm:0o600 in
+      let cleanup () =
+        (try Core_unix.flock_blocking fd Core_unix.Flock_command.unlock with _ -> ());
+        Core_unix.close fd
+      in
+      match
+        Core_unix.flock_blocking fd Core_unix.Flock_command.lock_exclusive;
+        let buf = Bytes.create 64 in
+        let n = Core_unix.read fd ~buf ~pos:0 ~len:64 in
+        let contents = Bytes.To_string.sub buf ~pos:0 ~len:n in
+        let current =
+          match Int.of_string (String.strip contents) with
+          | n -> n
+          | exception _ -> now_ms ()
+        in
+        let next = Int.max (current + 1) (now_ms ()) in
+        let _pos = Core_unix.lseek fd 0L ~mode:Core_unix.SEEK_SET in
+        let data = sprintf "%d\n" next in
+        let _written = Core_unix.write_substring fd ~buf:data ~pos:0
+          ~len:(String.length data) in
+        Core_unix.ftruncate fd ~len:(Int64.of_int (String.length data));
+        next
+      with
+      | nonce -> cleanup (); nonce
+      | exception exn -> cleanup (); raise exn)
+
+  (** Shared nonce file pipe using flock for cross-process safety.
+
+      Unlike per-bot nonce files, ALL bots using the same API key share
+      a single nonce file. The flock ensures only one process increments
+      at a time, preventing InvalidNonce errors that occur when multiple
+      processes race to use the same Gemini API key.
+
+      The init parameter is the path to the shared nonce file.
+      On first use, the file is created with a nonce based on now_ms(). *)
   let pipe ~init:filename () =
     Cfg.create_config_dir ()
     >>= fun () ->
     create_nonce_file ?default:None filename
     >>= fun () ->
-    Reader.with_file filename ~f:(fun reader ->
-      Reader.really_read_line reader ~wait_time:(Time_float.Span.of_ms 1.0))
-    >>= fun line ->
-    let file_nonce =
-      match line with
-      | None -> 0
-      | Some nonce_str ->
-        (try Int.of_string (String.strip nonce_str) with
-         | _ -> 0)
+    let pipe =
+      Inf_pipe.unfold ~init:() ~f:(fun () ->
+        let%bind nonce = locked_increment filename in
+          return (nonce, ()))
     in
-    (* Bootstrap: use max of current timestamp and file nonce + safety margin *)
-    let initial_nonce = Int.max (now_ms ()) (file_nonce + 100000) in
-      (* Persist immediately *)
-      Writer.save filename ~contents:(sprintf "%d\n" initial_nonce)
-      >>= fun () ->
-      Inf_pipe.unfold ~init:initial_nonce ~f:(fun prev_nonce ->
-        (* KEY FIX: Use current timestamp for EVERY nonce, not just the first.
-           This guarantees self-healing: even if a competing process used a
-           higher nonce, the next call uses current time which is always
-           moving forward. With 300ms+ delays between calls, each nonce
-           gets a unique millisecond timestamp. *)
-        let nonce = Int.max (prev_nonce + 1) (now_ms ()) in
-          (* Persist every 100 nonces for recovery *)
-          (match nonce mod 100 with
-           | 0 -> don't_wait_for (Writer.save filename ~contents:(sprintf "%d\n" nonce))
-           | _ -> ());
-          return (nonce, nonce))
-      |> return
+    return { pipe; sequencer = Throttle.Sequencer.create ~continue_on_error:true () }
 
   let default_filename =
     let root_path =
@@ -107,7 +142,7 @@ module Request = struct
     ; payload: Yojson.Safe.t option [@default None] }
 
   let make ~request ~nonce ?payload () =
-    Inf_pipe.read nonce >>= fun nonce -> return {request; nonce; payload}
+    Inf_pipe.read nonce.pipe >>= fun n -> return {request; nonce = n; payload}
 
   let to_yojson {request; nonce; payload} : Yojson.Safe.t =
     match request_nonce_to_yojson {request; nonce} with

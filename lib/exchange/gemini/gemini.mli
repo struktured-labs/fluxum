@@ -336,7 +336,8 @@ module V1 : sig
       ; amount: Decimal_string.t
       ; available: Decimal_string.t
       ; available_for_withdrawal: Decimal_string.t
-      ; type_: string }
+      ; type_: string
+      ; timestamp: string option }
     [@@deriving sexp, yojson]
 
     (* A list of balances, one for each supported currency. *)

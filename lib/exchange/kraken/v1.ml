@@ -1001,6 +1001,85 @@ module Cancel_all = struct
 end
 
 (** Get WebSocket authentication token *)
+(* ============================================================ *)
+(* Trade Volume & Fee Tier *)
+(* ============================================================ *)
+
+(** Query 30-day trade volume and current fee schedule.
+    Returns volume in USD and per-pair fee tiers.
+    Endpoint: POST /0/private/TradeVolume *)
+module Trade_volume = struct
+  module Fee_info = struct
+    type t =
+      { fee: string
+      ; minfee: string
+      ; maxfee: string
+      ; nextfee: string [@default ""]
+      ; nextvolume: string [@default ""]
+      ; tiervolume: string [@default ""] }
+    [@@deriving sexp, of_yojson]
+  end
+
+  module T = struct
+    let name = "trade-volume"
+    let endpoint = "TradeVolume"
+
+    type request = { pair: string option [@default None] } [@@deriving sexp]
+
+    let request_to_params { pair } =
+      match pair with
+      | Some p -> [("pair", p)]
+      | None -> []
+
+    type response =
+      { currency: string
+      ; volume: string
+      ; maker_fee_bps: float option  (** Extracted maker fee for requested pair *)
+      ; taker_fee_bps: float option }
+    [@@deriving sexp]
+
+    let response_of_yojson = function
+      | `Assoc fields ->
+        let get_string key =
+          List.Assoc.find fields ~equal:String.equal key
+          |> Option.bind ~f:(function `String s -> Some s | _ -> None)
+          |> Option.value ~default:""
+        in
+        let extract_fee fee_key =
+          match List.Assoc.find fields ~equal:String.equal fee_key with
+          | Some (`Assoc pairs) ->
+            (* fees_maker: {"PAIR": {"fee": "0.1600", ...}} — take first pair *)
+            (match pairs with
+             | (_pair, `Assoc fee_fields) :: _ ->
+               List.Assoc.find fee_fields ~equal:String.equal "fee"
+               |> Option.bind ~f:(function
+                 | `String s -> (try Some (Float.of_string s *. 100.0) with _ -> None)
+                 | _ -> None)
+             | _ -> None)
+          | _ -> None
+        in
+          Result.Ok
+            { currency = get_string "currency"
+            ; volume = get_string "volume"
+            ; maker_fee_bps = extract_fee "fees_maker"
+            ; taker_fee_bps = extract_fee "fees" }
+      | _ -> Result.Error "Expected object for trade volume"
+  end
+
+  include T
+
+  module Params = struct
+    let params =
+      let open Command.Let_syntax in
+      let open Fluxum.Cli_args in
+      [%map_open
+        let pair = string_flag_option ~field_name:"pair" ~doc:"Trading pair for fee lookup" in
+          { pair }]
+  end
+
+  include Rest.Make_with_params (T) (Params)
+end
+
 module Websocket_token = struct
   module T = struct
     let name = "websocket-token"
@@ -1010,7 +1089,7 @@ module Websocket_token = struct
 
     let request_to_params () = []
 
-    type response = {token: string} [@@deriving sexp, of_yojson]
+    type response = {token: string; expires: int [@default 900]} [@@deriving sexp, of_yojson]
   end
 
   include T

@@ -109,54 +109,75 @@ module Post (Operation : Operation.S) : sig
     -> Operation.request
     -> [`Ok of Operation.response | Error.post] Deferred.t
 end = struct
-  let post (module Cfg : Cfg.S) (nonce : Nonce.reader) (request : Operation.request)
+  let post_once (module Cfg : Cfg.S) (nonce : Nonce.reader) (request : Operation.request)
     : [`Ok of Operation.response | Error.post] Deferred.t
     =
-    let payload = Operation.request_to_yojson request in
-    let path = Path.to_string Operation.path in
-      Request.make ~nonce ~request:path ~payload ()
-      >>= fun request ->
-      Request.to_yojson request
-      |> Yojson.Safe.pretty_to_string
-      |> (fun s ->
-      Log.Global.info "request as json:\n %s" s;
-      return @@ Auth.of_payload s)
-      >>= fun payload ->
-      let headers = Auth.to_headers (module Cfg) payload in
-      let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path ?query:None () in
-        Cohttp_async.Client.post
-          ~headers
-          ?chunked:None
-          ?interrupt:None
-          ?ssl_config:None
-          ?body:None
-          uri
-        >>= fun (response, body) ->
-        match Cohttp.Response.status response with
-        | `OK ->
-          Cohttp_async.Body.to_string body
-          >>| fun s ->
-          Log.Global.debug "result as json:\n %s" s;
-          let yojson = Yojson.Safe.from_string s in
-            Response.parse yojson Operation.response_of_yojson
-        | `Not_found -> return `Not_found
-        | `Not_acceptable ->
-          Cohttp_async.Body.to_string body >>| fun body -> `Not_acceptable body
-        | `Bad_request ->
-          Cohttp_async.Body.to_string body >>| fun body -> `Bad_request body
-        | `Service_unavailable ->
-          Cohttp_async.Body.to_string body >>| fun body -> `Service_unavailable body
-        | `Bad_gateway ->
-          Cohttp_async.Body.to_string body >>| fun body -> `Bad_gateway body
-        | `Gateway_timeout ->
-          Cohttp_async.Body.to_string body >>| fun body -> `Gateway_timeout body
-        | (code : Cohttp.Code.status_code) ->
-          Cohttp_async.Body.to_string body
-          >>| fun body ->
-          let msg =
-            sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) body
-          in
-            `Service_unavailable msg
+    Nonce.enqueue nonce (fun () ->
+      let payload = Operation.request_to_yojson request in
+      let path = Path.to_string Operation.path in
+        Request.make ~nonce ~request:path ~payload ()
+        >>= fun request ->
+        Request.to_yojson request
+        |> Yojson.Safe.pretty_to_string
+        |> (fun s ->
+        Log.Global.info "request as json:\n %s" s;
+        return @@ Auth.of_payload s)
+        >>= fun payload ->
+        let headers = Auth.to_headers (module Cfg) payload in
+        let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path ?query:None () in
+          Cohttp_async.Client.post
+            ~headers
+            ?chunked:None
+            ?interrupt:None
+            ?ssl_config:None
+            ?body:None
+            uri
+          >>= fun (response, body) ->
+          match Cohttp.Response.status response with
+          | `OK ->
+            Cohttp_async.Body.to_string body
+            >>| fun s ->
+            Log.Global.debug "result as json:\n %s" s;
+            let yojson = Yojson.Safe.from_string s in
+              Response.parse yojson Operation.response_of_yojson
+          | `Not_found -> return `Not_found
+          | `Not_acceptable ->
+            Cohttp_async.Body.to_string body >>| fun body -> `Not_acceptable body
+          | `Bad_request ->
+            Cohttp_async.Body.to_string body >>| fun body -> `Bad_request body
+          | `Service_unavailable ->
+            Cohttp_async.Body.to_string body >>| fun body -> `Service_unavailable body
+          | `Bad_gateway ->
+            Cohttp_async.Body.to_string body >>| fun body -> `Bad_gateway body
+          | `Gateway_timeout ->
+            Cohttp_async.Body.to_string body >>| fun body -> `Gateway_timeout body
+          | (code : Cohttp.Code.status_code) ->
+            Cohttp_async.Body.to_string body
+            >>| fun body ->
+            let msg =
+              sprintf "HTTP %s (body=%S)" (Cohttp.Code.string_of_status code) body
+            in
+              `Service_unavailable msg)
+
+  (** Retry on InvalidNonce errors. Multiple processes sharing the same API key
+      can race nonces — retrying with a fresh timestamp-based nonce self-heals. *)
+  let post cfg nonce request =
+    let max_retries = 3 in
+    let rec try_post ~attempt =
+      post_once cfg nonce request
+      >>= function
+      | `Bad_request body
+        when String.is_substring body ~substring:"InvalidNonce"
+          && attempt < max_retries ->
+        let delay_ms = 50 + Random.int 100 in
+        Log.Global.info "InvalidNonce on %s (attempt %d/%d), retrying in %dms"
+          (Path.to_string Operation.path) (attempt + 1) max_retries delay_ms;
+        after (Time_float.Span.of_ms (Float.of_int delay_ms))
+        >>= fun () ->
+        try_post ~attempt:(attempt + 1)
+      | result -> return result
+    in
+    try_post ~attempt:0
 end
 
 module Make (Operation : Operation.S) = struct

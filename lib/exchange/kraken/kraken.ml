@@ -12,6 +12,7 @@ module Ledger = Ledger
 module Session = Session
 module Unified_adapter = Unified_adapter
 module Unified_cmd = Unified_cmd
+module Private_ws = Private_ws
 module Fluxum_adapter = Fluxum_adapter
 
 let command : Command.t =
@@ -22,6 +23,7 @@ let command : Command.t =
     ; V1.Add_order.command
     ; V1.Cancel_order.command
     ; V1.Query_orders.command
+    ; V1.Trade_volume.command
     ; V1.Closed_orders.command (* Account operations - deposits/withdrawals *)
     ; V1.Deposit_methods.command
     ; V1.Deposit_addresses.command
