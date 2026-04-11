@@ -33,7 +33,18 @@ end
 
 module Decimal_number = struct
   module T = struct
-    type t = (float[@encoding `number]) [@@deriving sexp, yojson, equal, compare]
+    type t = float [@@deriving sexp, equal, compare]
+
+    let to_yojson (f : t) : Yojson.Safe.t = `Float f
+
+    let of_yojson : Yojson.Safe.t -> (t, string) result = function
+      | `Float f -> Ok f
+      | `Int i -> Ok (Float.of_int i)
+      | `Intlit s ->
+        (match Float.of_string_opt s with
+         | Some f -> Ok f
+         | None -> Error ("Decimal_number: bad intlit " ^ s))
+      | json -> Error ("Decimal_number: expected number, got " ^ Yojson.Safe.to_string json)
 
     include (Float : module type of Float with type t := t)
     include (Csvfields.Csv.Atom (Float) : Csvfields.Csv.Csvable with type t := t)

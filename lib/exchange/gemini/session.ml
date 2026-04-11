@@ -16,7 +16,7 @@ module Client_order_id = struct
 
   let pipe ~prefix () =
     pipe ~init:default_filename ()
-    >>| Inf_pipe.map ~f:(fun i -> Format.sprintf "%s-%d" prefix i)
+    >>| fun nonce -> Inf_pipe.map nonce.Nonce.pipe ~f:(fun i -> Format.sprintf "%s-%d" prefix i)
 end
 
 type status_pipe = [`Ok of Order.Status.response | Error.post] Inf_pipe.Reader.t
