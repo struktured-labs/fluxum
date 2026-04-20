@@ -27,156 +27,185 @@ type t =
   ; fragment_buf: Buffer.t (* Buffer for reassembling fragmented WebSocket messages *) }
 
 let connect ~url ?headers () =
-  let open Deferred.Or_error.Let_syntax in
   (* Parse URL for building WebSocket upgrade request *)
   let uri = Uri.of_string url in
-  let%bind host =
-    Deferred.return
-      (Result.of_option (Uri.host uri) ~error:(Error.of_string "URL must have host"))
-  in
-  let path =
-    match Uri.path uri with
-    | "" | "/" -> "/"
-    | p -> p
-  in
-  (* Use curl to establish TLS connection *)
-  let%bind curl =
-    Deferred.Or_error.try_with (fun () ->
-      In_thread.run (fun () ->
-        let conn = Curl.init () in
-        (* Convert wss:// to https:// for CONNECT_ONLY mode *)
-        let connect_url =
-          match String.is_prefix url ~prefix:"wss://" with
-          | true -> "https://" ^ String.drop_prefix url 6
-          | false ->
-            (match String.is_prefix url ~prefix:"ws://" with
-             | true -> "http://" ^ String.drop_prefix url 5
-             | false -> url)
+  match Uri.host uri with
+  | None ->
+    Deferred.Or_error.error_string "URL must have host"
+  | Some host ->
+    let path =
+      match Uri.path uri with
+      | "" | "/" -> "/"
+      | p -> p
+    in
+    (* Use curl to establish TLS connection. If any step during setup raises,
+       the handle is freed before re-raising so the socket/eventfd don't leak. *)
+    let%bind curl_result =
+      Deferred.Or_error.try_with (fun () ->
+        In_thread.run (fun () ->
+          let conn = Curl.init () in
+            try
+              (* Convert wss:// to https:// for CONNECT_ONLY mode *)
+              let connect_url =
+                match String.is_prefix url ~prefix:"wss://" with
+                | true -> "https://" ^ String.drop_prefix url 6
+                | false ->
+                  (match String.is_prefix url ~prefix:"ws://" with
+                   | true -> "http://" ^ String.drop_prefix url 5
+                   | false -> url)
+              in
+                Curl.set_url conn connect_url;
+                Curl.set_connectonly conn true;
+                Curl.set_httpversion conn Curl.HTTP_VERSION_1_1;
+                (* Force HTTP/1.1, not HTTP/2 *)
+                Curl.set_nosignal conn true;
+                (* Prevent SIGPIPE signals *)
+                Curl.set_tcpnodelay conn true;
+                (* Disable Nagle's algorithm for low-latency sends *)
+                Curl.perform conn;
+                (* Set socket to non-blocking mode for fast send/recv operations *)
+                Curl_ext.set_nonblocking conn;
+                conn
+            with exn ->
+              (try Curl.cleanup conn with _ -> ());
+              raise exn))
+    in
+      match curl_result with
+      | Error e -> return (Error e)
+      | Ok curl ->
+        (* Any error past this point must free [curl] before returning. *)
+        let cleanup_curl () =
+          In_thread.run (fun () -> try Curl.cleanup curl with _ -> ())
         in
-          Curl.set_url conn connect_url;
-          Curl.set_connectonly conn true;
-          Curl.set_httpversion conn Curl.HTTP_VERSION_1_1;
-          (* Force HTTP/1.1, not HTTP/2 *)
-          Curl.set_nosignal conn true;
-          (* Prevent SIGPIPE signals *)
-          Curl.set_tcpnodelay conn true;
-          (* Disable Nagle's algorithm for low-latency sends *)
-          Curl.perform conn;
-          (* Set socket to non-blocking mode for fast send/recv operations *)
-          Curl_ext.set_nonblocking conn;
-          conn))
-  in
-  (* Build and send WebSocket upgrade request *)
-  let ws_key = random_key () in
-  let extra_headers =
-    match headers with
-    | None -> []
-    | Some h -> List.map h ~f:(fun (name, value) -> sprintf "%s: %s" name value)
-  in
-  let request =
-    String.concat
-      ~sep:"\r\n"
-      ([ sprintf "GET %s HTTP/1.1" path
-       ; sprintf "Host: %s" host
-       ; "Upgrade: websocket"
-       ; "Connection: Upgrade"
-       ; sprintf "Sec-WebSocket-Key: %s" ws_key
-       ; "Sec-WebSocket-Version: 13"
-       ; sprintf "Origin: https://%s" host ]
-       @ extra_headers
-       @ [""; ""])
-  in
-  (* Send using curl's send (goes through TLS) *)
-  let%bind () =
-    Deferred.Or_error.try_with (fun () ->
-      In_thread.run (fun () ->
-        let bytes = Bytes.of_string request in
-        let rec send_all offset =
-          match offset >= Bytes.length bytes with
-          | true -> ()
-          | false ->
-            let sent = Curl_ext.send curl bytes offset (Bytes.length bytes - offset) in
-              (match sent = 0 with
-               | true -> failwith "Connection closed while sending"
-               | false -> send_all (offset + sent))
+        let bail err =
+          let%bind () = cleanup_curl () in
+            return (Error err)
         in
-          send_all 0))
-  in
-  (* Read HTTP response using curl's recv, preserving any leftover bytes *)
-  let%bind response_lines, leftover_bytes, leftover_length =
-    Deferred.Or_error.try_with (fun () ->
-      In_thread.run (fun () ->
-        let buffer = Buffer.create 4096 in
-        let recv_buf = Bytes.create 1024 in
-        let rec read_until_headers () =
-          let received = Curl_ext.recv curl recv_buf 0 (Bytes.length recv_buf) in
-            match received = 0 with
-            | true -> failwith "Connection closed during upgrade"
-            | false ->
-              Buffer.add_subbytes buffer recv_buf ~pos:0 ~len:received;
-              let content = Buffer.contents buffer in
-                (* Check if we have complete headers (ends with \r\n\r\n) *)
-                (match String.is_substring content ~substring:"\r\n\r\n" with
-                 | true -> content
-                 | false -> read_until_headers ())
+        (* Build and send WebSocket upgrade request *)
+        let ws_key = random_key () in
+        let extra_headers =
+          match headers with
+          | None -> []
+          | Some h ->
+            List.map h ~f:(fun (name, value) -> sprintf "%s: %s" name value)
         in
-        let response = read_until_headers () in
-        (* Split at \r\n\r\n boundary - save any leftover bytes for WS frames *)
-        let header_end =
-          match String.substr_index response ~pattern:"\r\n\r\n" with
-          | Some idx -> idx + 4
-          | None -> String.length response
+        let request =
+          String.concat
+            ~sep:"\r\n"
+            ([ sprintf "GET %s HTTP/1.1" path
+             ; sprintf "Host: %s" host
+             ; "Upgrade: websocket"
+             ; "Connection: Upgrade"
+             ; sprintf "Sec-WebSocket-Key: %s" ws_key
+             ; "Sec-WebSocket-Version: 13"
+             ; sprintf "Origin: https://%s" host ]
+             @ extra_headers
+             @ [""; ""])
         in
-        let leftover_str = String.drop_prefix response header_end in
-        let leftover_bytes = Bytes.of_string leftover_str in
-        let leftover_length = String.length leftover_str in
-        (* Parse only the header portion *)
-        let header_portion = String.prefix response header_end in
-        let lines = String.split header_portion ~on:'\n' in
-        let parsed_lines =
-          List.map lines ~f:String.strip
-          |> List.filter ~f:(fun s -> not (String.is_empty s))
+        (* Send using curl's send (goes through TLS) *)
+        let%bind send_result =
+          Deferred.Or_error.try_with (fun () ->
+            In_thread.run (fun () ->
+              let bytes = Bytes.of_string request in
+              let rec send_all offset =
+                match offset >= Bytes.length bytes with
+                | true -> ()
+                | false ->
+                  let sent =
+                    Curl_ext.send curl bytes offset (Bytes.length bytes - offset)
+                  in
+                    (match sent = 0 with
+                     | true -> failwith "Connection closed while sending"
+                     | false -> send_all (offset + sent))
+              in
+                send_all 0))
         in
-          (parsed_lines, leftover_bytes, leftover_length)))
-  in
-  (* Parse status code *)
-  let status_code =
-    match response_lines with
-    | [] -> 0
-    | status_line :: _ ->
-      (match String.split status_line ~on:' ' with
-       | _ :: code_str :: _ ->
-         (match Int.of_string code_str with
-          | code -> code
-          | exception _ -> 0)
-       | _ -> 0)
-  in
-    match status_code <> 101 with
-    | true ->
-      Deferred.Or_error.error_string
-        (sprintf "WebSocket upgrade failed: HTTP %d" status_code)
-    | false ->
-      (* Parse headers *)
-      let headers = String.Table.create () in
-        List.iter (List.tl_exn response_lines) ~f:(fun line ->
-          match String.lsplit2 line ~on:':' with
-          | Some (name, value) ->
-            Hashtbl.set
-              headers
-              ~key:(String.lowercase (String.strip name))
-              ~data:(String.strip value)
-          | None -> ());
-        (* Verify Sec-WebSocket-Accept *)
-        let expected_accept = compute_accept_key ws_key in
-          (match Hashtbl.find headers "sec-websocket-accept" with
-           | Some actual when String.equal actual expected_accept ->
-             return
-               { curl
-               ; closed= false
-               ; leftover= leftover_bytes
-               ; leftover_len= leftover_length
-               ; fragment_buf= Buffer.create 4096 }
-           | _ -> Deferred.Or_error.error_string "Invalid Sec-WebSocket-Accept")
+          match send_result with
+          | Error e -> bail e
+          | Ok () ->
+            (* Read HTTP response using curl's recv, preserving any leftover bytes *)
+            let%bind recv_result =
+              Deferred.Or_error.try_with (fun () ->
+                In_thread.run (fun () ->
+                  let buffer = Buffer.create 4096 in
+                  let recv_buf = Bytes.create 1024 in
+                  let rec read_until_headers () =
+                    let received =
+                      Curl_ext.recv curl recv_buf 0 (Bytes.length recv_buf)
+                    in
+                      match received = 0 with
+                      | true -> failwith "Connection closed during upgrade"
+                      | false ->
+                        Buffer.add_subbytes buffer recv_buf ~pos:0 ~len:received;
+                        let content = Buffer.contents buffer in
+                          (* Check if we have complete headers (ends with \r\n\r\n) *)
+                          (match String.is_substring content ~substring:"\r\n\r\n" with
+                           | true -> content
+                           | false -> read_until_headers ())
+                  in
+                  let response = read_until_headers () in
+                  (* Split at \r\n\r\n boundary - save any leftover bytes for WS frames *)
+                  let header_end =
+                    match String.substr_index response ~pattern:"\r\n\r\n" with
+                    | Some idx -> idx + 4
+                    | None -> String.length response
+                  in
+                  let leftover_str = String.drop_prefix response header_end in
+                  let leftover_bytes = Bytes.of_string leftover_str in
+                  let leftover_length = String.length leftover_str in
+                  (* Parse only the header portion *)
+                  let header_portion = String.prefix response header_end in
+                  let lines = String.split header_portion ~on:'\n' in
+                  let parsed_lines =
+                    List.map lines ~f:String.strip
+                    |> List.filter ~f:(fun s -> not (String.is_empty s))
+                  in
+                    (parsed_lines, leftover_bytes, leftover_length)))
+            in
+              match recv_result with
+              | Error e -> bail e
+              | Ok (response_lines, leftover_bytes, leftover_length) ->
+                (* Parse status code *)
+                let status_code =
+                  match response_lines with
+                  | [] -> 0
+                  | status_line :: _ ->
+                    (match String.split status_line ~on:' ' with
+                     | _ :: code_str :: _ ->
+                       (match Int.of_string code_str with
+                        | code -> code
+                        | exception _ -> 0)
+                     | _ -> 0)
+                in
+                  (match status_code <> 101 with
+                   | true ->
+                     bail
+                       (Error.of_string
+                          (sprintf "WebSocket upgrade failed: HTTP %d" status_code))
+                   | false ->
+                     (* Parse headers *)
+                     let headers = String.Table.create () in
+                       List.iter (List.tl_exn response_lines) ~f:(fun line ->
+                         match String.lsplit2 line ~on:':' with
+                         | Some (name, value) ->
+                           Hashtbl.set
+                             headers
+                             ~key:(String.lowercase (String.strip name))
+                             ~data:(String.strip value)
+                         | None -> ());
+                       (* Verify Sec-WebSocket-Accept *)
+                       let expected_accept = compute_accept_key ws_key in
+                         (match Hashtbl.find headers "sec-websocket-accept" with
+                          | Some actual when String.equal actual expected_accept ->
+                            return
+                              (Ok
+                                 { curl
+                                 ; closed= false
+                                 ; leftover= leftover_bytes
+                                 ; leftover_len= leftover_length
+                                 ; fragment_buf= Buffer.create 4096 })
+                          | _ ->
+                            bail (Error.of_string "Invalid Sec-WebSocket-Accept")))
 
 (* Encode a masked WebSocket frame with given opcode *)
 let encode_frame ~opcode payload =
