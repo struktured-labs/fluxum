@@ -3,6 +3,14 @@
     Signs requests using RSA-PSS with SHA-256.
     Signature = sign(timestamp_ms + method + path_without_query) *)
 
+(* Initialize mirage-crypto's RNG exactly once when this module is loaded.
+   Without this, RSA signing raises "The default generator is not yet initialized." *)
+let () = Mirage_crypto_rng_unix.use_default ()
+
+(* Kalshi uses RSA-PSS with SHA-256, not PKCS1. Salt length defaults to hlen
+   (SHA256 digest size = 32 bytes), which matches Kalshi's expectation. *)
+module PSS_SHA256 = Mirage_crypto_pk.Rsa.PSS (Digestif.SHA256)
+
 let load_private_key path =
   let pem_data = In_channel.read_all path in
   match X509.Private_key.decode_pem pem_data with
@@ -13,10 +21,10 @@ let load_private_key path =
 let sign_request ~private_key_path ~timestamp_ms ~http_method ~path =
   let key = load_private_key private_key_path in
   let message = sprintf "%s%s%s" timestamp_ms (String.uppercase http_method) path in
-  match Mirage_crypto_pk.Rsa.PKCS1.sign ~hash:`SHA256 ~key (`Message message) with
+  match PSS_SHA256.sign ~key (`Message message) with
   | signature -> Base64.encode_exn signature
   | exception exn ->
-    failwithf "Kalshi: RSA signing failed: %s" (Exn.to_string exn) ()
+    failwithf "Kalshi: RSA-PSS signing failed: %s" (Exn.to_string exn) ()
 
 let headers (cfg : (module Cfg.S)) ~http_method ~path =
   let module Cfg = (val cfg : Cfg.S) in
