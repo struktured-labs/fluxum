@@ -28,7 +28,7 @@ let param ?default ~name () =
 
 let host ~env =
   match String.lowercase env with
-  | "production" | "prod" -> "api.kalshi.com"
+  | "production" | "prod" -> "api.elections.kalshi.com"
   | "demo" | "sandbox" -> "demo-api.kalshi.co"
   | _ -> failwithf "Kalshi environment must be 'production' or 'demo'" ()
 
