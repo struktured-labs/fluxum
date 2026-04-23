@@ -17,13 +17,37 @@ let home_dir () =
   | Some h -> h
   | None -> "/tmp"
 
-let param ?default ~name () =
-  let env_name = sprintf "KALSHI_%s" (String.uppercase name) in
-  match Unix.getenv env_name with
+(** Look up a Kalshi env var. Prefers env-specific form
+    (KALSHI_PRODUCTION_API_KEY, KALSHI_DEMO_API_KEY) when [env] is given;
+    falls back to the generic form (KALSHI_API_KEY). This matches the
+    KALSHI_PRODUCTION_* / KALSHI_DEMO_* convention used by fluxum's other
+    exchange adapters (GEMINI_PRODUCTION_*, KRAKEN_PRODUCTION_*, etc). *)
+let param ?default ?env ~name () =
+  let name_u = String.uppercase name in
+  let env_candidates =
+    match env with
+    | Some e ->
+      let env_u = String.uppercase e in
+      (* Normalize "prod" → "PRODUCTION", "sandbox" → "DEMO" for variable naming *)
+      let canon =
+        match String.lowercase e with
+        | "prod" -> "PRODUCTION"
+        | "sandbox" -> "DEMO"
+        | _ -> env_u
+      in
+      [ sprintf "KALSHI_%s_%s" canon name_u; sprintf "KALSHI_%s" name_u ]
+    | None -> [ sprintf "KALSHI_%s" name_u ]
+  in
+  let found =
+    List.find_map env_candidates ~f:(fun v -> Unix.getenv v)
+  in
+  match found with
   | Some v -> v
   | None ->
     (match default with
-     | None -> failwithf "Environment variable %S must be specified" env_name ()
+     | None ->
+       let primary = List.hd_exn env_candidates in
+       failwithf "Environment variable %S must be specified" primary ()
      | Some d -> d)
 
 let host ~env =
@@ -35,10 +59,10 @@ let host ~env =
 let make env =
   let module M = struct
     let api_host = host ~env
-    let api_key = param ~name:"API_KEY" ()
+    let api_key = param ~env ~name:"API_KEY" ()
 
     let private_key_path =
-      param ~name:"PRIVATE_KEY_PATH"
+      param ~env ~name:"PRIVATE_KEY_PATH"
         ~default:(sprintf "%s/.kalshi/private_key.pem" (home_dir ()))
         ()
   end
