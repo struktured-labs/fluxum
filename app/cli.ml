@@ -2087,6 +2087,186 @@ let bot_command =
                   Deferred.unit)
               <*> output_dir) ) ]
 
+(* Read-only Ethereum wallet introspection. Generic: takes address + optional
+   token, returns balances and recent transfer history. No fluxit-specific
+   integration glue here — that lives in fluxit's bin/eth_wallet.ml. *)
+let eth_wallet_default_rpc = "https://eth.llamarpc.com"
+
+let eth_wallet_rpc_flag =
+  let open Command.Param in
+    flag
+      "-rpc-url"
+      (optional_with_default
+         (match Sys.getenv "ETH_RPC_URL" with
+          | Some u -> u
+          | None -> eth_wallet_default_rpc)
+         string)
+      ~doc:
+        (sprintf
+           "URL Ethereum JSON-RPC endpoint (env: ETH_RPC_URL, default: %s)"
+           eth_wallet_default_rpc)
+
+let parse_since_arg (s : string) : Core.Time_float.Span.t =
+  let n = String.length s in
+    match n < 2 with
+    | true -> failwithf "Invalid --since: %S (expect e.g. 7d, 24h, 30m)" s ()
+    | false ->
+      let suffix = String.get s (n - 1) in
+      let num_str = String.sub s ~pos:0 ~len:(n - 1) in
+      let num = Float.of_string num_str in
+        match suffix with
+        | 'd' -> Core.Time_float.Span.of_day num
+        | 'h' -> Core.Time_float.Span.of_hr num
+        | 'm' -> Core.Time_float.Span.of_min num
+        | 's' -> Core.Time_float.Span.of_sec num
+        | _ ->
+          failwithf
+            "Invalid --since suffix: %c (use d/h/m/s)"
+            suffix
+            ()
+
+let print_transfers transfers =
+  List.iter transfers ~f:(fun (t : Ethereum.Wallet.Transfer.t) ->
+    let dir =
+      match t.direction with
+      | `Incoming -> "IN "
+      | `Outgoing -> "OUT"
+      | `Self -> "SLF"
+    in
+    let counterparty =
+      match t.direction with
+      | `Incoming -> t.from_addr
+      | `Outgoing | `Self -> t.to_addr
+    in
+      printf
+        "blk=%d  %s  %s  %s  tx=%s\n"
+        t.block_number
+        dir
+        (Ethereum.Erc20.Token_amount.to_display t.value)
+        counterparty
+        t.tx_hash)
+
+let eth_wallet_balance_cmd =
+  Command.async
+    ~summary:"Show native ETH balance for an address"
+    Command.Param.(
+      let address = flag "-address" (required string) ~doc:"0xHEX wallet address"
+      and rpc_url = eth_wallet_rpc_flag in
+        return (fun address rpc_url () ->
+          let%bind r = Ethereum.Wallet.eth_balance ~rpc_url ~address in
+            match r with
+            | Ok amt ->
+              print_endline (Ethereum.Erc20.Token_amount.to_display amt);
+              Deferred.unit
+            | Error e ->
+              eprintf "ERROR: %s\n"
+                (Sexp.to_string_hum (Ethereum.Rpc.sexp_of_error e));
+              exit 1)
+        <*> address
+        <*> rpc_url)
+
+let eth_wallet_erc20_cmd =
+  Command.async
+    ~summary:"Show ERC-20 token balance for an address"
+    Command.Param.(
+      let address = flag "-address" (required string) ~doc:"0xHEX wallet address"
+      and token = flag "-token" (required string) ~doc:"0xHEX ERC-20 contract address"
+      and rpc_url = eth_wallet_rpc_flag in
+        return (fun address token rpc_url () ->
+          let%bind r =
+            Ethereum.Wallet.erc20_balance ~rpc_url ~address ~contract:token
+          in
+            match r with
+            | Ok amt ->
+              print_endline (Ethereum.Erc20.Token_amount.to_display amt);
+              Deferred.unit
+            | Error e ->
+              eprintf "ERROR: %s\n"
+                (Sexp.to_string_hum (Ethereum.Rpc.sexp_of_error e));
+              exit 1)
+        <*> address
+        <*> token
+        <*> rpc_url)
+
+let eth_wallet_transfers_cmd =
+  Command.async
+    ~summary:"Show recent ERC-20 Transfer events involving an address"
+    Command.Param.(
+      let address = flag "-address" (required string) ~doc:"0xHEX wallet address"
+      and token = flag "-token" (required string) ~doc:"0xHEX ERC-20 contract address"
+      and since =
+        flag
+          "-since"
+          (optional string)
+          ~doc:"DURATION Lookback span (e.g. 7d, 24h); default 7d"
+      and last_blocks =
+        flag
+          "-last-blocks"
+          (optional int)
+          ~doc:"N Lookback by block count (overrides --since)"
+      and rpc_url = eth_wallet_rpc_flag in
+        return (fun address token since last_blocks rpc_url () ->
+          let span_opt = Option.map since ~f:parse_since_arg in
+          let handle_result r =
+            match r with
+            | Ok transfers ->
+              print_transfers transfers;
+              Deferred.unit
+            | Error e ->
+              eprintf "ERROR: %s\n"
+                (Sexp.to_string_hum (Ethereum.Rpc.sexp_of_log_error e));
+              exit 1
+          in
+            match last_blocks with
+            | None ->
+              let since_span =
+                Option.value
+                  span_opt
+                  ~default:Ethereum.Wallet.default_lookback_span
+              in
+                let%bind r =
+                  Ethereum.Wallet.recent_transfers
+                    ~rpc_url
+                    ~address
+                    ~contract:token
+                    ~since:since_span
+                    ()
+                in
+                  handle_result r
+            | Some n ->
+              let%bind end_block_r =
+                Ethereum.Rpc.eth_block_number ~rpc_url
+              in
+                (match end_block_r with
+                 | Error e ->
+                   eprintf "ERROR: %s\n"
+                     (Sexp.to_string_hum (Ethereum.Rpc.sexp_of_error e));
+                   exit 1
+                 | Ok end_block ->
+                   let from_block = Int.max 0 (end_block - n) in
+                     let%bind r =
+                       Ethereum.Wallet.recent_transfers
+                         ~rpc_url
+                         ~address
+                         ~contract:token
+                         ~from_block
+                         ~to_block:end_block
+                         ()
+                     in
+                       handle_result r))
+        <*> address
+        <*> token
+        <*> since
+        <*> last_blocks
+        <*> rpc_url)
+
+let eth_wallet_command =
+  Command.group
+    ~summary:"Read-only Ethereum wallet introspection"
+    [ ("balance", eth_wallet_balance_cmd)
+    ; ("erc20", eth_wallet_erc20_cmd)
+    ; ("transfers", eth_wallet_transfers_cmd) ]
+
 (* Main command structure *)
 let command =
   Command.group
@@ -2108,6 +2288,7 @@ let command =
     ; ("kalshi", kalshi_command)
     ; ("gateio", gateio_command)
     ; ("kucoin", kucoin_command)
+    ; ("eth-wallet", eth_wallet_command)
     ; ("api", api_command)
     ; ("backtest", backtest_command)
     ; ("bot", bot_command)
