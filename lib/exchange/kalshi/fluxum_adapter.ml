@@ -188,6 +188,9 @@ module Adapter = struct
       | `Api_error msg ->
         Types.Error.Exchange_specific
           { venue= Venue.t; code= "api"; message= msg }
+      | `Network msg ->
+        Types.Error.Exchange_specific
+          { venue= Venue.t; code= "network"; message= msg }
       | `Not_found ->
         Types.Error.Exchange_specific
           { venue= Venue.t; code= "404"; message= "not_found" }
