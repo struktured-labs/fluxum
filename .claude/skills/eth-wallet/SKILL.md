@@ -17,7 +17,7 @@ Wraps `fluxum eth-wallet` for quick on-chain wallet queries from a single Claude
 | `erc20` | ERC-20 token balance | `-address 0x...` `-token 0x...` |
 | `transfers` | Recent Transfer events for the address | `-address 0x...` `-token 0x...` `[-since 7d \| -last-blocks N]` |
 
-All subcommands accept `-rpc-url URL` (defaults to `https://eth.llamarpc.com`; override with `ETH_RPC_URL` env var if you have an Alchemy/Infura key).
+All subcommands accept `-rpc-url URL` (defaults to `https://1rpc.io/eth`; override with `ETH_RPC_URL` env var if you have an Alchemy/Infura key).
 
 ## Run
 
@@ -54,5 +54,5 @@ If the RPC returns an error, the command exits non-zero with `ERROR: <sexp>` on 
 ## Limitations
 
 - Mainnet only by default. For L2s, override `-rpc-url` (block-time heuristic in `transfers --since` assumes 12s/block — pass `-last-blocks N` directly on faster chains).
-- Free public RPCs rate-limit aggressively. Long `transfers` lookbacks paginate in 10k-block chunks with a 200ms pause; if you see `Max_logs_per_call_exceeded`, narrow the window.
+- Free public RPCs rate-limit aggressively. Long `transfers` lookbacks paginate in 10k-block chunks with a 200ms pause; if you see `Max_logs_per_call_exceeded`, narrow the window. As of 2026-04-27: `1rpc.io/eth` (default), `ethereum-rpc.publicnode.com`, `eth.drpc.org` all handle batching cleanly; `eth.llamarpc.com` 429s on Multicall3 follow-ups; `cloudflare-eth.com` errors on batches; `ankr.com/eth` now requires an API key.
 - No signing. For transactions, see `fluxum`'s exchange or DEX adapters.

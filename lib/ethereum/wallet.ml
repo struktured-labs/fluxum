@@ -351,10 +351,19 @@ let recent_transfers
                                               ~decimals
                                               ~symbol)
              in
-             let sorted =
-               List.sort transfers ~compare:(fun a b ->
-                 match Int.compare a.block_number b.block_number with
-                 | 0 -> Int.compare a.log_index b.log_index
-                 | n -> n)
+             (* Self-transfers (from = to = queried_address) match BOTH the
+                outgoing and incoming topic filters and would appear twice in
+                [all_logs]. Dedup by (block_number, tx_hash, log_index) — the
+                canonical unique key for a log entry on the chain. *)
+             let deduped =
+               List.dedup_and_sort
+                 transfers
+                 ~compare:(fun (a : Transfer.t) (b : Transfer.t) ->
+                   match Int.compare a.block_number b.block_number with
+                   | 0 ->
+                     (match Int.compare a.log_index b.log_index with
+                      | 0 -> String.compare a.tx_hash b.tx_hash
+                      | c -> c)
+                   | c -> c)
              in
-               return (Ok sorted))
+               return (Ok deduped))
