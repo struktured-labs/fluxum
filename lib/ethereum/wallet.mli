@@ -20,6 +20,29 @@ val blocks_in_span : Core.Time_float.Span.t -> int
 (** Default lookback window for [recent_transfers]: 7 days = ~50,400 blocks. *)
 val default_lookback_span : Core.Time_float.Span.t
 
+(** {1 Recommended defaults}
+
+    These constants centralize fluxum's current recommendations so consumers
+    can opt-in via [let rpc = Wallet.default_rpc_url in ...] rather than
+    hardcoding their own copies. When fluxum updates a recommendation,
+    consumers using these constants benefit automatically. *)
+
+(** Default Ethereum mainnet RPC endpoint (v0.11.0+: [https://1rpc.io/eth]).
+    Picked for clean Multicall3 handling without auth or aggressive
+    rate-limits. *)
+val default_rpc_url : string
+
+(** Default block-chunk size for paginated [eth_getLogs] queries (10,000). *)
+val default_chunk_size : int
+
+(** Default politeness pause between paginated [eth_getLogs] chunks (200ms). *)
+val default_pause_between_chunks : Core.Time_float.Span.t
+
+(** Block-time heuristic used by [blocks_in_span] (12s — Ethereum mainnet
+    post-Merge). L2s differ; consumers querying L2s should compute block
+    counts directly rather than via [recent_transfers ?since]. *)
+val mainnet_block_time_seconds : float
+
 (** Fetch native ETH balance of an address.
     Returns a typed [Token_amount.t] with decimals=18 and symbol="ETH". *)
 val eth_balance :

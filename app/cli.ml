@@ -2090,10 +2090,9 @@ let bot_command =
 (* Read-only Ethereum wallet introspection. Generic: takes address + optional
    token, returns balances and recent transfer history. No fluxit-specific
    integration glue here — that lives in fluxit's bin/eth_wallet.ml. *)
-(* Default RPC: 1rpc.io handles Multicall3 batched calls cleanly without
-   rate-limits. llamarpc 429s on follow-up batched calls; cloudflare-eth
-   returns "Internal error" on Multicall3; ankr requires API keys. *)
-let eth_wallet_default_rpc = "https://1rpc.io/eth"
+(* Default RPC tracked as a library constant so consumer binaries can
+   opt-in to "use whatever fluxum currently recommends." *)
+let eth_wallet_default_rpc = Ethereum.Wallet.default_rpc_url
 
 let eth_wallet_rpc_flag =
   let open Command.Param in

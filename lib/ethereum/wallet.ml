@@ -15,6 +15,21 @@ let blocks_in_span (span : Core.Time_float.Span.t) : int =
 
 let default_lookback_span = Core.Time_float.Span.of_day 7.
 
+(** Default Ethereum mainnet RPC endpoint. As of v0.11.0: 1rpc.io/eth, which
+    handles Multicall3 batched calls cleanly without auth or rate-limits.
+    See [doc/eth_rpc_reliability.md] for empirical comparison.
+    Consumers should reference this constant rather than hardcoding so they
+    auto-benefit from future updates without consumer-side code changes. *)
+let default_rpc_url = "https://1rpc.io/eth"
+
+(** Default block-chunk size for paginated [eth_getLogs] queries.
+    10,000 matches most public-RPC provider caps. *)
+let default_chunk_size = 10_000
+
+(** Default politeness pause between paginated [eth_getLogs] chunks (200ms).
+    Prevents free-tier rate-limit responses on long lookbacks. *)
+let default_pause_between_chunks = Core.Time_float.Span.of_ms 200.
+
 let eth_balance ~rpc_url ~address =
   Eth_rpc.eth_get_balance ~rpc_url ~address
   >>| function
@@ -248,9 +263,9 @@ let decode_transfer_log
          | _ -> None)
     | _ -> None
 
-let chunk_size = 10_000
+let chunk_size = default_chunk_size
 
-let pause_between_chunks = Core.Time_float.Span.of_ms 200.
+let pause_between_chunks = default_pause_between_chunks
 
 (** Iterate [from_block..to_block] in [chunk_size]-block windows, calling [f]
     on each window. Pauses between windows. Aborts on first error. *)
