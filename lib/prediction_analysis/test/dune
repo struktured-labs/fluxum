@@ -1,0 +1,6 @@
+(test
+ (name test_prediction)
+ (modules test_prediction)
+ (libraries core prediction_analysis)
+ (preprocess
+  (pps ppx_jane)))
