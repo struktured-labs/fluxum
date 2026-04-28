@@ -13,8 +13,11 @@
     - {!Spread}: Roll's spread estimator with discrete-tick detection
     - {!Liquidity}: Kyle's lambda, Amihud illiquidity with settlement-window
       contamination filters and zero-volume handling
-    - {!Order_flow}: Orderbook imbalance with sampling-aliasing detection *)
+    - {!Order_flow}: Orderbook imbalance with sampling-aliasing detection
+    - {!Ofi}: Order Flow Imbalance from fluxit's empirically-validated
+      Python prototype (signals at p<0.01 on 32h Gemini data) *)
 
 module Spread = Spread
 module Liquidity = Liquidity
 module Order_flow = Order_flow
+module Ofi = Ofi

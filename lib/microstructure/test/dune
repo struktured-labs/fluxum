@@ -1,6 +1,7 @@
 (test
  (name test_microstructure)
  (modules test_microstructure)
- (libraries core core_unix.time_float_unix microstructure)
+ (libraries core core_unix.time_float_unix core_unix.time_ns_unix microstructure)
  (preprocess
-  (pps ppx_jane)))
+  (pps ppx_jane))
+ (flags :standard -open Core))

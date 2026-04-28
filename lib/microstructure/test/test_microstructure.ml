@@ -266,6 +266,180 @@ let test_imbalance_no_gate () =
            (Microstructure.Order_flow.sexp_of_imbalance_result other));
       exit 1
 
+(* ================================ OFI ================================ *)
+
+let make_trade ~tid ~ts ~price ~amount ~aggressor : Microstructure.Ofi.Trade.t =
+  { tid = Int64.of_int tid
+  ; timestamp = ts
+  ; price
+  ; amount
+  ; aggressor
+  }
+
+let test_ofi_no_lookahead () =
+  (* The trade at index i must NOT include itself in its own OFI window.
+     Two trades at the same instant: the second's OFI window contains the
+     first only. *)
+  let ts0 = Time_ns_unix.now () in
+  let trades =
+    [| make_trade ~tid:1 ~ts:ts0 ~price:100. ~amount:1. ~aggressor:`Buy
+     ; make_trade ~tid:2
+         ~ts:(Time_ns_unix.add ts0 (Time_ns.Span.of_min 1.))
+         ~price:100.
+         ~amount:1.
+         ~aggressor:`Sell
+    |]
+  in
+  let tagged =
+    Microstructure.Ofi.compute
+      ~trades
+      ~window:(Time_ns.Span.of_hr 1.)
+      ~min_window_trades:1
+      ()
+  in
+  let t0 = tagged.(0) in
+  let t1 = tagged.(1) in
+  (* t0 has nothing before it → No_data or Insufficient *)
+  let t0_ok =
+    match t0.ofi with
+    | No_data | Insufficient_trades 0 -> true
+    | _ -> false
+  in
+  (* t1's window contains only t0 (a buy of value 100); no sells → Saturated_buy *)
+  let t1_ok =
+    match t1.ofi with
+    | Saturated_buy -> true
+    | _ -> false
+  in
+    match t0_ok && t1_ok with
+    | true -> printf "OK   ofi look-ahead-safe: t0=No_data, t1=Saturated_buy\n"
+    | false ->
+      eprintf "FAIL ofi look-ahead: t0=%s, t1=%s\n"
+        (Sexp.to_string (Microstructure.Ofi.sexp_of_ofi_value t0.ofi))
+        (Sexp.to_string (Microstructure.Ofi.sexp_of_ofi_value t1.ofi));
+      exit 1
+
+let test_ofi_basic_ratio () =
+  let ts0 = Time_ns_unix.now () in
+  let mins n =
+    Time_ns_unix.add ts0 (Time_ns.Span.of_min (Float.of_int n))
+  in
+  let trades =
+    [| make_trade ~tid:1 ~ts:(mins 0) ~price:100. ~amount:2. ~aggressor:`Buy
+     ; make_trade ~tid:2 ~ts:(mins 5) ~price:100. ~amount:1. ~aggressor:`Buy
+     ; make_trade ~tid:3 ~ts:(mins 10) ~price:100. ~amount:1. ~aggressor:`Sell
+     (* The 11th-min trade's window contains all 3 above:
+        buy_value = (100*2 + 100*1) = 300; sell_value = 100
+        OFI = 3.0 *)
+     ; make_trade ~tid:4 ~ts:(mins 11) ~price:100. ~amount:1. ~aggressor:`Buy
+    |]
+  in
+  let tagged =
+    Microstructure.Ofi.compute
+      ~trades
+      ~window:(Time_ns.Span.of_hr 1.)
+      ~min_window_trades:3
+      ()
+  in
+  let t3 = tagged.(3) in
+    match t3.ofi with
+    | Ofi v ->
+      assert_approx_eq ~name:"ofi 3:1 ratio" v 3.0 ~eps:1e-9;
+      assert_approx_eq
+        ~name:"ofi window buy_value"
+        t3.window_buy_value
+        300.
+        ~eps:1e-9;
+      assert_approx_eq
+        ~name:"ofi window sell_value"
+        t3.window_sell_value
+        100.
+        ~eps:1e-9
+    | other ->
+      eprintf "FAIL ofi basic: %s\n"
+        (Sexp.to_string (Microstructure.Ofi.sexp_of_ofi_value other));
+      exit 1
+
+let test_ofi_min_window_trades_gate () =
+  let ts0 = Time_ns_unix.now () in
+  let trades =
+    [| make_trade ~tid:1 ~ts:ts0 ~price:100. ~amount:1. ~aggressor:`Buy
+     ; make_trade ~tid:2
+         ~ts:(Time_ns_unix.add ts0 (Time_ns.Span.of_sec 1.))
+         ~price:100.
+         ~amount:1.
+         ~aggressor:`Buy
+    |]
+  in
+  let tagged =
+    Microstructure.Ofi.compute
+      ~trades
+      ~window:(Time_ns.Span.of_hr 1.)
+      ~min_window_trades:5
+      ()
+  in
+  let t1 = tagged.(1) in
+    match t1.ofi with
+    | Insufficient_trades 1 ->
+      printf "OK   ofi min_window_trades gate fires: 1 < 5\n"
+    | other ->
+      eprintf "FAIL ofi min_window_trades: %s\n"
+        (Sexp.to_string (Microstructure.Ofi.sexp_of_ofi_value other));
+      exit 1
+
+let test_ofi_default_bins_shape () =
+  let bins = Microstructure.Ofi.default_bins in
+  let n = List.length bins in
+    match n = 5 with
+    | true -> printf "OK   ofi default_bins has 5 entries\n"
+    | false ->
+      eprintf "FAIL ofi default_bins: expected 5, got %d\n" n;
+      exit 1
+
+let test_predictive_validity_smoke () =
+  (* Synthetic: 30 trades over 30 minutes, alternating buy/sell with
+     mid drifting up. Expect non-NaN result; we don't assert specific
+     p-values since 30 trades + 100 shuffles is too small for stable
+     statistics. *)
+  let ts0 = Time_ns_unix.now () in
+  let mins n =
+    Time_ns_unix.add ts0 (Time_ns.Span.of_min (Float.of_int n))
+  in
+  let trades =
+    Array.init 30 ~f:(fun i ->
+      let aggressor = match i % 2 with 0 -> `Buy | _ -> `Sell in
+        make_trade ~tid:i ~ts:(mins i) ~price:100. ~amount:1. ~aggressor)
+  in
+  let tagged =
+    Microstructure.Ofi.compute
+      ~trades
+      ~window:(Time_ns.Span.of_min 30.)
+      ~min_window_trades:1
+      ()
+  in
+  let mid_series =
+    Array.init 60 ~f:(fun i ->
+      (mins i, 100. +. (Float.of_int i *. 0.01)))
+  in
+  let result =
+    Microstructure.Ofi.predictive_validity
+      ~tagged_trades:tagged
+      ~mid_series
+      ~fwd_windows:[Time_ns.Span.of_min 5.]
+      ~n_shuffles:100
+      ()
+  in
+  let n_bins_per_window = List.length Microstructure.Ofi.default_bins in
+    match Array.length result.per_bin_drift = n_bins_per_window with
+    | true ->
+      printf
+        "OK   predictive_validity smoke: %d bin-drifts, %d shuffle tests\n"
+        (Array.length result.per_bin_drift)
+        (Array.length result.shuffle_tests)
+    | false ->
+      eprintf "FAIL predictive_validity smoke: bin count mismatch\n";
+      exit 1
+
 (* =============================== Main ================================ *)
 
 let () =
@@ -282,4 +456,9 @@ let () =
   test_imbalance_basic ();
   test_imbalance_sampling_aliased ();
   test_imbalance_no_gate ();
+  test_ofi_no_lookahead ();
+  test_ofi_basic_ratio ();
+  test_ofi_min_window_trades_gate ();
+  test_ofi_default_bins_shape ();
+  test_predictive_validity_smoke ();
   printf "\nAll Microstructure tests passed.\n"
