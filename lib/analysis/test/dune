@@ -1,0 +1,6 @@
+(test
+ (name test_analysis)
+ (modules test_analysis)
+ (libraries core analysis fluxum)
+ (preprocess
+  (pps ppx_jane)))
