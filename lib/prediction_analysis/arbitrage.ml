@@ -55,3 +55,35 @@ let best_two_leg ~quotes =
   match all_two_leg ~quotes with
   | [] -> None
   | top :: _ -> Some top
+
+type categorical_result =
+  | Arb of float
+  | Insufficient_coverage of
+      { observed_count : int
+      ; expected_count : int
+      ; observed_sum : float
+      }
+  | No_arb of float
+[@@deriving sexp]
+
+let categorical_check
+    ~outcome_prices
+    ~expected_outcomes
+    ?(min_coverage_fraction = 1.0)
+    ()
+  =
+  let observed_count = Array.length outcome_prices in
+  let observed_sum = Array.fold outcome_prices ~init:0. ~f:( +. ) in
+  let coverage =
+    match expected_outcomes with
+    | 0 -> 0.
+    | n -> Float.of_int observed_count /. Float.of_int n
+  in
+    match Float.( < ) coverage min_coverage_fraction with
+    | true ->
+      Insufficient_coverage
+        { observed_count; expected_count = expected_outcomes; observed_sum }
+    | false ->
+      (match Float.( < ) observed_sum 1.0 with
+       | true -> Arb (1.0 -. observed_sum)
+       | false -> No_arb observed_sum)

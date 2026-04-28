@@ -50,3 +50,55 @@ val best_two_leg :
 val all_two_leg :
   quotes:quote list ->
   opportunity list
+
+(** {1 Categorical (multi-outcome) arbitrage}
+
+    For events with N > 2 outcomes — race winners, temperature bins,
+    election outcomes with multiple candidates — the analog of "sum of
+    probabilities < 1.0 = arb" requires that {b every outcome} is
+    quoted. Without full coverage, the missing outcomes carry the
+    missing probability mass and apparent arb is illusory.
+
+    This API forces the caller to declare the total outcome count and
+    gates on a coverage threshold, returning a three-way result so the
+    caller can distinguish "real arb" from "can't tell — not enough
+    quotes" from "all outcomes covered, no arb". *)
+
+(** Result of a categorical arb check. *)
+type categorical_result =
+  | Arb of float
+      (** Sum of observed prices < 1.0 with sufficient coverage; profit
+          per unit if you bought all observed outcomes. *)
+  | Insufficient_coverage of
+      { observed_count : int
+      ; expected_count : int
+      ; observed_sum : float
+      }
+      (** Coverage threshold not met — verdict is "we don't know."
+          Includes the partial sum so callers can log it for diagnosis
+          but should not act on it as if it were real arb. *)
+  | No_arb of float
+      (** Full coverage, sum >= 1.0. Includes the sum (the venue's
+          implied overround + 1). *)
+[@@deriving sexp]
+
+(** Check for arbitrage across all outcomes of a categorical event.
+
+    @param outcome_prices Array of probability-prices for the outcomes
+           that {b are} quoted. Must be in [[0, 1]].
+    @param expected_outcomes Total number of possible outcomes for this
+           event (e.g. 22 for an F1 race, 6 for a temperature bin
+           market). Compared against [Array.length outcome_prices] to
+           compute coverage.
+    @param min_coverage_fraction Fraction of outcomes that must be
+           observed for the arb verdict to be considered reliable.
+           Default [1.0] (require all). Set [0.95] to allow 1 missing
+           outcome on a 20-outcome event, etc. — but be aware that any
+           less than 1.0 risks false positives proportional to the
+           missing mass. *)
+val categorical_check :
+  outcome_prices:float array ->
+  expected_outcomes:int ->
+  ?min_coverage_fraction:float ->
+  unit ->
+  categorical_result

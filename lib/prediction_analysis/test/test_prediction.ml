@@ -242,6 +242,81 @@ let test_arb_none () =
       eprintf "FAIL arb_none: should not return same-venue arb\n";
       exit 1
 
+let test_categorical_full_coverage_arb () =
+  (* All 6 weather temp bins quoted, sum 0.85 → real 15c arb *)
+  let result =
+    Prediction_analysis.Arbitrage.categorical_check
+      ~outcome_prices:[| 0.10; 0.15; 0.25; 0.20; 0.10; 0.05 |]
+      ~expected_outcomes:6
+      ()
+  in
+    match result with
+    | Arb p ->
+      assert_approx_eq ~name:"categorical full-cov arb" p 0.15 ~eps:1e-9
+    | other ->
+      eprintf "FAIL categorical full-cov arb: got %s\n"
+        (Sexp.to_string
+           (Prediction_analysis.Arbitrage.sexp_of_categorical_result other));
+      exit 1
+
+let test_categorical_insufficient_coverage () =
+  (* Only 2 of 6 bins quoted, sum 0.30 — naive would say "arb of 0.70"
+     but this is illusory: the unquoted 4 bins carry the missing 0.70
+     mass. Function MUST return Insufficient_coverage, not Arb. *)
+  let result =
+    Prediction_analysis.Arbitrage.categorical_check
+      ~outcome_prices:[| 0.10; 0.20 |]
+      ~expected_outcomes:6
+      ()
+  in
+    match result with
+    | Insufficient_coverage { observed_count; expected_count; observed_sum } ->
+      printf
+        "OK   categorical insufficient: %d/%d observed, sum=%.2f\n"
+        observed_count
+        expected_count
+        observed_sum
+    | other ->
+      eprintf
+        "FAIL categorical insufficient: should reject naive arb, got %s\n"
+        (Sexp.to_string
+           (Prediction_analysis.Arbitrage.sexp_of_categorical_result other));
+      exit 1
+
+let test_categorical_relaxed_coverage () =
+  (* 5 of 6 quoted (95% coverage with min=0.8) → still treated as
+     full-enough; real arb if sum < 1 *)
+  let result =
+    Prediction_analysis.Arbitrage.categorical_check
+      ~outcome_prices:[| 0.10; 0.15; 0.20; 0.20; 0.20 |]
+      ~expected_outcomes:6
+      ~min_coverage_fraction:0.8
+      ()
+  in
+    match result with
+    | Arb _ -> printf "OK   categorical relaxed coverage → arb\n"
+    | other ->
+      eprintf "FAIL categorical relaxed: %s\n"
+        (Sexp.to_string
+           (Prediction_analysis.Arbitrage.sexp_of_categorical_result other));
+      exit 1
+
+let test_categorical_no_arb () =
+  (* Full coverage, sum 1.05 (vig'd venue, no arb) *)
+  let result =
+    Prediction_analysis.Arbitrage.categorical_check
+      ~outcome_prices:[| 0.20; 0.30; 0.55 |]
+      ~expected_outcomes:3
+      ()
+  in
+    match result with
+    | No_arb sum -> assert_approx_eq ~name:"categorical no_arb sum" sum 1.05 ~eps:1e-9
+    | other ->
+      eprintf "FAIL categorical no_arb: %s\n"
+        (Sexp.to_string
+           (Prediction_analysis.Arbitrage.sexp_of_categorical_result other));
+      exit 1
+
 let test_arb_all () =
   (* Three venues, multiple arb opportunities; check we sort by profit *)
   let quotes : Prediction_analysis.Arbitrage.quote list =
@@ -283,4 +358,8 @@ let () =
   test_arb_obvious ();
   test_arb_none ();
   test_arb_all ();
+  test_categorical_full_coverage_arb ();
+  test_categorical_insufficient_coverage ();
+  test_categorical_relaxed_coverage ();
+  test_categorical_no_arb ();
   printf "\nAll Prediction_analysis tests passed.\n"

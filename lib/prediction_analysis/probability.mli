@@ -33,9 +33,29 @@ val to_american_odds : float -> int
 (** Sum of probabilities minus 1. For a fairly-priced binary market
     [\[p_yes; p_no\]] this is [0]; for a venue with vig it's positive
     (the venue's edge). For arbitrage candidates across venues, negative
-    overround indicates a cross-venue arb opportunity. *)
+    overround indicates a cross-venue arb opportunity.
+
+    {b WARNING — coverage assumption}: only meaningful when [probs]
+    enumerates {i all} possible outcomes. For a binary market that means
+    both YES and NO; for a categorical event (F1 winner, weather temp
+    bins, election outcomes) that means every possible outcome must be
+    quoted. Long-tail categorical events on real prediction-market venues
+    rarely have full simultaneous coverage — a 22-outcome race might only
+    have 4-5 outcomes quoted at any moment, and naive [implied_overround]
+    on the partial set will report large negative values that are
+    illusory ("arb") rather than real. Use {!Arbitrage.categorical_check}
+    when full coverage is uncertain — it gates on a coverage threshold.
+
+    Per bluxit-gemini empirical 2026-04-28: F1 Miami 22 drivers had 0
+    minutes with all 22 simultaneously quoted; weather temp-bin events
+    similarly. *)
 val implied_overround : probs:float array -> float
 
 (** Normalize an array of probabilities to remove the implied overround,
-    so that [sum result = 1.0]. Each [p_i] is divided by [sum probs]. *)
+    so that [sum result = 1.0]. Each [p_i] is divided by [sum probs].
+
+    Same coverage caveat as {!implied_overround}: meaningful only when
+    [probs] enumerates all outcomes. With partial coverage, this
+    "normalizes" away missing probability mass, producing inflated
+    individual probabilities. *)
 val remove_overround : probs:float array -> float array
