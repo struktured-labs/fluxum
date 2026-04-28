@@ -489,6 +489,170 @@ let test_predictive_validity_smoke () =
       eprintf "FAIL predictive_validity smoke: bin count mismatch\n";
       exit 1
 
+(* ========================= Pm_quality_gates ========================== *)
+
+(** Test cases mirror bluxit's docs/gate_validation_v1.md named-cohort
+    table — gates must fire on the markets the empirical work flagged
+    as failures, and pass markets it flagged as clean. *)
+
+let test_near_rail_kxfed_t125_4_23 () =
+  (* KXFED-27APR-T1.25 (4/23): expected to fire Near_rail per bluxit memo *)
+  match
+    Microstructure.Pm_quality_gates.check_near_rail
+      ~max_yes_bid:96
+      ~min_yes_ask_nonzero:97
+      ()
+  with
+  | Some _ -> printf "OK   near_rail fires on KXFED-T1.25 4/23 (yes_bid=96)\n"
+  | None ->
+    eprintf "FAIL near_rail should fire on yes_bid=96\n";
+    exit 1
+
+let test_near_rail_passes_clean () =
+  (* mid-range bid/ask, clearly clean *)
+  match
+    Microstructure.Pm_quality_gates.check_near_rail
+      ~max_yes_bid:46
+      ~min_yes_ask_nonzero:29
+      ()
+  with
+  | None -> printf "OK   near_rail passes on KXCAGOVPRIMARY1ST (yb=46, ya=29)\n"
+  | Some _ ->
+    eprintf "FAIL near_rail should pass on (46, 29)\n";
+    exit 1
+
+let test_near_rail_low_threshold () =
+  (* Custom threshold of 10 → yes_bid=46 still passes (54-distance from 100) *)
+  match
+    Microstructure.Pm_quality_gates.check_near_rail
+      ~threshold:10
+      ~max_yes_bid:46
+      ~min_yes_ask_nonzero:29
+      ()
+  with
+  | None -> printf "OK   near_rail respects custom threshold\n"
+  | Some _ ->
+    eprintf "FAIL near_rail with threshold=10 should pass (yb=46)\n";
+    exit 1
+
+let test_near_rail_zero_ask_not_rail () =
+  (* yes_ask=0 means no nonzero ask observed (One_sided_book case),
+     not a near-rail case. check_near_rail should NOT fire just because
+     ask=0. *)
+  match
+    Microstructure.Pm_quality_gates.check_near_rail
+      ~max_yes_bid:30
+      ~min_yes_ask_nonzero:0
+      ()
+  with
+  | None -> printf "OK   near_rail correctly skips (yb=30, ya=0 → one-sided)\n"
+  | Some _ ->
+    eprintf "FAIL near_rail incorrectly fires on yes_ask=0 (one-sided case)\n";
+    exit 1
+
+let test_regime_break_kxalbumsales () =
+  (* KXALBUMSALES 32→96 = 64c jump, fires both Near_rail and Regime_break *)
+  match
+    Microstructure.Pm_quality_gates.check_regime_break
+      ~mid_start:32.
+      ~mid_end:96.
+      ()
+  with
+  | Some r ->
+    assert_approx_eq ~name:"regime_break delta" r.delta 64. ~eps:1e-9
+  | None ->
+    eprintf "FAIL regime_break should fire on 32→96 jump\n";
+    exit 1
+
+let test_regime_break_kxcagovprimary_passes () =
+  (* mid 51→29 = 22c < 40c default → passes regime_break. The clean miss
+     bluxit's memo specifically called out — gates pass but ticker still
+     drove 138% concentration. Per-market gate is correctly innocent;
+     concentration is a cohort-level concern. *)
+  match
+    Microstructure.Pm_quality_gates.check_regime_break
+      ~mid_start:51.
+      ~mid_end:29.
+      ()
+  with
+  | None ->
+    printf "OK   regime_break passes on KXCAGOVPRIMARY1ST 51→29 (Δ=22 < 40)\n"
+  | Some _ ->
+    eprintf "FAIL regime_break should pass on 22c jump\n";
+    exit 1
+
+let test_one_sided_book_ask_empty () =
+  (* Fed-strike T1.00 (4/25) per memo: One_sided_book(ask) *)
+  match
+    Microstructure.Pm_quality_gates.check_one_sided_book
+      ~yes_bid_window:[ 30; 32; 31; 30 ]
+      ~yes_ask_window:[ 0; 0; 0; 0 ]
+  with
+  | Some r ->
+    (match r.side with
+     | `Ask_empty ->
+       printf "OK   one_sided_book fires (Ask_empty) on KXFED-T1.00 4/25\n"
+     | `Bid_empty ->
+       eprintf "FAIL expected Ask_empty, got Bid_empty\n";
+       exit 1)
+  | None ->
+    eprintf "FAIL one_sided_book should fire when ask all zero\n";
+    exit 1
+
+let test_one_sided_book_passes_normal () =
+  match
+    Microstructure.Pm_quality_gates.check_one_sided_book
+      ~yes_bid_window:[ 30; 32; 31; 30 ]
+      ~yes_ask_window:[ 35; 36; 35; 34 ]
+  with
+  | None -> printf "OK   one_sided_book passes on two-sided book\n"
+  | Some _ ->
+    eprintf "FAIL one_sided_book should pass on two-sided book\n";
+    exit 1
+
+let test_check_all_per_market_pass () =
+  (* KXCAGOVPRIMARY1ST-XBEC: passes ALL per-market gates per bluxit memo
+     (this is the case that drove 138% concentration but per-market gates
+     correctly mark clean — concentration is a separate level). *)
+  let result =
+    Microstructure.Pm_quality_gates.check_all_per_market
+      ~max_yes_bid:46
+      ~min_yes_ask_nonzero:29
+      ~mid_start:(Some 51.)
+      ~mid_end:(Some 29.)
+      ~yes_bid_window:[ 50; 51; 49; 46; 30 ]
+      ~yes_ask_window:[ 52; 53; 51; 48; 32 ]
+      ()
+  in
+    match Microstructure.Pm_quality_gates.is_pass result with
+    | true ->
+      printf "OK   check_all_per_market: KXCAGOVPRIMARY1ST passes (cohort-level concern)\n"
+    | false ->
+      eprintf "FAIL KXCAGOVPRIMARY1ST should pass per-market gates\n";
+      exit 1
+
+let test_check_all_per_market_combined_fire () =
+  (* KXFED-27APR-T1.25 4/25: fires both Near_rail AND One_sided_book *)
+  let result =
+    Microstructure.Pm_quality_gates.check_all_per_market
+      ~max_yes_bid:97
+      ~min_yes_ask_nonzero:0  (* one-sided *)
+      ~mid_start:(Some 90.)
+      ~mid_end:(Some 95.)
+      ~yes_bid_window:[ 95; 96; 97; 96 ]
+      ~yes_ask_window:[ 0; 0; 0; 0 ]  (* ask empty *)
+      ()
+  in
+    match
+      Option.is_some result.near_rail
+      && Option.is_some result.one_sided_book
+    with
+    | true ->
+      printf "OK   check_all_per_market: T1.25 4/25 fires Near_rail + One_sided_book\n"
+    | false ->
+      eprintf "FAIL T1.25 4/25 should fire BOTH Near_rail and One_sided_book\n";
+      exit 1
+
 (* =============================== Main ================================ *)
 
 let () =
@@ -511,4 +675,14 @@ let () =
   test_ofi_default_bins_shape ();
   test_predictive_validity_smoke ();
   test_predictive_validity_seeded_reproducibility ();
+  test_near_rail_kxfed_t125_4_23 ();
+  test_near_rail_passes_clean ();
+  test_near_rail_low_threshold ();
+  test_near_rail_zero_ask_not_rail ();
+  test_regime_break_kxalbumsales ();
+  test_regime_break_kxcagovprimary_passes ();
+  test_one_sided_book_ask_empty ();
+  test_one_sided_book_passes_normal ();
+  test_check_all_per_market_pass ();
+  test_check_all_per_market_combined_fire ();
   printf "\nAll Microstructure tests passed.\n"
