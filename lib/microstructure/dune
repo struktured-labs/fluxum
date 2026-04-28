@@ -1,0 +1,6 @@
+(library
+ (name microstructure)
+ (public_name fluxum.microstructure)
+ (libraries core core_unix.time_float_unix)
+ (preprocess
+  (pps ppx_jane)))
