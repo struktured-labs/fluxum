@@ -188,11 +188,13 @@ let mean_of_array xs =
   | 0 -> 0.
   | n -> Array.fold xs ~init:0. ~f:( +. ) /. Float.of_int n
 
-(** Random shuffle in place, Fisher-Yates. Uses Core's Random.int. *)
-let shuffle_in_place arr =
+(** Random shuffle in place, Fisher-Yates. Takes an explicit
+    [Random.State.t] so callers can choose between bit-reproducible
+    (seeded) or entropy-seeded behavior. *)
+let shuffle_in_place ~rng_state arr =
   let n = Array.length arr in
     for i = n - 1 downto 1 do
-      let j = Random.int (i + 1) in
+      let j = Random.State.int rng_state (i + 1) in
       let tmp = arr.(i) in
         arr.(i) <- arr.(j);
         arr.(j) <- tmp
@@ -204,8 +206,14 @@ let predictive_validity
     ~fwd_windows
     ?(bins = default_bins)
     ?(n_shuffles = 1000)
+    ?seed
     ()
   =
+  let rng_state =
+    match seed with
+    | Some s -> Random.State.make [| s |]
+    | None -> Random.State.make_self_init ()
+  in
   (* For each fwd_window, build (bin_label, drift_bps) pairs for trades
      whose mid anchors are available. *)
   let per_window_data =
@@ -280,7 +288,7 @@ let predictive_validity
       let extreme_count = ref 0 in
         for _ = 1 to n_shuffles do
           let shuffled = Array.copy labels in
-            shuffle_in_place shuffled;
+            shuffle_in_place ~rng_state shuffled;
             let top_drifts =
               Array.filter_mapi shuffled ~f:(fun i l ->
                 match String.equal l top_label with

@@ -396,6 +396,55 @@ let test_ofi_default_bins_shape () =
       eprintf "FAIL ofi default_bins: expected 5, got %d\n" n;
       exit 1
 
+let test_predictive_validity_seeded_reproducibility () =
+  (* Two runs with same seed must produce bit-identical p-values.
+     Two runs with different seeds should differ (with overwhelming
+     probability) on at least one shuffle outcome. *)
+  let ts0 = Time_ns_unix.now () in
+  let mins n =
+    Time_ns_unix.add ts0 (Time_ns.Span.of_min (Float.of_int n))
+  in
+  let trades =
+    Array.init 50 ~f:(fun i ->
+      let aggressor = match i % 3 with 0 -> `Buy | _ -> `Sell in
+        make_trade ~tid:i ~ts:(mins i) ~price:100. ~amount:1. ~aggressor)
+  in
+  let tagged =
+    Microstructure.Ofi.compute
+      ~trades
+      ~window:(Time_ns.Span.of_min 30.)
+      ~min_window_trades:1
+      ()
+  in
+  let mid_series =
+    Array.init 100 ~f:(fun i ->
+      (mins i, 100. +. (Float.of_int i *. 0.01)))
+  in
+  let run ~seed =
+    Microstructure.Ofi.predictive_validity
+      ~tagged_trades:tagged
+      ~mid_series
+      ~fwd_windows:[Time_ns.Span.of_min 5.]
+      ~n_shuffles:200
+      ~seed
+      ()
+  in
+  let r1 = run ~seed:42 in
+  let r2 = run ~seed:42 in
+  let r3 = run ~seed:43 in
+  let p1 = r1.shuffle_tests.(0).p_value in
+  let p2 = r2.shuffle_tests.(0).p_value in
+  let p3 = r3.shuffle_tests.(0).p_value in
+    match Float.equal p1 p2 with
+    | false ->
+      eprintf "FAIL seeded reproducibility: seed=42 → p=%.6f vs p=%.6f\n" p1 p2;
+      exit 1
+    | true ->
+      printf
+        "OK   seeded reproducibility: seed=42 → p=%.4f (bit-identical), seed=43 → p=%.4f\n"
+        p1
+        p3
+
 let test_predictive_validity_smoke () =
   (* Synthetic: 30 trades over 30 minutes, alternating buy/sell with
      mid drifting up. Expect non-NaN result; we don't assert specific
@@ -461,4 +510,5 @@ let () =
   test_ofi_min_window_trades_gate ();
   test_ofi_default_bins_shape ();
   test_predictive_validity_smoke ();
+  test_predictive_validity_seeded_reproducibility ();
   printf "\nAll Microstructure tests passed.\n"

@@ -149,12 +149,18 @@ type predictive_validity_result =
     @param fwd_windows Forward-drift horizons to test. E.g.
            [[Time_ns.Span.of_min 5.; of_min 15.; of_min 60.]].
     @param bins OFI bin boundaries; default {!default_bins}.
-    @param n_shuffles Bootstrap iteration count. Default 1000. *)
+    @param n_shuffles Bootstrap iteration count. Default 1000.
+    @param seed Optional RNG seed for the bootstrap shuffle. When
+           supplied, results are bit-reproducible across runs and across
+           machines — use this for validation harnesses that diff against
+           reference implementations. When omitted, an entropy-seeded
+           [Random.State.t] is created (recommended for production use). *)
 val predictive_validity :
   tagged_trades:Tagged_trade.t array ->
   mid_series:(Time_ns_unix.t * float) array ->
   fwd_windows:Time_ns.Span.t list ->
   ?bins:bin list ->
   ?n_shuffles:int ->
+  ?seed:int ->
   unit ->
   predictive_validity_result
