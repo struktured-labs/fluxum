@@ -4,3 +4,4 @@ data
 logs
 tmp/
 .claude/settings.local.json
+reports/
