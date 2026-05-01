@@ -1,0 +1,6 @@
+(library
+ (name analysis)
+ (public_name fluxum.analysis)
+ (libraries core fluxum)
+ (preprocess
+  (pps ppx_jane)))
