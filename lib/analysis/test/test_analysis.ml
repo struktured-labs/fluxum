@@ -249,7 +249,11 @@ let test_dollar_bars () =
 
 let test_time_bars () =
   let sym = Fluxum.Types.Symbol.of_string "BTCUSD" in
-  let base_ts = Time_float_unix.now () in
+  (* Use fixed epoch-aligned timestamp: 2000-01-01 00:00:00 UTC *)
+  let base_ts =
+    Time_float_unix.of_span_since_epoch
+      (Time_float_unix.Span.of_sec 946684800.0)
+  in
   let t secs =
     Time_float_unix.add base_ts (Time_float_unix.Span.of_sec secs)
   in
