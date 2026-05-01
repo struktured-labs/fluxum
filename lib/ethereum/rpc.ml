@@ -14,6 +14,13 @@ type error =
   | `Json_parse of string ]
 [@@deriving sexp]
 
+(** Extended error type for log queries — wide window can return a provider
+    rejection that callers should handle as a signal to paginate finer. *)
+type log_error =
+  [ error
+  | `Max_logs_per_call_exceeded of string ]
+[@@deriving sexp]
+
 let next_id = ref 1
 
 (** Make a JSON-RPC request to an Ethereum node *)
@@ -160,5 +167,81 @@ let eth_get_transaction_receipt ~rpc_url ~tx_hash =
     | Ok `Null -> Ok None
     | Ok json -> Ok (Some json)
     | Error e -> Error e
+
+(** eth_blockNumber - Get the latest block number *)
+let eth_block_number ~rpc_url =
+  let params = `List [] in
+    make_request ~rpc_url ~method_:"eth_blockNumber" ~params
+    >>| function
+    | Ok (`String hex) -> Ok (hex_to_int hex)
+    | Ok _ -> Error (`Json_parse "Expected string result from eth_blockNumber")
+    | Error e -> Error e
+
+(** Format an int as "0x"-prefixed hex without leading zeros (per JSON-RPC spec). *)
+let int_to_hex (n : int) : string = sprintf "0x%x" n
+
+(** Format a block tag: either a specific block number or "latest"/"earliest"/"pending". *)
+type block_tag =
+  [ `Number of int
+  | `Latest
+  | `Earliest
+  | `Pending ]
+
+let block_tag_to_json = function
+  | `Number n -> `String (int_to_hex n)
+  | `Latest -> `String "latest"
+  | `Earliest -> `String "earliest"
+  | `Pending -> `String "pending"
+
+(** Heuristic: detect provider-specific "too many logs" / "block range too large" errors.
+    Different providers use different phrasings; this matches the common ones. *)
+let is_log_limit_error (msg : string) : bool =
+  let lower = String.lowercase msg in
+  let needles =
+    [ "log response size exceeded"
+    ; "query returned more than"
+    ; "block range is too wide"
+    ; "block range too large"
+    ; "exceed maximum block range"
+    ; "more than 10000 results"
+    ; "10k results"
+    ; "response size limit" ]
+  in
+    List.exists needles ~f:(fun n -> String.is_substring lower ~substring:n)
+
+(** eth_getLogs - Fetch event logs matching a filter.
+    @param address Contract address to filter by (single address).
+    @param topics List of topic filters. Each entry may be [None] (wildcard) or
+                  [Some topic_hex]. Position is significant: [topics.(0)] is the
+                  event signature, [topics.(1..)] are indexed parameters.
+    @param from_block Block tag for window start.
+    @param to_block Block tag for window end.
+
+    Returns the raw JSON list of log entries. Callers should decode per-event.
+    Returns [`Max_logs_per_call_exceeded] when the provider rejects the window
+    as too wide — caller should retry with a smaller range. *)
+let eth_get_logs ~rpc_url ~address ?(topics = []) ~from_block ~to_block () :
+  (Yojson.Safe.t list, log_error) Result.t Deferred.t =
+  let topics_json =
+    `List
+      (List.map topics ~f:(function
+         | None -> `Null
+         | Some t -> `String t))
+  in
+  let filter =
+    `Assoc
+      [ ("address", `String address)
+      ; ("fromBlock", block_tag_to_json from_block)
+      ; ("toBlock", block_tag_to_json to_block)
+      ; ("topics", topics_json) ]
+  in
+  let params = `List [filter] in
+    make_request ~rpc_url ~method_:"eth_getLogs" ~params
+    >>| function
+    | Ok (`List logs) -> Ok logs
+    | Ok _ -> Error (`Json_parse "Expected array result from eth_getLogs")
+    | Error (`Rpc msg) when is_log_limit_error msg ->
+      Error (`Max_logs_per_call_exceeded msg)
+    | Error (#error as e) -> Error e
 
 let _hex_to_int64 = hex_to_int64

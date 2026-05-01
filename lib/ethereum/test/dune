@@ -1,0 +1,6 @@
+(test
+ (name test_wallet)
+ (modules test_wallet)
+ (libraries core async ethereum)
+ (preprocess
+  (pps ppx_jane)))
