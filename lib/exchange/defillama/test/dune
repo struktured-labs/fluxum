@@ -1,0 +1,7 @@
+(test
+ (name test_defillama)
+ (modules test_defillama)
+ (libraries core_unix.command_unix async defillama feed_only_adapter)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))

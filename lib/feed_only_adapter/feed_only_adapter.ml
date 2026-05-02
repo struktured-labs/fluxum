@@ -87,6 +87,13 @@ module List_filter = struct
   let default = { limit = None; category = None; include_resolved = false }
 end
 
+(** Sibling interfaces for non-event-shaped feeds.
+    See {!Spot_feed.S} for per-symbol price feeds (oracles, aggregators)
+    and {!Aggregate_feed.S} for protocol/chain-level stats (DefiLlama,
+    L2Beat). *)
+module Spot_feed = Spot_feed
+module Aggregate_feed = Aggregate_feed
+
 module type S = sig
   val name : string
   val homepage : string

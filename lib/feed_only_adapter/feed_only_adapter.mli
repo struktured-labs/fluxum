@@ -143,7 +143,17 @@ module List_filter : sig
   val default : t
 end
 
-(** The interface every read-only data-feed adapter implements. *)
+(** Sibling interfaces for non-event-shaped feeds. See {!Spot_feed.S}
+    for per-symbol price feeds (oracles, aggregators) and
+    {!Aggregate_feed.S} for protocol/chain-level stats (DefiLlama,
+    L2Beat). *)
+module Spot_feed : module type of Spot_feed
+
+module Aggregate_feed : module type of Aggregate_feed
+
+(** The interface every {b event-with-outcomes} read-only data-feed
+    adapter implements. For per-symbol price feeds use {!Spot_feed.S};
+    for protocol-level stats use {!Aggregate_feed.S}. *)
 module type S = sig
   (** Human-readable adapter name. *)
   val name : string

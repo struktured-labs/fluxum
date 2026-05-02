@@ -26,6 +26,9 @@
   ethereum
   feed_only_adapter
   polymarket
+  pyth
+  manifold
+  defillama
   kalshi
   gateio
   kucoin
