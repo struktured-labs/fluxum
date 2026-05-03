@@ -100,28 +100,45 @@ let parse_event (json : Yojson.Safe.t) : Feed.Event.t option =
            ; mk "NO" (Option.map prob ~f:(fun p -> 1. -. p))
           |]
       | "MULTIPLE_CHOICE" | "MULTI_NUMERIC" ->
-        (* Manifold returns answers under "answers" array each with id, text, probability *)
+        (* Manifold returns answers under "answers" array each with id,
+           text, probability — but ONLY in the per-market /v0/market/{id}
+           endpoint. The /v0/markets list endpoint omits answers entirely.
+           Fall back to a single placeholder outcome when answers absent
+           so the event shape stays consistent (caller can then
+           [get_event] for full per-outcome data). *)
         (match field "answers" json with
-         | Some (`List items) ->
+         | Some (`List items) when not (List.is_empty items) ->
            List.filter_map items ~f:(fun a ->
              match str_field "id" a, str_field "text" a with
              | Some aid, Some txt ->
                let prob = float_field "probability" a in
-               Some
-                 { Feed.Outcome.id = sprintf "%s:%s" id aid
-                 ; label = txt
-                 ; token_id = Option.map prob ~f:Float.to_string
-                 }
+                 Some
+                   { Feed.Outcome.id = sprintf "%s:%s" id aid
+                   ; label = txt
+                   ; token_id = Option.map prob ~f:Float.to_string
+                   }
              | _ -> None)
            |> Array.of_list
-         | _ -> [||])
-      | _ ->
-        (* Free-response / numeric / pseudo-numeric — use single placeholder *)
-        [| { Feed.Outcome.id = sprintf "%s:current" id
-           ; label = "current"
-           ; token_id = None
-           }
-        |]
+         | _ ->
+           [| { Feed.Outcome.id = sprintf "%s:multi" id
+              ; label = "MULTIPLE_CHOICE (call get_event for outcomes)"
+              ; token_id = None
+              }
+           |])
+      | "PSEUDO_NUMERIC" | "NUMERIC" | "FREE_RESPONSE" | "POLL" | "BOUNTIED_QUESTION" | _ ->
+        (* Non-binary, non-categorical types collapse to a single
+           placeholder outcome carrying the implied probability when
+           available. Caller can branch on outcome_type via venue_metadata
+           when needed. *)
+        let prob = float_field "probability" json in
+          [| { Feed.Outcome.id = sprintf "%s:current" id
+             ; label =
+                 (match outcome_type with
+                  | "" -> "current"
+                  | t -> t)
+             ; token_id = Option.map prob ~f:Float.to_string
+             }
+          |]
     in
     let resolution_ts = parse_ts_ms_opt "closeTime" json in
     let is_resolved =
@@ -274,17 +291,31 @@ let get_recent_trades ~outcome_id ?(limit = 50) () =
 
 let get_resolved_events ?since ?(limit = 100) ?category () =
   let _ = since in
-  let _ = category in
+  (* Manifold's /v0/markets endpoint returns active markets only — its sort
+     options ('created-time' | 'updated-time' | 'last-bet-time' |
+     'last-comment-time') all surface live activity, and resolved markets
+     stop generating updates so they don't appear. The /v0/search-markets
+     endpoint has an explicit [filter=resolved] which is the right tool. *)
   let query =
-    [ ("limit", [ Int.to_string limit ])
-    ; ("sort", [ "resolved-newest" ])
+    [ ("term", [ "" ])
+    ; ("filter", [ "resolved" ])
+    ; ("limit", [ Int.to_string limit ])
     ]
   in
-    http_get ~path:"/v0/markets" ~query ()
+    http_get ~path:"/v0/search-markets" ~query ()
     >>| function
     | Error e -> Error e
     | Ok (`List items) ->
-      Ok
-        (List.filter_map items ~f:parse_event
-         |> List.filter ~f:(fun (e : Feed.Event.t) -> e.is_resolved))
+      let events =
+        List.filter_map items ~f:parse_event
+        |> (fun all ->
+          match category with
+          | None -> all
+          | Some cat ->
+            List.filter all ~f:(fun (e : Feed.Event.t) ->
+              match e.category with
+              | Some c -> String.equal c cat
+              | None -> false))
+      in
+        Ok events
     | Ok _ -> Error (`Json_parse "Expected JSON array")

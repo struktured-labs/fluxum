@@ -109,11 +109,50 @@ let test_book_and_quote () =
                 (Option.value_map q.last_price ~default:"-" ~f:(sprintf "%.4f"));
               Deferred.unit))
 
+let test_recent_trades () =
+  let filter = { Feed_only_adapter.List_filter.default with limit = Some 5 } in
+  let%bind r = Polymarket.list_events ~filter () in
+    match r with
+    | Error e -> on_error "list_events(setup)" (format_err e)
+    | Ok [] -> on_error "list_events(setup)" "empty"
+    | Ok (first :: _) ->
+      (match Array.length first.outcomes > 0 with
+       | false ->
+         eprintf "FAIL [trades]: setup event had no outcomes\n";
+         exit 1
+       | true ->
+         let outcome_id = first.outcomes.(0).id in
+         let%bind tr = Polymarket.get_recent_trades ~outcome_id ~limit:5 () in
+           match tr with
+           | Error e -> on_error "get_recent_trades" (format_err e)
+           | Ok trades ->
+             printf "OK   [get_recent_trades]: %d trades\n" (List.length trades);
+             Deferred.unit)
+
+let test_resolved_events () =
+  let%bind r = Polymarket.get_resolved_events ~limit:5 () in
+    match r with
+    | Error e -> on_error "get_resolved_events" (format_err e)
+    | Ok evs ->
+      let n = List.length evs in
+        printf "OK   [get_resolved_events]: %d resolved\n" n;
+        (* Every returned event should be is_resolved = true *)
+        let all_resolved =
+          List.for_all evs ~f:(fun (e : Feed_only_adapter.Event.t) -> e.is_resolved)
+        in
+          match all_resolved with
+          | true -> Deferred.unit
+          | false ->
+            eprintf "FAIL: get_resolved_events returned non-resolved events\n";
+            exit 1
+
 let main () =
   let%bind () = test_metadata () in
   let%bind () = test_list_events () in
   let%bind () = test_get_event () in
   let%bind () = test_book_and_quote () in
+  let%bind () = test_recent_trades () in
+  let%bind () = test_resolved_events () in
     printf "\nAll Polymarket smoke tests done.\n";
     Deferred.unit
 

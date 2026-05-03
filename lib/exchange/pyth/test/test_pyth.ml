@@ -61,10 +61,39 @@ let test_list_symbols () =
           (Option.value s.asset_class ~default:"?"));
       Deferred.unit
 
+let eth_usd_feed_id =
+  "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace"
+
+let test_get_prices_batch () =
+  let%bind r =
+    Pyth.get_prices ~symbols:[ btc_usd_feed_id; eth_usd_feed_id ]
+  in
+    match r with
+    | Error e -> on_err "get_prices(batch)" e
+    | Ok prices ->
+      let n = List.length prices in
+        printf "OK   [get_prices(batch)]: returned %d entries\n" n;
+        match n >= 2 with
+        | true -> Deferred.unit
+        | false ->
+          eprintf "FAIL: expected at least 2 prices in batch, got %d\n" n;
+          exit 1
+
+let test_unknown_feed_id () =
+  let bogus = "0000000000000000000000000000000000000000000000000000000000000000" in
+  let%bind r = Pyth.get_price ~symbol:bogus in
+    match r with
+    | Error _ -> printf "OK   [get_price(bogus)]: error returned as expected\n"; Deferred.unit
+    | Ok _ ->
+      eprintf "FAIL: expected error for bogus feed_id\n";
+      exit 1
+
 let main () =
   let%bind () = test_metadata () in
   let%bind () = test_get_btc_price () in
   let%bind () = test_list_symbols () in
+  let%bind () = test_get_prices_batch () in
+  let%bind () = test_unknown_feed_id () in
     printf "\nAll Pyth smoke tests done.\n";
     Deferred.unit
 

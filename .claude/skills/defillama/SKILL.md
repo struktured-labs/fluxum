@@ -26,15 +26,15 @@ cd ~/projects/fluxum && eval "$(opam env)" && dune exec ./app/cli.exe -- defilla
 
 ```
 /defillama list -limit 20                       # top 20 protocols by TVL
-/defillama list -category DEX -limit 10         # top 10 DEXes
+/defillama list -category Dexs -limit 10        # top 10 DEXes (note: DefiLlama uses "Dexs")
 /defillama list -category Lending -limit 10     # top 10 lending protocols
 /defillama protocol -slug uniswap               # Uniswap details
 /defillama protocol -slug aave                  # Aave details
 ```
 
-## Common categories
+## Common categories (DefiLlama spelling — copy verbatim)
 
-DEX, Lending, CDP, Yield, Yield Aggregator, Bridge, Liquid Staking, Liquid Restaking, Perps, Derivatives, CEX, Synthetics, NFT Lending, Insurance, Cross Chain, Algo-Stables.
+`Dexs`, `Lending`, `CDP`, `Yield`, `Yield Aggregator`, `Bridge`, `Liquid Staking`, `Derivatives`, `CEX`, `Farm`, `Launchpad`. Note: it's `"Dexs"` (with an 's' and lowercase 'e'), not `"DEX"`. Empirical: 1964 protocols in `Dexs`, 0 in `DEX`. Use `/defillama list -limit 100` and grep the category column to discover others.
 
 ## Composability
 

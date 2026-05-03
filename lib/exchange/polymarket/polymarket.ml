@@ -322,13 +322,12 @@ let parse_trade (json : Yojson.Safe.t) : Feed.Trade.t option =
         }
 
 let get_recent_trades ~outcome_id ?(limit = 50) () =
-  (* Polymarket data-api expects market (conditionId) not token_id. We
-     don't have conditionId in scope here directly — but the data-api
-     also accepts ?asset_id=<token_id> for filtering. Use that. *)
+  (* Polymarket data-api filters by [asset_id] (token_id) or [market]
+     (conditionId). Since [outcome_id] in this adapter IS the token_id,
+     use the [asset_id] filter — passing token_id as [market] silently
+     returns no results. *)
   let query =
-    [ ("market", [ outcome_id ])
-        (* Polymarket also accepts asset_id; market here is overloaded
-           to accept either. Token_id works for asset filtering. *)
+    [ ("asset_id", [ outcome_id ])
     ; ("limit", [ Int.to_string limit ])
     ]
   in
@@ -336,13 +335,7 @@ let get_recent_trades ~outcome_id ?(limit = 50) () =
     >>| function
     | Error e -> Error e
     | Ok (`List items) ->
-      let trades =
-        List.filter_map items ~f:parse_trade
-        |> List.filter ~f:(fun (t : Feed.Trade.t) ->
-          (* Server might return all trades for the market across both
-             outcomes; filter to the requested outcome. *)
-          String.equal t.outcome_id outcome_id)
-      in
+      let trades = List.filter_map items ~f:parse_trade in
         Ok trades
     | Ok _ ->
       Error (`Json_parse "Expected JSON array from /trades")
