@@ -1,0 +1,7 @@
+(test
+ (name test_manifold)
+ (modules test_manifold)
+ (libraries core_unix.command_unix async manifold feed_only_adapter)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))

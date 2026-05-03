@@ -1,0 +1,15 @@
+(library
+ (name manifold)
+ (public_name fluxum.manifold)
+ (libraries
+  core
+  core_unix.command_unix
+  async
+  cohttp
+  cohttp-async
+  uri
+  yojson
+  feed_only_adapter)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
