@@ -1,0 +1,8 @@
+(library
+ (name fluxum_solana_test)
+ (modules test_solana_smoke)
+ (libraries solana core)
+ (inline_tests)
+ (preprocess
+  (pps ppx_jane ppx_expect))
+ (flags (:standard -open Core)))

@@ -1,0 +1,20 @@
+(library
+ (name solana)
+ (public_name fluxum.solana)
+ (libraries
+  core
+  core_unix.sys_unix
+  async
+  yojson
+  cohttp
+  cohttp-async
+  uri
+  base64
+  hex
+  mirage-crypto-ec
+  mirage-crypto-rng
+  mirage-crypto-rng.unix
+  ppx_jane)
+ (preprocess
+  (pps ppx_jane ppx_deriving_yojson))
+ (flags (:standard -open Core -open Async)))
