@@ -264,6 +264,11 @@ module Adapter = struct
       ; tick_size= None
       ; quote_increment= None }
 
+    let positive_finite ~name value =
+      if Float.is_finite value && Float.(value > 0.)
+      then Ok value
+      else Error (sprintf "%s must be positive and finite, got: %g" name value)
+
     let ticker (quote : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       (* Calculate price from amounts and decimals *)
       let open Result.Let_syntax in
@@ -274,10 +279,12 @@ module Adapter = struct
       let to_decimals = Float.of_int quote.toToken.decimals in
       let from_amount = Float.(10. ** from_decimals) in
       (* 1 unit of from token *)
-      let price =
-        to_amount
-        /. Float.(10. ** to_decimals)
-        /. (from_amount /. Float.(10. ** from_decimals))
+      let%bind price =
+        positive_finite
+          ~name:"ticker price"
+          (to_amount
+           /. Float.(10. ** to_decimals)
+           /. (from_amount /. Float.(10. ** from_decimals)))
       in
       let symbol = sprintf "%s-%s" quote.fromToken.symbol quote.toToken.symbol in
         Ok
@@ -307,9 +314,17 @@ module Adapter = struct
       in
       let from_dec = Float.of_int sell_quote.fromToken.decimals in
       let to_dec = Float.of_int sell_quote.toToken.decimals in
-      let sell_price = sell_to_amt /. Float.(10. ** to_dec) in
+      let%bind sell_price =
+        positive_finite
+          ~name:"synthetic ask price"
+          (sell_to_amt /. Float.(10. ** to_dec))
+      in
       let buy_dec = Float.of_int buy_quote.toToken.decimals in
-      let buy_price = Float.(10. ** buy_dec) /. buy_to_amt in
+      let%bind buy_price =
+        positive_finite
+          ~name:"synthetic bid price"
+          (Float.(10. ** buy_dec) /. buy_to_amt)
+      in
       let _ = from_dec in
       (* Suppress unused warning *)
       let bid = {Types.Order_book.Price_level.price= buy_price; volume= 1.0} in

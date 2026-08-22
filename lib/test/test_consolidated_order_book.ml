@@ -279,6 +279,23 @@ let%test_module "Book - Spread Calculations" =
         | None -> false
   end)
 
+let%test_module "Book - VWAP Validation" =
+  (module struct
+    let book () =
+      let consolidated = Book.empty "BTC/USD" in
+      let gemini = make_gemini_book "BTC/USD" in
+      let gemini = Gemini.Order_book.Book.set gemini ~side:`Bid ~price:99. ~size:2. in
+      let gemini = Gemini.Order_book.Book.set gemini ~side:`Ask ~price:101. ~size:2. in
+        Book.update_gemini consolidated gemini
+
+    let%test "zero volume is rejected" = Option.is_none (Book.vwap_ask (book ()) ~volume:0.)
+    let%test "negative volume is rejected" = Option.is_none (Book.vwap_bid (book ()) ~volume:(-1.))
+    let%test "positive volume computes" =
+      match Book.vwap_ask (book ()) ~volume:1. with
+      | Some price -> float_equal price 101.
+      | None -> false
+  end)
+
 let%test_module "Book - Deep Books" =
   (module struct
     let%test "multiple price levels from single exchange" =

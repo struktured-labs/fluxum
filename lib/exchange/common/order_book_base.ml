@@ -82,7 +82,7 @@ struct
 
     (** Apply a single level update to bid and ask maps *)
     let apply_level_to_maps ~bids ~asks ~side ~price ~size =
-      match Float.(equal zero size) with
+      match Float.(size <= zero) with
       | true ->
         (match side with
          | `Bid -> (Map.remove bids price, asks)
@@ -102,7 +102,7 @@ struct
       in
       let metadata = match metadata with
         | Some m -> m
-        | None -> Config.default_metadata ()
+        | None -> t.metadata
       in
       let bids, asks = apply_level_to_maps ~bids:t.bids ~asks:t.asks ~side ~price ~size in
       { t with bids; asks; epoch = t.epoch + 1; update_time; metadata }
@@ -121,7 +121,7 @@ struct
       in
       let metadata = match metadata with
         | Some m -> m
-        | None -> Config.default_metadata ()
+        | None -> t.metadata
       in
       let bids, asks =
         List.fold levels ~init:(t.bids, t.asks) ~f:(fun (bids, asks) (side, price, size) ->
@@ -200,22 +200,25 @@ struct
 
     (** Accumulate cost across a sequence of price levels until target volume is met *)
     let vwap_accumulate ~volume seq =
-      let rec go remaining acc_cost seq =
-        match Sequence.next seq with
-        | None ->
-          (match Float.(remaining > 0.) with
-           | true -> None
-           | false -> Some (acc_cost /. volume))
-        | Some ((_key, level), rest) ->
-          (match Float.(remaining <= level.Price_level.volume) with
-           | true ->
-             let cost = remaining *. level.price in
-             Some ((acc_cost +. cost) /. volume)
-           | false ->
-             let cost = level.volume *. level.price in
-             go (remaining -. level.volume) (acc_cost +. cost) rest)
-      in
-      go volume 0. seq
+      if Float.(volume <= 0.) || Float.is_nan volume || Float.is_inf volume
+      then None
+      else
+        let rec go remaining acc_cost seq =
+          match Sequence.next seq with
+          | None ->
+            (match Float.(remaining > 0.) with
+             | true -> None
+             | false -> Some (acc_cost /. volume))
+          | Some ((_key, level), rest) ->
+            (match Float.(remaining <= level.Price_level.volume) with
+             | true ->
+               let cost = remaining *. level.price in
+               Some ((acc_cost +. cost) /. volume)
+             | false ->
+               let cost = level.volume *. level.price in
+               go (remaining -. level.volume) (acc_cost +. cost) rest)
+        in
+        go volume 0. seq
 
     (** Calculate VWAP for buying (consuming asks).
         Operates directly on the map sequence - no intermediate list allocation. *)

@@ -92,6 +92,19 @@ let test_normalize_ticker_nan_to_amount () =
          (Oneinch.Fluxum_adapter.Adapter.Normalize.ticker quote)
          "Rejected NaN toAmount")
 
+let test_normalize_ticker_zero_to_amount () =
+  printf "\n[Normalize] Ticker with zero toAmount\n";
+  let quote : Oneinch.Rest.Types.quote =
+    { fromToken= make_token ~address:"0xEth" ~symbol:"ETH" ~decimals:18
+    ; toToken= make_token ~address:"0xUsdc" ~symbol:"USDC" ~decimals:6
+    ; toAmount= "0"
+    ; gas= None }
+  in
+    ignore
+      (assert_error
+         (Oneinch.Fluxum_adapter.Adapter.Normalize.ticker quote)
+         "Rejected zero toAmount")
+
 let test_normalize_order_book_valid () =
   printf "\n[Normalize] Order book with valid quotes\n";
   let sell_quote : Oneinch.Rest.Types.quote =
@@ -191,6 +204,7 @@ let () =
   test_normalize_ticker_valid ();
   test_normalize_ticker_invalid_to_amount ();
   test_normalize_ticker_nan_to_amount ();
+  test_normalize_ticker_zero_to_amount ();
   (* Order book tests *)
   test_normalize_order_book_valid ();
   test_normalize_order_book_invalid_sell_to_amount ();

@@ -494,45 +494,28 @@ module Book = struct
             printf "\n";
             Out_channel.flush stdout
 
-  (** Calculate volume-weighted average price for bids *)
-  let vwap_bid t ~volume =
-    let rec accumulate remaining acc_cost levels =
-      match levels with
-      | [] ->
-        (match Float.(remaining > 0.) with
-         | true -> None
-         | false -> Some (acc_cost /. volume))
-      | level :: rest ->
-        (match Float.(remaining <= level.Attributed_level.volume) with
-         | true ->
-           let cost = remaining *. level.price in
-             Some ((acc_cost +. cost) /. volume)
-         | false ->
-           let cost = level.volume *. level.price in
-             accumulate (remaining -. level.volume) (acc_cost +. cost) rest)
-    in
-    let levels = best_n_bids t ~n:100 () in
+  let vwap_sequence ~volume levels =
+    if Float.(volume <= 0.) || Float.is_nan volume || Float.is_inf volume
+    then None
+    else
+      let rec accumulate remaining acc_cost levels =
+        match Sequence.next levels with
+        | None -> None
+        | Some ((_price, level), rest) ->
+          let consumed = Float.min remaining level.Attributed_level.volume in
+          let remaining = remaining -. consumed in
+          let acc_cost = acc_cost +. (consumed *. level.price) in
+            if Float.(remaining <= 0.)
+            then Some (acc_cost /. volume)
+            else accumulate remaining acc_cost rest
+      in
       accumulate volume 0. levels
 
+  (** Calculate volume-weighted average price for bids *)
+  let vwap_bid t ~volume = vwap_sequence ~volume (Map.to_sequence t.bids)
+
   (** Calculate volume-weighted average price for asks *)
-  let vwap_ask t ~volume =
-    let rec accumulate remaining acc_cost levels =
-      match levels with
-      | [] ->
-        (match Float.(remaining > 0.) with
-         | true -> None
-         | false -> Some (acc_cost /. volume))
-      | level :: rest ->
-        (match Float.(remaining <= level.Attributed_level.volume) with
-         | true ->
-           let cost = remaining *. level.price in
-             Some ((acc_cost +. cost) /. volume)
-         | false ->
-           let cost = level.volume *. level.price in
-             accumulate (remaining -. level.volume) (acc_cost +. cost) rest)
-    in
-    let levels = best_n_asks t ~n:100 () in
-      accumulate volume 0. levels
+  let vwap_ask t ~volume = vwap_sequence ~volume (Map.to_sequence t.asks)
 
   (** Get total liquidity available within percentage of best price *)
   let liquidity_depth t ~side ~percentage =

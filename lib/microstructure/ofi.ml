@@ -36,37 +36,6 @@ let default_min_window_trades = 5
 
 let trade_value (t : Trade.t) = t.price *. t.amount
 
-(** Walk backward from index [i-1], accumulating buy/sell value of trades
-    whose timestamp is within [window] of trade [i]'s timestamp. Excludes
-    trade at [i] itself — the look-ahead-bias guard. *)
-let window_at_index trades i ~window =
-  let n = Array.length trades in
-    match i <= 0 || i >= n with
-    | true -> (0., 0., 0)
-    | false ->
-      let t_now = trades.(i).Trade.timestamp in
-      let cutoff =
-        Time_ns_unix.sub t_now window
-      in
-      let buy_v = ref 0. in
-      let sell_v = ref 0. in
-      let count = ref 0 in
-      let j = ref (i - 1) in
-      let stop = ref false in
-        while (not !stop) && !j >= 0 do
-          let trade_j = trades.(!j) in
-            match Time_ns_unix.( >= ) trade_j.timestamp cutoff with
-            | false -> stop := true
-            | true ->
-              let v = trade_value trade_j in
-                (match trade_j.aggressor with
-                 | `Buy -> buy_v := !buy_v +. v
-                 | `Sell -> sell_v := !sell_v +. v);
-                incr count;
-                decr j
-        done;
-        (!buy_v, !sell_v, !count)
-
 let value_to_ofi ~buy_v ~sell_v ~count ~min_window_trades : ofi_value =
   match count < min_window_trades with
   | true -> Insufficient_trades count
@@ -84,21 +53,52 @@ let compute
     ()
   =
   let n = Array.length trades in
+  let left = ref 0 in
+  let buy_v = ref 0. in
+  let sell_v = ref 0. in
+  let buy_count = ref 0 in
+  let sell_count = ref 0 in
+  let count = ref 0 in
     Array.init n ~f:(fun i ->
-      let buy_v, sell_v, count = window_at_index trades i ~window in
+      let cutoff = Time_ns_unix.sub trades.(i).Trade.timestamp window in
+      (* The accumulator contains exactly the preceding trades in
+         [left, i). Evict each expired trade once. *)
+      while !left < i && Time_ns_unix.(trades.(!left).timestamp < cutoff) do
+        let expired = trades.(!left) in
+        let value = trade_value expired in
+          (match expired.aggressor with
+           | `Buy ->
+             decr buy_count;
+             buy_v := if !buy_count = 0 then 0. else !buy_v -. value
+           | `Sell ->
+             decr sell_count;
+             sell_v := if !sell_count = 0 then 0. else !sell_v -. value);
+          decr count;
+          incr left
+      done;
       let ofi =
         value_to_ofi
-          ~buy_v
-          ~sell_v
-          ~count
+          ~buy_v:!buy_v
+          ~sell_v:!sell_v
+          ~count:!count
           ~min_window_trades
       in
-      { Tagged_trade.trade = trades.(i)
-      ; ofi
-      ; window_buy_value = buy_v
-      ; window_sell_value = sell_v
-      ; window_trade_count = count
-      })
+      let tagged =
+        { Tagged_trade.trade = trades.(i)
+        ; ofi
+        ; window_buy_value = !buy_v
+        ; window_sell_value = !sell_v
+        ; window_trade_count = !count
+        }
+      in
+      (* Add the current trade only after tagging it to preserve the strict
+         no-look-ahead contract. *)
+      let value = trade_value trades.(i) in
+        (match trades.(i).Trade.aggressor with
+         | `Buy -> incr buy_count; buy_v := !buy_v +. value
+         | `Sell -> incr sell_count; sell_v := !sell_v +. value);
+        incr count;
+        tagged)
 
 let default_bins =
   [ (0.0, 0.4, "<0.4 heavy SELL pressure")
@@ -133,22 +133,32 @@ type predictive_validity_result =
   }
 [@@deriving sexp]
 
-(** Find the most recent (timestamp <= t) entry. None if no such entry. *)
+(** Binary searches over the documented time-ordered midpoint series. *)
 let mid_at_or_before mid_series t =
-  Array.fold mid_series ~init:None ~f:(fun acc (ts, mid) ->
-    match Time_ns_unix.( <= ) ts t with
-    | true ->
-      (match acc with
-       | None -> Some mid
-       | Some _ -> Some mid (* keep walking forward; later wins *))
-    | false -> acc)
+  let lo = ref 0 in
+  let hi = ref (Array.length mid_series - 1) in
+  let result = ref None in
+    while !lo <= !hi do
+      let mid_index = !lo + ((!hi - !lo) / 2) in
+      let ts, mid = mid_series.(mid_index) in
+        if Time_ns_unix.(ts <= t)
+        then (result := Some mid; lo := mid_index + 1)
+        else hi := mid_index - 1
+    done;
+    !result
 
-(** Find the first (timestamp >= t) entry. None if no such entry. *)
 let mid_at_or_after mid_series t =
-  Array.find_map mid_series ~f:(fun (ts, mid) ->
-    match Time_ns_unix.( >= ) ts t with
-    | true -> Some mid
-    | false -> None)
+  let lo = ref 0 in
+  let hi = ref (Array.length mid_series - 1) in
+  let result = ref None in
+    while !lo <= !hi do
+      let mid_index = !lo + ((!hi - !lo) / 2) in
+      let ts, mid = mid_series.(mid_index) in
+        if Time_ns_unix.(ts >= t)
+        then (result := Some mid; hi := mid_index - 1)
+        else lo := mid_index + 1
+    done;
+    !result
 
 let drift_bps_for_trade
     (tagged : Tagged_trade.t)

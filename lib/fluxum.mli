@@ -7,6 +7,8 @@ module Exchange_intf = Exchange_intf
 module Json = Json
 module Cli_args = Cli_args
 module Normalize_common = Normalize_common
+module Market_making = Market_making
+module Order_book_incremental = Order_book_incremental
 
 (* Unified interfaces *)
 module Order_book_intf = Order_book_intf
@@ -51,6 +53,10 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) : sig
       type update = E.Native.Book.update
     end
 
+    module Symbol_info : sig
+      type t = E.Native.Symbol_info.t
+    end
+
     module Error : sig
       type t = E.Native.Error.t
     end
@@ -71,6 +77,35 @@ module Make (E : Exchange_intf.S) (Builder : BUILDER with module E := E) : sig
 
   val cancel_order : t -> Native.Order.id -> (unit, Types.Error.t) Deferred.Result.t
   val balances : t -> (Types.Balance.t list, Types.Error.t) Deferred.Result.t
+
+  val get_order_status
+    :  t
+    -> Native.Order.id
+    -> (Types.Order_status.t, Types.Error.t) Deferred.Result.t
+
+  val get_open_orders
+    :  t
+    -> ?symbol:Types.Symbol.t
+    -> unit
+    -> (Types.Order.t list, Types.Error.t) Deferred.Result.t
+
+  val get_order_history
+    :  t
+    -> ?symbol:Types.Symbol.t
+    -> ?limit:int
+    -> unit
+    -> (Types.Order.t list, Types.Error.t) Deferred.Result.t
+
+  val get_my_trades
+    :  t
+    -> symbol:Types.Symbol.t
+    -> ?limit:int
+    -> unit
+    -> (Types.Trade.t list, Types.Error.t) Deferred.Result.t
+
+  val get_symbols
+    :  t
+    -> (Types.Symbol_info.t list, Types.Error.t) Deferred.Result.t
 
   module Streams : sig
     val trades : t -> Types.Trade.t Pipe.Reader.t Deferred.t

@@ -211,15 +211,15 @@ let apply_event t (envelope : Event.envelope) =
     | Order (Order_filled {order_id; venue; fill_qty; fill_price; fee; _}) ->
       (* Update active order *)
       let order_opt = Map.find t.active_orders order_id in
-      let active_orders, symbol, side =
+      let active_orders =
         match order_opt with
-        | None -> (t.active_orders, "UNKNOWN", Event.Side.Buy)
+        | None -> t.active_orders
         | Some order ->
           let remaining = order.remaining_qty -. fill_qty in
             (match Float.(remaining <= 0.0001) with
              | true ->
                (* Fully filled, remove from active *)
-               (Map.remove t.active_orders order_id, order.symbol, order.side)
+               Map.remove t.active_orders order_id
              | false ->
                let order =
                  { order with
@@ -227,31 +227,36 @@ let apply_event t (envelope : Event.envelope) =
                  ; remaining_qty= remaining
                  ; last_update= envelope.timestamp }
                in
-                 ( Map.set t.active_orders ~key:order_id ~data:order
-                 , order.symbol
-                 , order.side ))
+                 Map.set t.active_orders ~key:order_id ~data:order)
       in
-      (* Update ledger *)
-      let venue_entry = event_venue_to_entry_venue venue in
-      let fluxum_side = Event.Side.to_fluxum_side side in
-      let ledger, _ =
-        Unified_ledger.Ledger.apply_fill
-          t.ledger
-          ~symbol
-          ~venue:venue_entry
-          ~price:fill_price
-          ~qty:fill_qty
-          ~side:fluxum_side
-          ~fee
+      (* Without the submitted order, a fill event has no symbol or side.
+         Do not corrupt the ledger with fabricated UNKNOWN/Buy metadata. *)
+      let ledger =
+        match order_opt with
+        | None -> t.ledger
+        | Some order ->
+          let venue_entry = event_venue_to_entry_venue venue in
+          let fluxum_side = Event.Side.to_fluxum_side order.side in
+          let ledger, _ =
+            Unified_ledger.Ledger.apply_fill
+              t.ledger
+              ~symbol:order.symbol
+              ~venue:venue_entry
+              ~price:fill_price
+              ~qty:fill_qty
+              ~side:fluxum_side
+              ~fee
+          in
+            ledger
       in
         {t with active_orders; ledger}
     | Order
         (Order_partially_filled {order_id; venue; fill_qty; fill_price; remaining_qty; fee})
       ->
       let order_opt = Map.find t.active_orders order_id in
-      let active_orders, symbol, side =
+      let active_orders =
         match order_opt with
-        | None -> (t.active_orders, "UNKNOWN", Event.Side.Buy)
+        | None -> t.active_orders
         | Some order ->
           let order =
             { order with
@@ -259,19 +264,25 @@ let apply_event t (envelope : Event.envelope) =
             ; remaining_qty
             ; last_update= envelope.timestamp }
           in
-            (Map.set t.active_orders ~key:order_id ~data:order, order.symbol, order.side)
+            Map.set t.active_orders ~key:order_id ~data:order
       in
-      let venue_entry = event_venue_to_entry_venue venue in
-      let fluxum_side = Event.Side.to_fluxum_side side in
-      let ledger, _ =
-        Unified_ledger.Ledger.apply_fill
-          t.ledger
-          ~symbol
-          ~venue:venue_entry
-          ~price:fill_price
-          ~qty:fill_qty
-          ~side:fluxum_side
-          ~fee
+      let ledger =
+        match order_opt with
+        | None -> t.ledger
+        | Some order ->
+          let venue_entry = event_venue_to_entry_venue venue in
+          let fluxum_side = Event.Side.to_fluxum_side order.side in
+          let ledger, _ =
+            Unified_ledger.Ledger.apply_fill
+              t.ledger
+              ~symbol:order.symbol
+              ~venue:venue_entry
+              ~price:fill_price
+              ~qty:fill_qty
+              ~side:fluxum_side
+              ~fee
+          in
+            ledger
       in
         {t with active_orders; ledger}
     | Order (Order_cancelled {order_id; _}) ->

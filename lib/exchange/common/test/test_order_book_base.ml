@@ -280,6 +280,41 @@ let%test_module "Book - Metadata Handling" =
       let book = Rich_book.set_many book levels ~metadata:meta in
       let stored_meta = Rich_book.metadata book in
         Int64.(stored_meta.last_update_id = 200L)
+
+    let%test "set preserves existing metadata when omitted" =
+      let book = Rich_book.create ~symbol:"BTC/USD" in
+      let meta = {Rich_metadata_config.exchange_id= 3; last_update_id= 300L} in
+      let book = Rich_book.set book ~side:`Bid ~price:50000. ~size:1.0 ~metadata:meta in
+      let book = Rich_book.set book ~side:`Ask ~price:50001. ~size:2.0 in
+      let stored_meta = Rich_book.metadata book in
+        stored_meta.exchange_id = 3 && Int64.(stored_meta.last_update_id = 300L)
+
+    let%test "set_many preserves existing metadata when omitted" =
+      let book = Rich_book.create ~symbol:"BTC/USD" in
+      let meta = {Rich_metadata_config.exchange_id= 4; last_update_id= 400L} in
+      let book = Rich_book.set book ~side:`Bid ~price:50000. ~size:1.0 ~metadata:meta in
+      let book = Rich_book.set_many book [(`Ask, 50001., 2.0)] in
+      let stored_meta = Rich_book.metadata book in
+        stored_meta.exchange_id = 4 && Int64.(stored_meta.last_update_id = 400L)
+  end)
+
+let%test_module "Book - VWAP validation" =
+  (module struct
+    let book () =
+      let book = make_book "BTC/USD" in
+      let book = Book.set book ~side:`Bid ~price:99. ~size:2. in
+        Book.set book ~side:`Ask ~price:101. ~size:2.
+
+    let%test "zero volume is rejected" =
+      Option.is_none (Book.vwap_buy (book ()) ~volume:0.)
+
+    let%test "negative volume is rejected" =
+      Option.is_none (Book.vwap_sell (book ()) ~volume:(-1.))
+
+    let%test "finite positive volume computes" =
+      match Book.vwap_buy (book ()) ~volume:1. with
+      | Some price -> float_equal price 101.
+      | None -> false
   end)
 
 let%test_module "Books - Multi-Symbol" =

@@ -77,8 +77,7 @@ end
            meaningful. Below this, [Insufficient_trades n] is reported
            rather than a noisy ratio. Default 5.
 
-    Time complexity: O(n × avg_window_size). For thin markets
-    (≤ tens of trades per hour) effectively O(n). *)
+    Time complexity: O(n), using a rolling two-pointer window. *)
 val compute :
   trades:Trade.t array ->
   ?window:Time_ns.Span.t ->
