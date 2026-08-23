@@ -145,7 +145,8 @@ module Make (Config : sig
     (** Update a single price level.
 
         @param timestamp Optional timestamp (defaults to current time)
-        @param metadata Optional exchange-specific metadata
+        @param metadata Optional exchange-specific metadata; when omitted,
+               the book's existing metadata is preserved
         @param side Bid or Ask side
         @param price Price level to update
         @param size New size at this price (0 removes the level)
@@ -173,7 +174,8 @@ module Make (Config : sig
         More efficient than multiple {!set} calls.
 
         @param timestamp Optional timestamp
-        @param metadata Optional exchange-specific metadata
+        @param metadata Optional exchange-specific metadata; when omitted,
+               the book's existing metadata is preserved
         @param updates List of (side, price, size) tuples
         @return New book with all updates applied
 
@@ -269,7 +271,8 @@ module Make (Config : sig
         the requested volume is filled.
 
         @param volume Amount to buy
-        @return Some average_price if sufficient liquidity exists, None otherwise
+        @return Some average_price if sufficient liquidity exists, None for
+                non-positive/non-finite volume or insufficient liquidity
 
         {b Example:}
         {[
@@ -285,7 +288,8 @@ module Make (Config : sig
         the requested volume is filled.
 
         @param volume Amount to sell
-        @return Some average_price if sufficient liquidity exists, None otherwise *)
+        @return Some average_price if sufficient liquidity exists, None for
+                non-positive/non-finite volume or insufficient liquidity *)
     val vwap_sell : t -> volume:float -> float option
 
     (** Calculate total volume in the top N levels of a side.

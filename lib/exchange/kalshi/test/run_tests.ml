@@ -306,11 +306,11 @@ let () =
   (* Cfg tests *)
   printf "\n--- Configuration ---\n";
   assert_equal "production host"
-    ~expected:"api.kalshi.com" (Kalshi.Cfg.host ~env:"production");
+    ~expected:"external-api.kalshi.com" (Kalshi.Cfg.host ~env:"production");
   assert_equal "demo host"
-    ~expected:"demo-api.kalshi.co" (Kalshi.Cfg.host ~env:"demo");
+    ~expected:"external-api.demo.kalshi.co" (Kalshi.Cfg.host ~env:"demo");
   assert_equal "sandbox host"
-    ~expected:"demo-api.kalshi.co" (Kalshi.Cfg.host ~env:"sandbox");
+    ~expected:"external-api.demo.kalshi.co" (Kalshi.Cfg.host ~env:"sandbox");
 
   (* Place_order request serialization *)
   printf "\n--- Request Serialization ---\n";
@@ -333,4 +333,5 @@ let () =
    | _ -> incr failed; printf "✗ request serialization\n");
 
   printf "\n=== Results: %d passed, %d failed (%d total) ===\n"
-    !passed !failed (!passed + !failed)
+    !passed !failed (!passed + !failed);
+  if !failed > 0 then exit 1

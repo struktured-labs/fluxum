@@ -125,13 +125,10 @@ let test_normalize_ticker_zero_in_amount () =
     ; contextSlot= None
     ; timeTaken= None }
   in
-    match Jupiter.Fluxum_adapter.Adapter.Normalize.ticker quote with
-    | Ok t ->
-      (* Division by zero should give infinity *)
-      (match Float.is_finite t.last_price with
-       | true -> fail "Zero inAmount should produce infinity/NaN"
-       | false -> pass "Zero inAmount handled (infinity)")
-    | Error msg -> pass (sprintf "Zero inAmount rejected: %s" msg)
+    ignore
+      (assert_error
+         (Jupiter.Fluxum_adapter.Adapter.Normalize.ticker quote)
+         "Rejected zero inAmount")
 
 let test_normalize_order_book_valid () =
   printf "\n[Normalize] Order book with valid quotes\n";

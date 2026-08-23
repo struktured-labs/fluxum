@@ -1,8 +1,8 @@
 (** Kalshi API Configuration
 
     Authentication uses RSA-PSS key signing.
-    API base: https://api.kalshi.com/trade-api/v2/
-    Demo:     https://demo-api.kalshi.co/trade-api/v2/ *)
+    API base: https://external-api.kalshi.com/trade-api/v2/
+    Demo:     https://external-api.demo.kalshi.co/trade-api/v2/ *)
 
 let api_version = "v2"
 
@@ -52,8 +52,8 @@ let param ?default ?env ~name () =
 
 let host ~env =
   match String.lowercase env with
-  | "production" | "prod" -> "api.elections.kalshi.com"
-  | "demo" | "sandbox" -> "demo-api.kalshi.co"
+  | "production" | "prod" -> "external-api.kalshi.com"
+  | "demo" | "sandbox" -> "external-api.demo.kalshi.co"
   | _ -> failwithf "Kalshi environment must be 'production' or 'demo'" ()
 
 let make env =

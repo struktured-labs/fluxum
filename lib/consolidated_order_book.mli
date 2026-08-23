@@ -270,7 +270,8 @@ module Book : sig
       Returns weighted average price.
 
       @param volume Target volume to sell
-      @return Some vwap if sufficient liquidity, None otherwise
+      @return Some vwap if sufficient liquidity, None for non-positive or
+              non-finite volume, or when liquidity is insufficient
 
       {b Use case:} Market impact analysis for large sell orders.
 

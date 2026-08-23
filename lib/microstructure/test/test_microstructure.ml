@@ -387,6 +387,33 @@ let test_ofi_min_window_trades_gate () =
         (Sexp.to_string (Microstructure.Ofi.sexp_of_ofi_value other));
       exit 1
 
+let test_ofi_rolling_window_eviction () =
+  let ts0 = Time_ns_unix.now () in
+  let mins n = Time_ns_unix.add ts0 (Time_ns.Span.of_min (Float.of_int n)) in
+  let trades =
+    [| make_trade ~tid:1 ~ts:(mins 0) ~price:100. ~amount:1. ~aggressor:`Buy
+     ; make_trade ~tid:2 ~ts:(mins 60) ~price:100. ~amount:1. ~aggressor:`Sell
+     ; make_trade ~tid:3 ~ts:(mins 121) ~price:100. ~amount:1. ~aggressor:`Buy
+    |]
+  in
+  let tagged =
+    Microstructure.Ofi.compute
+      ~trades
+      ~window:(Time_ns.Span.of_min 60.)
+      ~min_window_trades:1
+      ()
+  in
+  let boundary_inclusive = tagged.(1).window_trade_count = 1 in
+  let expired = tagged.(2).window_trade_count = 0 in
+    match boundary_inclusive && expired with
+    | true -> printf "OK   ofi rolling window keeps boundary and evicts expired trades\n"
+    | false ->
+      eprintf
+        "FAIL ofi rolling eviction: boundary_count=%d expired_count=%d\n"
+        tagged.(1).window_trade_count
+        tagged.(2).window_trade_count;
+      exit 1
+
 let test_ofi_default_bins_shape () =
   let bins = Microstructure.Ofi.default_bins in
   let n = List.length bins in
@@ -672,6 +699,7 @@ let () =
   test_ofi_no_lookahead ();
   test_ofi_basic_ratio ();
   test_ofi_min_window_trades_gate ();
+  test_ofi_rolling_window_eviction ();
   test_ofi_default_bins_shape ();
   test_predictive_validity_smoke ();
   test_predictive_validity_seeded_reproducibility ();

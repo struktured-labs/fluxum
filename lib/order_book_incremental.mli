@@ -85,8 +85,10 @@ module Manager : sig
   val is_valid_sequence : 'book t -> seq:int64 -> bool
   val needs_resync : 'book t -> bool
 
-  (** Apply update to book using provided apply function
-      Returns Error if sequence gap detected *)
+  (** Apply an update to the book using [apply_fn]. Snapshots reset the
+      sequence baseline, stale/duplicate deltas are ignored, overlapping
+      sequence ranges are accepted, and forward gaps are rejected without
+      modifying the book. *)
   val apply
     :  'book t
     -> update:Update.t

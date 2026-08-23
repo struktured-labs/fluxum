@@ -272,6 +272,11 @@ module Adapter = struct
       ; tick_size= None
       ; quote_increment= None }
 
+    let positive_finite ~name value =
+      if Float.is_finite value && Float.(value > 0.)
+      then Ok value
+      else Error (sprintf "%s must be positive and finite, got: %g" name value)
+
     let ticker (quote : Native.Ticker.t) : (Types.Ticker.t, string) Result.t =
       (* Calculate price from quote amounts *)
       let open Result.Let_syntax in
@@ -281,7 +286,7 @@ module Adapter = struct
       let%bind out_amount =
         Fluxum.Normalize_common.Float_conv.qty_of_string quote.outAmount
       in
-      let price = out_amount /. in_amount in
+      let%bind price = positive_finite ~name:"ticker price" (out_amount /. in_amount) in
       let symbol =
         sprintf
           "%s-%s"
@@ -320,8 +325,12 @@ module Adapter = struct
       let%bind buy_out =
         Fluxum.Normalize_common.Float_conv.qty_of_string buy_quote.outAmount
       in
-      let sell_price = sell_out /. sell_in in
-      let buy_price = buy_in /. buy_out in
+      let%bind sell_price =
+        positive_finite ~name:"synthetic ask price" (sell_out /. sell_in)
+      in
+      let%bind buy_price =
+        positive_finite ~name:"synthetic bid price" (buy_in /. buy_out)
+      in
       let bid = {Types.Order_book.Price_level.price= buy_price; volume= buy_out} in
       let ask = {Types.Order_book.Price_level.price= sell_price; volume= sell_in} in
         Ok

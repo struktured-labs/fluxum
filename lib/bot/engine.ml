@@ -55,80 +55,67 @@ module type Market_data_handler = sig
     -> unit Deferred.t
 end
 
-(** Strategy wrapper using existential type *)
+(** Type-safe strategy wrapper. Each callback closes over the strategy's
+    concrete state type, so heterogeneous strategies need no runtime cast. *)
 module Strategy_wrapper = struct
-  (** Existential wrapper for strategy state *)
-  type packed_state = Packed : 'a -> packed_state
-
   type t =
     { name: string
     ; version: string
-    ; mutable state: packed_state
     ; on_book:
-        packed_state
-        -> Strategy_intf.Book_snapshot.t
+        Strategy_intf.Book_snapshot.t
         -> Strategy_intf.Context.t
-        -> Strategy_intf.Signal.t list * packed_state
+        -> Strategy_intf.Signal.t list
     ; on_trade:
-        packed_state
-        -> symbol:string
+        symbol:string
         -> venue:Event.Venue.t
         -> price:float
         -> qty:float
         -> side:Event.Side.t option
         -> Strategy_intf.Context.t
-        -> Strategy_intf.Signal.t list * packed_state
+        -> Strategy_intf.Signal.t list
     ; on_fill:
-        packed_state
-        -> order_id:string
+        order_id:string
         -> symbol:string
         -> venue:Event.Venue.t
         -> side:Event.Side.t
         -> fill_qty:float
         -> fill_price:float
         -> Strategy_intf.Context.t
-        -> Strategy_intf.Signal.t list * packed_state
+        -> Strategy_intf.Signal.t list
     ; on_tick:
-        packed_state
-        -> time:Event.Time.t
+        time:Event.Time.t
         -> Strategy_intf.Context.t
-        -> Strategy_intf.Signal.t list * packed_state
+        -> Strategy_intf.Signal.t list
     ; on_start:
-        packed_state
-        -> Strategy_intf.Context.t
-        -> Strategy_intf.Signal.t list * packed_state
+        Strategy_intf.Context.t
+        -> Strategy_intf.Signal.t list
     ; on_stop:
-        packed_state
-        -> Strategy_intf.Context.t
-        -> Strategy_intf.Signal.t list * packed_state }
+        Strategy_intf.Context.t
+        -> Strategy_intf.Signal.t list }
 
   let wrap
         (type cfg st)
         (module S : Strategy_intf.S with type config = cfg and type state = st)
         config
     =
-    let initial_state = S.init config in
-    let pack st = Packed st in
-    let unpack (Packed st) = (Obj.magic st : st) in
+    let state = ref (S.init config) in
+    let update f =
+      let signals, new_state = f !state in
+        state := new_state;
+        signals
+    in
       { name= S.name
       ; version= S.version
-      ; state= pack initial_state
       ; on_book=
-          (fun packed book ctx ->
-            let state = unpack packed in
-            let signals, new_state = S.on_book_update state ~book ~context:ctx in
-              (signals, pack new_state))
+          (fun book ctx ->
+            update (fun state -> S.on_book_update state ~book ~context:ctx))
       ; on_trade=
-          (fun packed ~symbol ~venue ~price ~qty ~side ctx ->
-            let state = unpack packed in
-            let signals, new_state =
-              S.on_trade state ~symbol ~venue ~price ~qty ~side ~context:ctx
-            in
-              (signals, pack new_state))
+          (fun ~symbol ~venue ~price ~qty ~side ctx ->
+            update (fun state ->
+              S.on_trade state ~symbol ~venue ~price ~qty ~side ~context:ctx))
       ; on_fill=
-          (fun packed ~order_id ~symbol ~venue ~side ~fill_qty ~fill_price ctx ->
-            let state = unpack packed in
-            let signals, new_state =
+          (fun ~order_id ~symbol ~venue ~side ~fill_qty ~fill_price ctx ->
+            update (fun state ->
               S.on_fill
                 state
                 ~order_id
@@ -137,24 +124,13 @@ module Strategy_wrapper = struct
                 ~side
                 ~fill_qty
                 ~fill_price
-                ~context:ctx
-            in
-              (signals, pack new_state))
+                ~context:ctx))
       ; on_tick=
-          (fun packed ~time ctx ->
-            let state = unpack packed in
-            let signals, new_state = S.on_tick state ~time ~context:ctx in
-              (signals, pack new_state))
+          (fun ~time ctx -> update (fun state -> S.on_tick state ~time ~context:ctx))
       ; on_start=
-          (fun packed ctx ->
-            let state = unpack packed in
-            let signals, new_state = S.on_start state ~context:ctx in
-              (signals, pack new_state))
+          (fun ctx -> update (fun state -> S.on_start state ~context:ctx))
       ; on_stop=
-          (fun packed ctx ->
-            let state = unpack packed in
-            let signals, new_state = S.on_stop state ~context:ctx in
-              (signals, pack new_state)) }
+          (fun ctx -> update (fun state -> S.on_stop state ~context:ctx)) }
 end
 
 (** Order submission callback type.
@@ -330,8 +306,7 @@ let on_book_update t ~symbol ~venue ~bids ~asks ~is_snapshot =
               {Strategy_intf.Book_snapshot.price= l.Event.Price_level.price; qty= l.qty})
         ; timestamp= Event.Time.now () }
       in
-      let signals, new_state = strategy.on_book strategy.state book ctx in
-        strategy.state <- new_state;
+      let signals = strategy.on_book book ctx in
         process_signals t signals
     | _ -> return ()
 
@@ -345,42 +320,36 @@ let on_trade t ~symbol ~venue ~price ~qty ~side =
     match (t.strategy, t.is_running) with
     | Some strategy, true ->
       let ctx = build_context t in
-      let signals, new_state =
-        strategy.on_trade strategy.state ~symbol ~venue ~price ~qty ~side ctx
-      in
-        strategy.state <- new_state;
+      let signals = strategy.on_trade ~symbol ~venue ~price ~qty ~side ctx in
         process_signals t signals
     | _ -> return ()
 
 (** Handle order fill *)
 let on_fill t ~order_id ~venue ~fill_qty ~fill_price ~fee ~is_maker =
+  (* A full fill removes the order from [active_orders] while the event is
+     applied. Capture routing metadata first so the strategy receives the
+     actual symbol and side rather than the old fabricated UNKNOWN/Buy
+     fallback. *)
+  let order_opt = Map.find t.state.active_orders order_id in
   let event =
     Event.Order
       (Event.Order_event.Order_filled
          {order_id; venue; fill_qty; fill_price; fee; is_maker})
   in
   let%bind () = emit t event in
-    match (t.strategy, t.is_running) with
-    | Some strategy, true ->
+    match (t.strategy, t.is_running, order_opt) with
+    | Some strategy, true, Some order ->
       let ctx = build_context t in
-      let order_opt = Map.find t.state.active_orders order_id in
-      let symbol, side =
-        match order_opt with
-        | Some o -> (o.State.Active_order.symbol, o.side)
-        | None -> ("UNKNOWN", Event.Side.Buy)
-      in
-      let signals, new_state =
+      let signals =
         strategy.on_fill
-          strategy.state
           ~order_id
-          ~symbol
+          ~symbol:order.State.Active_order.symbol
           ~venue
-          ~side
+          ~side:order.side
           ~fill_qty
           ~fill_price
           ctx
       in
-        strategy.state <- new_state;
         process_signals t signals
     | _ -> return ()
 
@@ -390,8 +359,7 @@ let on_tick t =
   | Some strategy, true ->
     let ctx = build_context t in
     let time = Event.Time.now () in
-    let signals, new_state = strategy.on_tick strategy.state ~time ctx in
-      strategy.state <- new_state;
+    let signals = strategy.on_tick ~time ctx in
       process_signals t signals
   | _ -> return ()
 
@@ -478,8 +446,7 @@ let start t =
       | None -> return ()
       | Some strategy ->
         let ctx = build_context t in
-        let signals, new_state = strategy.on_start strategy.state ctx in
-          strategy.state <- new_state;
+        let signals = strategy.on_start ctx in
           process_signals t signals
     in
       (* Start clocks *)
@@ -498,8 +465,7 @@ let stop t ~reason =
       | None -> return ()
       | Some strategy ->
         let ctx = build_context t in
-        let signals, new_state = strategy.on_stop strategy.state ctx in
-          strategy.state <- new_state;
+        let signals = strategy.on_stop ctx in
           process_signals t signals
     in
       t.is_running <- false;

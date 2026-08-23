@@ -727,6 +727,29 @@ let%expect_test "state apply_event - order cancelled" =
     After cancel - Active: 0
   |}]
 
+let%expect_test "state apply_event - unknown fill does not fabricate a position" =
+  let state = Bot.State.empty ~bot_id:"test-bot" in
+  let fill =
+    Bot.Event.Order
+      (Bot.Event.Order_event.Order_filled
+         { order_id= "missing-order"
+         ; venue= Bot.Event.Venue.Gemini
+         ; fill_qty= 1.0
+         ; fill_price= 50000.0
+         ; fee= 1.0
+         ; is_maker= None })
+  in
+  let state =
+    Bot.State.apply_event state (Bot.Event.create_envelope ~sequence:1L fill)
+  in
+    printf "Ledger entries: %d\n" (Bot.Ledger.count state.ledger);
+    printf "Active orders: %d\n" (Map.length state.active_orders);
+    [%expect
+      {|
+    Ledger entries: 0
+    Active orders: 0
+  |}]
+
 let%expect_test "state apply_event - order rejected" =
   let state = Bot.State.empty ~bot_id:"test-bot" in
   let submit =
@@ -1897,4 +1920,43 @@ let%expect_test "engine strategy wrapper with noop" =
       {|
     Strategy name: noop
     Strategy version: 1.0.0
+  |}]
+
+module Counting_strategy : Bot.Strategy_intf.S with type config = unit and type state = int = struct
+  type config = unit
+  type state = int
+
+  let name = "counting"
+  let version = "1.0.0"
+  let default_config = ()
+  let init () = 0
+  let on_book_update state ~book:_ ~context:_ = ([], state)
+  let on_trade state ~symbol:_ ~venue:_ ~price:_ ~qty:_ ~side:_ ~context:_ = ([], state)
+  let on_fill state ~order_id:_ ~symbol:_ ~venue:_ ~side:_ ~fill_qty:_ ~fill_price:_ ~context:_ = ([], state)
+  let on_start state ~context:_ = ([], state)
+  let on_stop state ~context:_ = ([], state)
+
+  let on_tick state ~time:_ ~context:_ =
+    (List.init state ~f:(fun _ -> Bot.Strategy_intf.Signal.No_action), state + 1)
+end
+
+let%expect_test "engine strategy wrapper retains typed state" =
+  let strategy = Bot.Engine.Strategy_wrapper.wrap (module Counting_strategy) () in
+  let context : Bot.Strategy_intf.Context.t =
+    { timestamp= Bot.Event.Time.epoch
+    ; positions= []
+    ; balances= []
+    ; active_orders= []
+    ; total_pnl= 0.
+    ; realized_pnl= 0.
+    ; unrealized_pnl= 0. }
+  in
+  let first = strategy.on_tick ~time:Bot.Event.Time.epoch context in
+  let second = strategy.on_tick ~time:Bot.Event.Time.epoch context in
+    printf "First signals: %d\n" (List.length first);
+    printf "Second signals: %d\n" (List.length second);
+    [%expect
+      {|
+    First signals: 0
+    Second signals: 1
   |}]

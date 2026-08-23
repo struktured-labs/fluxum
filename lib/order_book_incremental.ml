@@ -25,19 +25,20 @@ module Sequence = struct
   let is_valid t ~seq =
     match t.expected_next with
     | None -> true (* First message, always valid *)
-    | Some expected -> Int64.(seq >= expected)
+    | Some expected -> Int64.equal seq expected
 
   (** Update sequence tracker with new sequence number *)
   let update t ~seq =
-    let gaps_detected =
-      match t.expected_next with
-      | None -> 0
-      | Some expected when Int64.(seq < expected) ->
-        t.gaps_detected (* Duplicate or old message, ignore *)
-      | Some expected when Int64.(seq > expected) ->
-        t.gaps_detected + 1 (* Gap detected! *)
-      | Some _ -> t.gaps_detected (* Expected sequence *)
-    in
+    match t.expected_next with
+    | Some expected when Int64.(seq < expected) ->
+      (* Never let a duplicate regress the tracker. *)
+      t
+    | expected_next ->
+      let gaps_detected =
+        match expected_next with
+        | Some expected when Int64.(seq > expected) -> t.gaps_detected + 1
+        | None | Some _ -> t.gaps_detected
+      in
       {last_seen= Some seq; expected_next= Some Int64.(seq + 1L); gaps_detected}
 
   (** Reset sequence tracker (after snapshot) *)
@@ -46,6 +47,8 @@ module Sequence = struct
 
   (** Check if we need to re-sync (too many gaps) *)
   let needs_resync t ~max_gaps = t.gaps_detected > max_gaps
+
+  let record_gap t = {t with gaps_detected= t.gaps_detected + 1}
 end
 
 (** Price level update operation *)
@@ -130,27 +133,44 @@ module Manager = struct
   (** Apply update to book using provided apply function *)
   let apply t ~update ~apply_fn =
     let effective_seq = Update.effective_sequence update in
-    (* Check sequence validity *)
-    let sequence_valid =
-      match effective_seq with
-      | None -> true
-      | Some seq -> is_valid_sequence t ~seq
+    let update_type = Update.update_type update in
+    (* Sequence ranges may overlap the expected ID (as Binance ranges do).
+       A fully old range is a harmless duplicate; a range beginning after
+       the expected ID is a real gap and must not be applied. Snapshots
+       always establish a new sequence baseline. *)
+    let sequence_status =
+      match update_type, t.sequence.expected_next, update.sequence_range, effective_seq with
+      | Update_type.Delta, _, Some (first, final), _ when Int64.(first > final) -> `Gap
+      | Update_type.Snapshot, _, _, _ | Update_type.Delta, None, _, _ -> `Accept
+      | Update_type.Delta, Some _, _, None -> `Accept
+      | Update_type.Delta, Some expected, Some (first, final), Some _ ->
+        if Int64.(final < expected)
+        then `Stale
+        else if Int64.(first > expected)
+        then `Gap
+        else `Accept
+      | Update_type.Delta, Some expected, None, Some seq ->
+        if Int64.(seq < expected)
+        then `Stale
+        else if Int64.(seq > expected)
+        then `Gap
+        else `Accept
     in
-      match sequence_valid with
-      | false ->
+      match sequence_status with
+      | `Stale -> Ok t
+      | `Gap ->
         (* Sequence gap detected *)
-        let gaps = t.sequence.gaps_detected + 1 in
+        let sequence = Sequence.record_gap t.sequence in
           Log.Global.info_s
             [%message
               "Order book sequence gap detected"
-                ~gaps:(gaps : int)
+                ~gaps:(sequence.gaps_detected : int)
                 ~expected:(t.sequence.expected_next : int64 option)
                 ~received:(effective_seq : int64 option)];
-          Error (`Sequence_gap (t.sequence, effective_seq))
-      | true ->
+          Error (`Sequence_gap (sequence, effective_seq))
+      | `Accept ->
         (* Apply update *)
         let book' = apply_fn t.book (Update.levels update) in
-        let update_type = Update.update_type update in
         let sequence' =
           match (update_type, effective_seq) with
           | Update_type.Snapshot, Some seq -> Sequence.reset t.sequence ~seq
@@ -227,9 +247,12 @@ module Batch = struct
          | Error e -> Error e)
     in
     let updates = Queue.to_list t.pending in
-      Queue.clear t.pending;
       match process t.manager updates with
-      | Ok manager' -> Ok {t with manager= manager'}
+      | Ok manager' ->
+        Queue.clear t.pending;
+        Ok {t with manager= manager'}
+      (* Retain every update on failure. The returned error carries no updated
+         batch value, so clearing here would silently lose market data. *)
       | Error e -> Error e
 
   (** Process updates with automatic flushing *)
