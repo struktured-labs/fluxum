@@ -1,5 +1,7 @@
 open Core
 module Cfg = Cfg
+module Fix = Fix
+module Fix_session = Fix_session
 module Common = Common
 module Rest = Rest
 module V1 = V1

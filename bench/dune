@@ -1,0 +1,7 @@
+(executable
+ (name kraken_fix_codec)
+ (modules kraken_fix_codec)
+ (libraries core kraken)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core))

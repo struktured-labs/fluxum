@@ -1,6 +1,6 @@
 (library
  (name exchange_common_test)
- (modules test_order_book_base test_auto_restart)
+ (modules test_order_book_base test_auto_restart test_fix_codec)
  (libraries core async core_unix exchange_common)
  (inline_tests)
  (preprocess

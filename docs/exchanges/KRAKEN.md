@@ -7,9 +7,80 @@ Complete Kraken WebSocket and REST API integration with order book management.
 - **Exchange**: Kraken
 - **WebSocket**: v2 (public), v1 (private)
 - **REST API**: v1 and v0 (legacy)
+- **Low-latency API**: Unified FIX 4.4 message codec (Spot)
 - **Order Book**: Unified interface with configurable depth
 - **Trading**: Full support (spot)
 - **Authentication**: HMAC-SHA512
+
+## Unified FIX 4.4 fast path
+
+`Kraken.Fix` provides validated FIX framing, exact Kraken Logon signing, session
+messages, L2 subscriptions, Spot market/limit orders, cancels, typed L2 updates,
+and inbound execution-report classification. Prices and quantities use exact
+fixed-point decimals; the API does not accept floats. `Kraken.Fix_session` adds
+an Async TLS client with verified certificates and hostnames, reconnects,
+heartbeats, TestRequest responses, and durable inbound/outbound sequence state.
+
+FIX access is separate from an ordinary Kraken API key. Before connecting,
+request Unified FIX access and a SenderCompID from your Kraken account manager,
+create a FIX-specific key, and whitelist the machine's public IP. Resolve DNS at
+connection time rather than pinning an address.
+
+Production uses `fix.kraken.com`; UAT uses `fix.uat.kraken.com`. Spot L2 market
+data is on port 4000, Spot trading is on port 4001, and Spot L3 data is on port
+4005. Hostnames are resolved on every reconnect.
+
+```ocaml
+module Fix = Kraken.Fix
+module Fix_session = Kraken.Fix_session
+
+let session_or_fail = function
+  | Ok value -> value
+  | Error error ->
+      failwith (Sexp.to_string_hum (Fix_session.sexp_of_error error))
+
+let endpoint =
+  Fix.Endpoint.create ~environment:Uat ~service:Spot_market_data_l2
+
+let config =
+  Fix_session.Config.create ~endpoint ~sender_comp_id
+    ~authentication:Market_data
+    ~state_path:"var/kraken-fix-l2.sexp" ()
+  |> session_or_fail
+
+let%bind client = Fix_session.Client.create config >>| session_or_fail
+let events = Fix_session.Client.events client
+
+(* Run this concurrently with an event consumer. [run] reconnects until stopped. *)
+let session = Fix_session.Client.run client
+```
+
+For a trading endpoint, construct `Fix.Credentials.t` from the FIX-specific key
+and use `Trading { credentials; cancel_on_disconnect; client_id }` as the
+authentication value. Keep secrets out of the state path; the state file stores
+only sequence numbers. `cancel_on_disconnect` is explicit. Single-order cancels
+are session-scoped on Kraken FIX, so preserve the session that originated each
+live order.
+
+The runner asks Kraken for missing inbound messages when it detects a sequence
+gap. It does not replay outbound business messages automatically when Kraken
+sends a ResendRequest: consume that inbound message and reconcile order state
+before deciding whether to reset or replay. This is deliberate because silently
+re-emitting an order after an ambiguous disconnect can duplicate economic
+intent. Use `reset_on_start` only for a coordinated sequence reset, such as a
+fresh UAT session, not as routine reconnect policy.
+
+Sequence state is fsynced after every message by default. For latency testing,
+raising `checkpoint_every` batches those fsyncs; clean disconnects still save
+state, but a process or machine crash can roll sequence numbers back to the last
+checkpoint. That is an explicit durability/latency tradeoff, not a safe default
+for unattended trading.
+
+Run the local codec benchmark with:
+
+```bash
+dune exec --profile=release ./bench/kraken_fix_codec.exe -- 200000
+```
 
 ## Quick Start
 
