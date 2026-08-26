@@ -153,10 +153,10 @@ module T = struct
     }
 
   let update_from_book t book =
-    (* TODO: Restore market_price calculation once added to base module *)
-    (* Fallback to best bid price for now *)
-    let best_bid = Order_book.Book.best_bid book in
-    update_spot t (Order_book.Price_level.price best_bid)
+    let market_price = Order_book.Book.mid_price book in
+    match Float.(market_price > 0.0) with
+    | true -> update_spot t market_price
+    | false -> t
 
   type event =
     [ `Order_event of Order_events.Order_event.t
