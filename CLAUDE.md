@@ -79,6 +79,10 @@ module F = Fluxum.Make(E)(E.Builder)
 
 ## Code Style & Conventions
 
+The canonical implementation and review standard is
+[`docs/guides/STYLE.md`](docs/guides/STYLE.md). Follow it for every material
+change; the summary below is not a substitute for the full guide.
+
 ### Core Principles (MUST FOLLOW)
 
 1. **Jane Street First**: Always use Jane Street libraries (Core, Async, Base) over stdlib
@@ -114,6 +118,11 @@ module F = Fluxum.Make(E)(E.Builder)
    if condition then do_something () else do_other ()
    ```
 
+   Use `Option` and `Result` combinators, locally scoped `Let_syntax`, and
+   monadic operators for genuine transformation pipelines. Keep explicit
+   matches for protocol states or branches with different behavior. Do not
+   mechanically prefer either form.
+
 6. **Minimize Mutability**: Prefer immutable data structures
    - Use `ref` only when performance requires it
    - Prefer `Map.t` over `Hashtbl.t` unless benchmarks show need
@@ -122,6 +131,9 @@ module F = Fluxum.Make(E)(E.Builder)
 7. **Native OCaml Where Possible**: Avoid external dependencies when stdlib/Core suffices
 
 8. **Never Remove Stale Symbols or Currencies**: Delisted trading pairs and currencies must be kept in enum types for backward compatibility — historical trades, ledger entries, and order records reference them. Only add new entries; never remove old ones.
+
+9. **No Representation Magic**: Never use `Obj`, unchecked casts, or
+   representation-dependent tricks.
 
 ### File Conventions
 

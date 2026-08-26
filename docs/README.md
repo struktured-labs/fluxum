@@ -93,6 +93,7 @@ See [Architecture Guide](guides/ARCHITECTURE.md) for details.
 ### Core Guides
 
 - **[Architecture](guides/ARCHITECTURE.md)** - System architecture and design patterns
+- **[OCaml Style](guides/STYLE.md)** - Canonical implementation and review conventions
 - **[Order Book](guides/ORDER_BOOK.md)** - Complete order book usage guide
 - **[Bot Framework](guides/BOT_FRAMEWORK.md)** - Trading bot infrastructure with event sourcing
 - **[WebSocket](guides/WEBSOCKET.md)** - WebSocket streaming guide (TODO)
