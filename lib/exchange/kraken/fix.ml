@@ -238,11 +238,16 @@ module Session = struct
       ~body_fields
 
   let heartbeat ~header ~target ?test_request_id () =
-    let body_fields =
-      Option.to_list (Option.map test_request_id ~f:(fun id -> (112, id)))
-    in
-    encode ~header ~target_comp_id:(target_comp_id target) ~msg_type:"0"
-      ~body_fields
+    match test_request_id with
+    | Some value -> (
+        match nonempty_wire_value value with
+        | false -> Error (`Invalid_request "TestReqID must be non-empty")
+        | true ->
+            encode ~header ~target_comp_id:(target_comp_id target) ~msg_type:"0"
+              ~body_fields:[ (112, value) ])
+    | None ->
+        encode ~header ~target_comp_id:(target_comp_id target) ~msg_type:"0"
+          ~body_fields:[]
 
   let test_request ~header ~target ~test_request_id =
     match nonempty_wire_value test_request_id with

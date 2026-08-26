@@ -132,6 +132,29 @@ let test_resend_request_range () =
   | Error (`Invalid_request _) -> ()
   | _ -> failwith "descending resend range was accepted"
 
+let test_heartbeat_test_request_id () =
+  (match
+     Fix.Session.heartbeat ~header:(header 11) ~target:Market_data
+       ~test_request_id:"echo-me" ()
+   with
+  | Ok raw ->
+      let frame =
+        Fix.Codec.Frame.decode raw
+        |> Result.map_error ~f:(fun error -> (error :> Fix.error))
+        |> or_fail
+      in
+      assert (
+        Option.equal String.equal
+          (Fix.Codec.Frame.value frame 112)
+          (Some "echo-me"))
+  | Error error -> fail_error error);
+  match
+    Fix.Session.heartbeat ~header:(header 12) ~target:Market_data
+      ~test_request_id:"" ()
+  with
+  | Error (`Invalid_request _) -> ()
+  | _ -> failwith "empty Heartbeat TestReqID was accepted"
+
 let test_market_data_request () =
   let raw =
     Fix.Market_data.request ~header:(header 2)
@@ -370,6 +393,7 @@ let () =
   test_authentication_vector ();
   test_sequence_reset_gap_fill ();
   test_resend_request_range ();
+  test_heartbeat_test_request_id ();
   test_market_data_request ();
   test_order_and_cancel ();
   test_published_execution_report ();
