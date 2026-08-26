@@ -17,6 +17,7 @@
   (dune (>= 3.16))
   (core (>= v0.17.0))
   (async (>= v0.17.0))
+  (async_ssl (>= v0.17.0))
   (cohttp (>= 5.3.0))
   (cohttp-async (>= 5.3.0))
   (yojson (>= 2.2.0))
