@@ -127,6 +127,13 @@ module Session : sig
     ?text:string ->
     unit ->
     (string, error) Result.t
+
+  val sequence_reset_gap_fill :
+    header:Header.t ->
+    target:target ->
+    orig_sending_time:string ->
+    new_sequence_number:int ->
+    (string, error) Result.t
 end
 
 module Market_data : sig

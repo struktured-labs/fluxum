@@ -12,6 +12,13 @@ let encode ?(seq = 1) ?(body = []) msg_type =
     ~body_fields:body
   |> or_fail
 
+let encode_poss_dup ?(seq = 1) ?(body = []) msg_type =
+  Fix.Encoder.message_poss_dup ~sender_comp_id:"CLIENT"
+    ~target_comp_id:"KRAKEN-MD" ~msg_type ~msg_seq_num:seq
+    ~sending_time:"20260824-12:35:00.123"
+    ~orig_sending_time:"20260824-12:34:56.123" ~body_fields:body
+  |> or_fail
+
 let%test_module "FIX codec" =
   (module struct
     let%test "round trip validates framing" =
@@ -85,8 +92,7 @@ let%test_module "FIX codec" =
     let%test "possible duplicates do not advance sequence" =
       let state = Fix.Sequence.create ~incoming:2 () in
       let duplicate =
-        encode ~seq:1 ~body:[ (43, "Y"); (122, "20260824-12:34:56.000") ] "0"
-        |> Fix.Frame.decode |> or_fail
+        encode_poss_dup ~seq:1 "0" |> Fix.Frame.decode |> or_fail
       in
       match Fix.Sequence.accept_incoming state duplicate with
       | Ok (same_state, `Possible_duplicate) ->
@@ -95,11 +101,69 @@ let%test_module "FIX codec" =
 
     let%test "possible duplicates require original sending time" =
       let state = Fix.Sequence.create ~incoming:2 () in
+      let raw = encode ~seq:1 "0" in
       let duplicate =
-        encode ~seq:1 ~body:[ (43, "Y") ] "0" |> Fix.Frame.decode |> or_fail
+        String.substr_replace_first raw
+          ~pattern:("52=20260824-12:34:56.123" ^ String.make 1 Fix.soh)
+          ~with_:
+            ("52=20260824-12:34:56.123" ^ String.make 1 Fix.soh ^ "43=Y"
+           ^ String.make 1 Fix.soh)
+      in
+      let body_length = String.length duplicate - String.length raw in
+      let frame = Fix.Frame.decode raw |> or_fail in
+      let declared_length = Fix.Frame.value_exn frame 9 |> Int.of_string in
+      let duplicate =
+        String.substr_replace_first duplicate
+          ~pattern:("9=" ^ Int.to_string declared_length)
+          ~with_:("9=" ^ Int.to_string (declared_length + body_length))
+      in
+      let checksum_position = String.substr_index_exn duplicate ~pattern:"10=" in
+      let checksum =
+        String.prefix duplicate checksum_position
+        |> String.fold ~init:0 ~f:(fun total char -> total + Char.to_int char)
+        |> fun total -> total mod 256
+      in
+      let duplicate =
+        String.prefix duplicate checksum_position
+        ^ sprintf "10=%03d%c" checksum Fix.soh
+        |> Fix.Frame.decode |> or_fail
       in
       match Fix.Sequence.accept_incoming state duplicate with
       | Error (`Possible_duplicate_without_orig_sending_time 1) -> true
+      | _ -> false
+
+    let%test "replay preserves intent and marks the duplicate" =
+      let original =
+        encode ~seq:7
+          ~body:[ (262, "book-7"); (267, "2"); (269, "0"); (269, "1") ]
+          "V"
+        |> Fix.Frame.decode |> or_fail
+      in
+      let replayed =
+        Fix.Encoder.replay original ~sending_time:"20260824-12:36:00.000"
+        |> or_fail |> Fix.Frame.decode |> or_fail
+      in
+      Fix.Frame.sequence_number replayed = 7
+      && String.equal (Fix.Frame.msg_type replayed) "V"
+      && Option.equal String.equal (Fix.Frame.value replayed 43) (Some "Y")
+      && Option.equal String.equal
+           (Fix.Frame.value replayed 52)
+           (Some "20260824-12:36:00.000")
+      && Option.equal String.equal
+           (Fix.Frame.value replayed 122)
+           (Some "20260824-12:34:56.123")
+      && List.equal String.equal
+           (Fix.Frame.find_all replayed 269
+           |> List.map ~f:(Fix.Field.value ~message:(Fix.Frame.raw replayed)))
+           [ "0"; "1" ]
+
+    let%test "duplicate control tags cannot be smuggled through the body" =
+      match
+        Fix.Encoder.message ~sender_comp_id:"CLIENT"
+          ~target_comp_id:"KRAKEN-MD" ~msg_type:"0" ~msg_seq_num:1
+          ~sending_time:"20260824-12:34:56.123" ~body_fields:[ (43, "Y") ]
+      with
+      | Error (`Unexpected_field (-1, 43)) -> true
       | _ -> false
 
     let%test "oversized declared frames cannot overflow length arithmetic" =

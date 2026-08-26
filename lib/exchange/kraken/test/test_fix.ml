@@ -69,6 +69,39 @@ let test_authentication_vector () =
   assert (
     Option.equal String.equal (Fix.Codec.Frame.value frame 8674) (Some "0"))
 
+let test_sequence_reset_gap_fill () =
+  let raw =
+    Fix.Session.sequence_reset_gap_fill ~header:(header 7) ~target:Market_data
+      ~orig_sending_time:"20260824-12:34:00.000" ~new_sequence_number:10
+    |> or_fail
+  in
+  let frame =
+    Fix.Codec.Frame.decode raw
+    |> Result.map_error ~f:(fun error -> (error :> Fix.error))
+    |> or_fail
+  in
+  assert (String.equal (Fix.Codec.Frame.msg_type frame) "4");
+  assert (Fix.Codec.Frame.sequence_number frame = 7);
+  assert (Option.equal String.equal (Fix.Codec.Frame.value frame 43) (Some "Y"));
+  assert (
+    Option.equal String.equal
+      (Fix.Codec.Frame.value frame 122)
+      (Some "20260824-12:34:00.000"));
+  assert (Option.equal String.equal (Fix.Codec.Frame.value frame 123) (Some "Y"));
+  assert (Option.equal String.equal (Fix.Codec.Frame.value frame 36) (Some "10"));
+  (match
+     Fix.Session.sequence_reset_gap_fill ~header:(header 7) ~target:Market_data
+       ~orig_sending_time:"20260824-12:34:00.000" ~new_sequence_number:7
+   with
+  | Error (`Invalid_sequence_number 7) -> ()
+  | _ -> failwith "non-advancing gap fill was accepted");
+  match
+    Fix.Session.sequence_reset_gap_fill ~header:(header 7) ~target:Market_data
+      ~orig_sending_time:"bad-time" ~new_sequence_number:10
+  with
+  | Error (`Invalid_sending_time "bad-time") -> ()
+  | _ -> failwith "invalid OrigSendingTime was accepted"
+
 let test_market_data_request () =
   let raw =
     Fix.Market_data.request ~header:(header 2)
@@ -299,6 +332,7 @@ let test_fail_closed_validation () =
 let () =
   test_endpoints ();
   test_authentication_vector ();
+  test_sequence_reset_gap_fill ();
   test_market_data_request ();
   test_order_and_cancel ();
   test_published_execution_report ();

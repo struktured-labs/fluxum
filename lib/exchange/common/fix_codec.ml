@@ -301,7 +301,7 @@ let validate_encoded_field (tag, value) =
 
 module Encoder = struct
   let reserved_tag = function
-    | 8 | 9 | 10 | 35 | 34 | 49 | 52 | 56 -> true
+    | 8 | 9 | 10 | 34 | 35 | 43 | 49 | 52 | 56 | 122 -> true
     | _ -> false
 
   let add_field buffer (tag, value) =
@@ -310,8 +310,8 @@ module Encoder = struct
     Buffer.add_string buffer value;
     Buffer.add_char buffer soh
 
-  let message ~sender_comp_id ~target_comp_id ~msg_type ~msg_seq_num
-      ~sending_time ~body_fields =
+  let message_internal ~poss_dup_orig_sending_time ~sender_comp_id
+      ~target_comp_id ~msg_type ~msg_seq_num ~sending_time ~body_fields =
     let open Result.Let_syntax in
     let header_fields =
       [
@@ -321,6 +321,10 @@ module Encoder = struct
         (56, target_comp_id);
         (52, sending_time);
       ]
+      @
+      match poss_dup_orig_sending_time with
+      | None -> []
+      | Some original -> [ (43, "Y"); (122, original) ]
     in
     let%bind () =
       Result.all_unit
@@ -340,6 +344,42 @@ module Encoder = struct
     let check = checksum prefix ~length:(String.length prefix) in
     let raw = sprintf "%s10=%03d%c" prefix check soh in
     Ok raw
+
+  let message ~sender_comp_id ~target_comp_id ~msg_type ~msg_seq_num
+      ~sending_time ~body_fields =
+    message_internal ~poss_dup_orig_sending_time:None ~sender_comp_id
+      ~target_comp_id ~msg_type ~msg_seq_num ~sending_time ~body_fields
+
+  let message_poss_dup ~sender_comp_id ~target_comp_id ~msg_type ~msg_seq_num
+      ~sending_time ~orig_sending_time ~body_fields =
+    message_internal ~poss_dup_orig_sending_time:(Some orig_sending_time)
+      ~sender_comp_id ~target_comp_id ~msg_type ~msg_seq_num ~sending_time
+      ~body_fields
+
+  let replay frame ~sending_time =
+    let open Result.Let_syntax in
+    let%bind sender_comp_id =
+      Frame.value frame 49 |> Result.of_option ~error:(`Missing_field 49)
+    in
+    let%bind target_comp_id =
+      Frame.value frame 56 |> Result.of_option ~error:(`Missing_field 56)
+    in
+    let%bind original_sending_time =
+      Frame.value frame 52 |> Result.of_option ~error:(`Missing_field 52)
+    in
+    let raw = Frame.raw frame in
+    let body_fields =
+      Frame.fields frame |> Array.to_list
+      |> List.filter_map ~f:(fun field ->
+          let tag = Field.tag field in
+          match reserved_tag tag with
+          | true -> None
+          | false -> Some (tag, Field.value ~message:raw field))
+    in
+    message_poss_dup ~orig_sending_time:original_sending_time ~sender_comp_id
+      ~target_comp_id ~msg_type:(Frame.msg_type frame)
+      ~msg_seq_num:(Frame.sequence_number frame)
+      ~sending_time ~body_fields
 end
 
 module Framer = struct

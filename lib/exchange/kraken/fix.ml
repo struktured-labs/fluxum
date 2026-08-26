@@ -107,6 +107,16 @@ let encode ~header ~target_comp_id ~msg_type ~body_fields =
     ~body_fields
   |> Result.map_error ~f:codec_error
 
+let encode_poss_dup ~header ~target_comp_id ~msg_type ~orig_sending_time
+    ~body_fields =
+  Codec.Encoder.message_poss_dup
+    ~sender_comp_id:(Header.sender_comp_id header)
+    ~target_comp_id ~msg_type
+    ~msg_seq_num:(Header.msg_seq_num header)
+    ~sending_time:(Header.sending_time header)
+    ~orig_sending_time ~body_fields
+  |> Result.map_error ~f:codec_error
+
 module Credentials = struct
   type t = { api_key : string; api_secret : string }
 
@@ -259,6 +269,19 @@ module Session = struct
     in
     encode ~header ~target_comp_id:(target_comp_id target) ~msg_type:"5"
       ~body_fields
+
+  let sequence_reset_gap_fill ~header ~target ~orig_sending_time
+      ~new_sequence_number =
+    match
+      ( valid_fix_timestamp orig_sending_time,
+        new_sequence_number > Header.msg_seq_num header )
+    with
+    | false, _ -> Error (`Invalid_sending_time orig_sending_time)
+    | true, false -> Error (`Invalid_sequence_number new_sequence_number)
+    | true, true ->
+        encode_poss_dup ~orig_sending_time ~header
+          ~target_comp_id:(target_comp_id target) ~msg_type:"4"
+          ~body_fields:[ (123, "Y"); (36, Int.to_string new_sequence_number) ]
 end
 
 module Market_data = struct

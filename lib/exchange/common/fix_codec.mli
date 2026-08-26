@@ -66,6 +66,20 @@ module Encoder : sig
     sending_time:string ->
     body_fields:(int * string) list ->
     (string, error) Result.t
+
+  val message_poss_dup :
+    sender_comp_id:string ->
+    target_comp_id:string ->
+    msg_type:string ->
+    msg_seq_num:int ->
+    sending_time:string ->
+    orig_sending_time:string ->
+    body_fields:(int * string) list ->
+    (string, error) Result.t
+
+  val replay : Frame.t -> sending_time:string -> (string, error) Result.t
+  (** Re-encodes a validated frame with its original sequence number,
+      [PossDupFlag=Y], and the original [SendingTime] as [OrigSendingTime]. *)
 end
 
 module Framer : sig

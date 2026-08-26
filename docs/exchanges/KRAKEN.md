@@ -63,18 +63,26 @@ are session-scoped on Kraken FIX, so preserve the session that originated each
 live order.
 
 The runner asks Kraken for missing inbound messages when it detects a sequence
-gap. It does not replay outbound business messages automatically when Kraken
-sends a ResendRequest: consume that inbound message and reconcile order state
-before deciding whether to reset or replay. This is deliberate because silently
-re-emitting an order after an ambiguous disconnect can duplicate economic
-intent. Use `reset_on_start` only for a coordinated sequence reset, such as a
-fresh UAT session, not as routine reconnect policy.
+gap, buffers bounded out-of-order frames, and delivers recovered messages in
+sequence. When Kraken sends a ResendRequest, the runner replays application
+messages from its bounded in-process journal with `PossDupFlag=Y` and gap-fills
+administrative messages. The journal intentionally is not restored after a
+process restart. Missing or evicted history terminates the session with
+`Replay_unavailable`; reconcile exchange state and coordinate a sequence reset
+instead of guessing at past economic intent. Use `reset_on_start` only for a
+coordinated reset, such as a fresh UAT session, not as routine reconnect policy.
 
-Sequence state is fsynced after every message by default. For latency testing,
-raising `checkpoint_every` batches those fsyncs; clean disconnects still save
-state, but a process or machine crash can roll sequence numbers back to the last
-checkpoint. That is an explicit durability/latency tradeoff, not a safe default
-for unattended trading.
+Sequence state and its containing directory are fsynced after every message by
+default. For latency testing, raising `checkpoint_every` batches those fsyncs;
+clean disconnects still save state, but a process or machine crash can roll
+sequence numbers back to the last checkpoint. If a socket flush succeeds but
+the checkpoint fails, `send` returns `Sent_but_not_checkpointed`; the message is
+ambiguous and must not be blindly retried. That is an explicit durability and
+latency tradeoff, not a safe default for unattended trading.
+
+Logon and inbound-silence timeouts fail the connection and trigger reconnect.
+Event, inbound-gap, and replay-journal capacities are hard memory bounds; an
+overflow fails closed instead of allowing an unbounded fast-path queue.
 
 Run the local codec benchmark with:
 

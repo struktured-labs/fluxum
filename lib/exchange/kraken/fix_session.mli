@@ -4,11 +4,18 @@ module Fix = Fix
 
 type error =
   [ `Already_running
+  | `Event_queue_full of int
+  | `Event_stream_closed
   | `Fix of Fix.error
+  | `Gap_buffer_full of int
   | `Io of Error.t
+  | `Liveness_timeout of Time_ns.Span.t
+  | `Logon_timeout of Time_ns.Span.t
   | `Not_connected
   | `Not_logged_on
+  | `Replay_unavailable of int * int
   | `Sequence of Fix.Codec.Sequence.sequence_error
+  | `Sent_but_not_checkpointed of int * Error.t
   | `State of Error.t
   | `Stopped
   | `Wrong_session_identity of string
@@ -26,7 +33,8 @@ end
 module State_store : sig
   val load : string -> Sequence_state.t Deferred.Or_error.t
   (** Missing files load as a fresh [1, 1] session. Saves use an fsynced
-      same-directory temporary followed by atomic rename. *)
+      same-directory temporary followed by atomic rename and containing-directory
+      fsync. *)
 
   val save : string -> Sequence_state.t -> unit Deferred.Or_error.t
   val reset : string -> unit Deferred.Or_error.t
@@ -53,12 +61,20 @@ module Config : sig
     ?connect_timeout:Time_ns.Span.t ->
     ?max_frame_length:int ->
     ?checkpoint_every:int ->
+    ?event_capacity:int ->
+    ?gap_buffer_capacity:int ->
+    ?journal_capacity:int ->
+    ?logon_timeout:Time_ns.Span.t ->
+    ?liveness_timeout:Time_ns.Span.t ->
     ?reset_on_start:bool ->
     unit ->
     (t, error) Result.t
   (** [checkpoint_every] defaults to [1]. Higher values batch fsyncs for lower
       latency, at the cost of sequence rollback after a process or machine
-      crash. Graceful disconnect and [stop] always checkpoint. *)
+      crash. Graceful disconnect and [stop] always checkpoint. Event, gap, and
+      replay-journal capacities are hard bounds; crossing one fails closed. The
+      replay journal survives reconnects within this process, but is not restored
+      after a process restart. *)
 
   val endpoint : t -> Fix.Endpoint.t
   val sender_comp_id : t -> string
@@ -99,8 +115,10 @@ module Client : sig
 
   val send : t -> Outbound.t -> (unit, error) Deferred.Result.t
   (** Messages are serialized and assigned the next sequence number only after
-      the socket flush succeeds. Application messages are rejected until
-      Kraken's Logon response arrives. *)
+      the socket flush succeeds. [`Sent_but_not_checkpointed] means the message
+      reached the socket but its sequence state did not become durable; callers
+      must reconcile and must not blindly retry. Application messages are
+      rejected until Kraken's Logon response arrives. *)
 
   val stop : t -> unit
 
@@ -118,5 +136,6 @@ module Client : sig
       (connection, Error.t) Deferred.Result.t
 
     val create : Config.t -> connector:connector -> (t, error) Deferred.Result.t
+    val tls_config : Fix.Endpoint.t -> Async_ssl.Config.Client.t
   end
 end
