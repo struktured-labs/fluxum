@@ -723,7 +723,7 @@ module Client = struct
         let connected =
           match Fix.Codec.Frame.msg_type frame with
           | "A" when Ivar.is_empty live.logged_on ->
-              Ivar.fill live.logged_on ();
+              Ivar.fill_exn live.logged_on ();
               publish t Connected
           | _ -> Ok ()
         in
