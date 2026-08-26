@@ -108,6 +108,30 @@ let test_sequence_reset_gap_fill () =
   | Error (`Invalid_sending_time "bad-time") -> ()
   | _ -> failwith "invalid OrigSendingTime was accepted"
 
+let test_resend_request_range () =
+  let open Fix.Session in
+  let open Result.Let_syntax in
+  let valid =
+    let%bind open_ended =
+      resend_request ~header:(header 8) ~target:Market_data
+        ~begin_sequence_number:10 ~end_sequence_number:0
+    in
+    let%map explicit =
+      resend_request ~header:(header 9) ~target:Market_data
+        ~begin_sequence_number:10 ~end_sequence_number:12
+    in
+    (open_ended, explicit)
+  in
+  (match valid with
+  | Ok _ -> ()
+  | Error error -> fail_error error);
+  match
+    resend_request ~header:(header 10) ~target:Market_data
+      ~begin_sequence_number:10 ~end_sequence_number:5
+  with
+  | Error (`Invalid_request _) -> ()
+  | _ -> failwith "descending resend range was accepted"
+
 let test_market_data_request () =
   let raw =
     Fix.Market_data.request ~header:(header 2)
@@ -345,6 +369,7 @@ let () =
   test_endpoints ();
   test_authentication_vector ();
   test_sequence_reset_gap_fill ();
+  test_resend_request_range ();
   test_market_data_request ();
   test_order_and_cancel ();
   test_published_execution_report ();

@@ -253,9 +253,15 @@ module Session = struct
 
   let resend_request ~header ~target ~begin_sequence_number ~end_sequence_number
       =
-    match begin_sequence_number > 0 && end_sequence_number >= 0 with
-    | false -> Error (`Invalid_request "invalid resend sequence range")
-    | true ->
+    let valid_end =
+      match end_sequence_number with
+      | 0 -> true
+      | explicit -> explicit >= begin_sequence_number
+    in
+    match (begin_sequence_number > 0, valid_end) with
+    | false, _ | true, false ->
+        Error (`Invalid_request "invalid resend sequence range")
+    | true, true ->
         encode ~header ~target_comp_id:(target_comp_id target) ~msg_type:"2"
           ~body_fields:
             [
