@@ -5,6 +5,7 @@ let soh = '\x01'
 type error =
   [ `Body_length_mismatch of int * int
   | `Checksum_mismatch of int * int
+  | `Duplicate_field of int
   | `Frame_too_large of int * int
   | `Invalid_body_length of string
   | `Invalid_checksum of string
@@ -252,6 +253,11 @@ module Frame = struct
     let%bind msg_type_field = validate_field_at fields 2 35 in
     let last_index = Array.length fields - 1 in
     let%bind checksum_field = validate_field_at fields last_index 10 in
+    let%bind () =
+      match Array.count fields ~f:(fun field -> Field.tag field = 10) with
+      | 1 -> Ok ()
+      | _ -> Error (`Duplicate_field 10)
+    in
     let body_position =
       body_length_field.value_position + body_length_field.value_length + 1
     in

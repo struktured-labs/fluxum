@@ -19,6 +19,32 @@ let encode_poss_dup ?(seq = 1) ?(body = []) msg_type =
     ~orig_sending_time:"20260824-12:34:56.123" ~body_fields:body
   |> or_fail
 
+let insert_before_checksum raw (tag, value) =
+  let separator = String.make 1 Fix.soh in
+  let original = Fix.Frame.decode raw |> or_fail in
+  let original_body_length = Fix.Frame.value_exn original 9 |> Int.of_string in
+  let field = sprintf "%d=%s%c" tag value Fix.soh in
+  let checksum_position = String.length raw - 7 in
+  let inserted =
+    String.prefix raw checksum_position ^ field
+    ^ String.drop_prefix raw checksum_position
+  in
+  let inserted =
+    String.substr_replace_first inserted
+      ~pattern:("9=" ^ Int.to_string original_body_length ^ separator)
+      ~with_:
+        ("9=" ^ Int.to_string (original_body_length + String.length field)
+       ^ separator)
+  in
+  let checksum_position = String.length inserted - 7 in
+  let checksum =
+    String.prefix inserted checksum_position
+    |> String.fold ~init:0 ~f:(fun total char -> total + Char.to_int char)
+    |> fun total -> total mod 256
+  in
+  String.prefix inserted checksum_position
+  ^ sprintf "10=%03d%c" checksum Fix.soh
+
 let%test_module "FIX codec" =
   (module struct
     let%test "round trip validates framing" =
@@ -103,29 +129,7 @@ let%test_module "FIX codec" =
       let state = Fix.Sequence.create ~incoming:2 () in
       let raw = encode ~seq:1 "0" in
       let duplicate =
-        String.substr_replace_first raw
-          ~pattern:("52=20260824-12:34:56.123" ^ String.make 1 Fix.soh)
-          ~with_:
-            ("52=20260824-12:34:56.123" ^ String.make 1 Fix.soh ^ "43=Y"
-           ^ String.make 1 Fix.soh)
-      in
-      let body_length = String.length duplicate - String.length raw in
-      let frame = Fix.Frame.decode raw |> or_fail in
-      let declared_length = Fix.Frame.value_exn frame 9 |> Int.of_string in
-      let duplicate =
-        String.substr_replace_first duplicate
-          ~pattern:("9=" ^ Int.to_string declared_length)
-          ~with_:("9=" ^ Int.to_string (declared_length + body_length))
-      in
-      let checksum_position = String.substr_index_exn duplicate ~pattern:"10=" in
-      let checksum =
-        String.prefix duplicate checksum_position
-        |> String.fold ~init:0 ~f:(fun total char -> total + Char.to_int char)
-        |> fun total -> total mod 256
-      in
-      let duplicate =
-        String.prefix duplicate checksum_position
-        ^ sprintf "10=%03d%c" checksum Fix.soh
+        insert_before_checksum raw (43, "Y")
         |> Fix.Frame.decode |> or_fail
       in
       match Fix.Sequence.accept_incoming state duplicate with
@@ -164,6 +168,12 @@ let%test_module "FIX codec" =
           ~sending_time:"20260824-12:34:56.123" ~body_fields:[ (43, "Y") ]
       with
       | Error (`Unexpected_field (-1, 43)) -> true
+      | _ -> false
+
+    let%test "an earlier checksum field cannot shadow the trailer" =
+      let malicious = insert_before_checksum (encode "0") (10, "111") in
+      match Fix.Frame.decode malicious with
+      | Error (`Duplicate_field 10) -> true
       | _ -> false
 
     let%test "oversized declared frames cannot overflow length arithmetic" =

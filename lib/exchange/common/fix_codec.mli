@@ -9,6 +9,7 @@ val soh : char
 type error =
   [ `Body_length_mismatch of int * int
   | `Checksum_mismatch of int * int
+  | `Duplicate_field of int
   | `Frame_too_large of int * int
   | `Invalid_body_length of string
   | `Invalid_checksum of string
