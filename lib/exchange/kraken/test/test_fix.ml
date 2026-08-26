@@ -46,6 +46,12 @@ let test_authentication_vector () =
   assert (
     String.equal password
       "MwX+M7nvuHXxD5aGI/TFpghXxg2iblxXYyz7lRzLCPMA4UJYI3osNrUKWCiI3fDnOLkEQ5WKSK58Mp3nvu1Klw==");
+  (match
+     Fix.Auth.password ~credentials ~msg_seq_num:0 ~sender_comp_id:"CLIENT"
+       ~nonce:1724512345678L
+   with
+  | Error (`Invalid_sequence_number 0) -> ()
+  | _ -> failwith "zero MsgSeqNum authentication input was accepted");
   let raw =
     Fix.Session.trading_logon ~header:(header 7) ~credentials
       ~nonce:1724512345678L ~heartbeat_interval:60 ~reset_sequence_numbers:true
@@ -299,6 +305,12 @@ let test_published_market_data_groups () =
       [ Some Delete_entry; Some New_entry ])
 
 let test_fail_closed_validation () =
+  (match
+     Fix.Header.create ~sender_comp_id:"CLIENT" ~msg_seq_num:0
+       ~sending_time:"20260824-12:34:56.123"
+   with
+  | Error (`Invalid_sequence_number 0) -> ()
+  | _ -> failwith "zero MsgSeqNum header was accepted");
   (match Fix.Client_order_id.create "0001" with
   | Error (`Invalid_client_order_id _) -> ()
   | _ -> failwith "leading-zero ClOrdID was accepted");

@@ -86,7 +86,7 @@ module Header = struct
     match nonempty_wire_value sender_comp_id with
     | false -> Error `Invalid_sender_comp_id
     | true -> (
-        match msg_seq_num < 0 with
+        match msg_seq_num <= 0 with
         | true -> Error (`Invalid_sequence_number msg_seq_num)
         | false -> (
             match valid_fix_timestamp sending_time with
@@ -134,7 +134,7 @@ end
 
 module Auth = struct
   let password ~credentials ~msg_seq_num ~sender_comp_id ~nonce =
-    match msg_seq_num < 0 with
+    match msg_seq_num <= 0 with
     | true -> Error (`Invalid_sequence_number msg_seq_num)
     | false -> (
         match nonempty_wire_value sender_comp_id with
