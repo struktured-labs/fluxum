@@ -236,14 +236,32 @@ module Frame = struct
         | true -> Ok fields.(index)
         | false -> Error (`Unexpected_field (expected, actual)))
 
+  let singleton_bit = function
+    | 8 -> 1 lsl 0
+    | 9 -> 1 lsl 1
+    | 10 -> 1 lsl 2
+    | 34 -> 1 lsl 3
+    | 35 -> 1 lsl 4
+    | 43 -> 1 lsl 5
+    | 49 -> 1 lsl 6
+    | 52 -> 1 lsl 7
+    | 56 -> 1 lsl 8
+    | 122 -> 1 lsl 9
+    | _ -> 0
+
   let validate_singleton_fields fields =
-    let singleton_tags = [ 8; 9; 10; 34; 35; 43; 49; 52; 56; 122 ] in
-    match
-      List.find singleton_tags ~f:(fun tag ->
-          Array.count fields ~f:(fun field -> Field.tag field = tag) > 1)
-    with
-    | None -> Ok ()
-    | Some tag -> Error (`Duplicate_field tag)
+    let rec loop index seen =
+      match index = Array.length fields with
+      | true -> Ok ()
+      | false ->
+          let tag = Field.tag fields.(index) in
+          let bit = singleton_bit tag in
+          (match (bit = 0, seen land bit = 0) with
+          | true, _ -> loop (index + 1) seen
+          | false, true -> loop (index + 1) (seen lor bit)
+          | false, false -> Error (`Duplicate_field tag))
+    in
+    loop 0 0
 
   let decode raw =
     let open Result.Let_syntax in
