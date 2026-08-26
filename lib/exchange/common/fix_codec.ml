@@ -317,7 +317,9 @@ module Frame = struct
       | None -> Error (`Missing_field 34)
       | Some field -> Field.int_value ~message:raw field
     in
-    Ok { raw; fields; msg_type; sequence_number }
+    (match sequence_number > 0 with
+    | true -> Ok { raw; fields; msg_type; sequence_number }
+    | false -> Error (`Invalid_value (34, Int.to_string sequence_number)))
 end
 
 let validate_encoded_field (tag, value) =
@@ -342,6 +344,11 @@ module Encoder = struct
   let message_internal ~poss_dup_orig_sending_time ~sender_comp_id
       ~target_comp_id ~msg_type ~msg_seq_num ~sending_time ~body_fields =
     let open Result.Let_syntax in
+    let%bind () =
+      match msg_seq_num > 0 with
+      | true -> Ok ()
+      | false -> Error (`Invalid_value (34, Int.to_string msg_seq_num))
+    in
     let header_fields =
       [
         (35, msg_type);

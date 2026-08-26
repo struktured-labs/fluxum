@@ -19,6 +19,15 @@ let encode_poss_dup ?(seq = 1) ?(body = []) msg_type =
     ~orig_sending_time:"20260824-12:34:56.123" ~body_fields:body
   |> or_fail
 
+let recompute_checksum raw =
+  let checksum_position = String.length raw - 7 in
+  let checksum =
+    String.prefix raw checksum_position
+    |> String.fold ~init:0 ~f:(fun total char -> total + Char.to_int char)
+    |> fun total -> total mod 256
+  in
+  String.prefix raw checksum_position ^ sprintf "10=%03d%c" checksum Fix.soh
+
 let insert_before_checksum raw (tag, value) =
   let separator = String.make 1 Fix.soh in
   let original = Fix.Frame.decode raw |> or_fail in
@@ -36,14 +45,7 @@ let insert_before_checksum raw (tag, value) =
         ("9=" ^ Int.to_string (original_body_length + String.length field)
        ^ separator)
   in
-  let checksum_position = String.length inserted - 7 in
-  let checksum =
-    String.prefix inserted checksum_position
-    |> String.fold ~init:0 ~f:(fun total char -> total + Char.to_int char)
-    |> fun total -> total mod 256
-  in
-  String.prefix inserted checksum_position
-  ^ sprintf "10=%03d%c" checksum Fix.soh
+  recompute_checksum inserted
 
 let%test_module "FIX codec" =
   (module struct
@@ -53,6 +55,24 @@ let%test_module "FIX codec" =
       String.equal (Fix.Frame.msg_type frame) "V"
       && Fix.Frame.sequence_number frame = 1
       && Option.equal String.equal (Fix.Frame.value frame 55) (Some "BTC/USD")
+
+    let%test "non-positive sequence numbers fail at both wire boundaries" =
+      let encoded =
+        Fix.Encoder.message ~sender_comp_id:"CLIENT"
+          ~target_comp_id:"KRAKEN-MD" ~msg_type:"0" ~msg_seq_num:0
+          ~sending_time:"20260824-12:34:56.123" ~body_fields:[]
+      in
+      let malicious =
+        encode "0"
+        |> String.substr_replace_first
+             ~pattern:("34=1" ^ String.make 1 Fix.soh)
+             ~with_:("34=0" ^ String.make 1 Fix.soh)
+        |> recompute_checksum |> Fix.Frame.decode
+      in
+      match (encoded, malicious) with
+      | Error (`Invalid_value (34, "0")), Error (`Invalid_value (34, "0")) ->
+          true
+      | _ -> false
 
     let%test "body length corruption is rejected" =
       let raw = encode "0" in
