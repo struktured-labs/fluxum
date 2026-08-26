@@ -236,9 +236,19 @@ module Frame = struct
         | true -> Ok fields.(index)
         | false -> Error (`Unexpected_field (expected, actual)))
 
+  let validate_singleton_fields fields =
+    let singleton_tags = [ 8; 9; 10; 34; 35; 43; 49; 52; 56; 122 ] in
+    match
+      List.find singleton_tags ~f:(fun tag ->
+          Array.count fields ~f:(fun field -> Field.tag field = tag) > 1)
+    with
+    | None -> Ok ()
+    | Some tag -> Error (`Duplicate_field tag)
+
   let decode raw =
     let open Result.Let_syntax in
     let%bind fields = parse_fields raw in
+    let%bind () = validate_singleton_fields fields in
     let%bind begin_field = validate_field_at fields 0 8 in
     let begin_string = Field.value ~message:raw begin_field in
     let%bind () =
@@ -253,11 +263,6 @@ module Frame = struct
     let%bind msg_type_field = validate_field_at fields 2 35 in
     let last_index = Array.length fields - 1 in
     let%bind checksum_field = validate_field_at fields last_index 10 in
-    let%bind () =
-      match Array.count fields ~f:(fun field -> Field.tag field = 10) with
-      | 1 -> Ok ()
-      | _ -> Error (`Duplicate_field 10)
-    in
     let body_position =
       body_length_field.value_position + body_length_field.value_length + 1
     in

@@ -176,6 +176,12 @@ let%test_module "FIX codec" =
       | Error (`Duplicate_field 10) -> true
       | _ -> false
 
+    let%test "singleton session fields cannot be duplicated" =
+      let malicious = insert_before_checksum (encode "0") (34, "999") in
+      match Fix.Frame.decode malicious with
+      | Error (`Duplicate_field 34) -> true
+      | _ -> false
+
     let%test "oversized declared frames cannot overflow length arithmetic" =
       let separator = String.make 1 Fix.soh in
       let prefix = "8=FIX.4.4" ^ separator ^ "9=" in
