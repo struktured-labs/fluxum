@@ -554,11 +554,20 @@ let test_sent_but_not_checkpointed () =
   (match sent with
   | Error (`Sent_but_not_checkpointed (2, _)) -> ()
   | _ -> failwith "post-flush checkpoint failure was not explicit");
+  let%bind second_send =
+    Session.Client.send client (Market_data_request request)
+  in
+  (match second_send with
+  | Error (`Sent_but_not_checkpointed (2, _))
+  | Error `Not_connected
+  | Error `Stopped -> ()
+  | _ -> failwith "send was accepted after a terminal checkpoint failure");
   let%bind () = Ivar.read request_received in
   let%bind run_result = Ivar.read run_finished in
   (match run_result with
   | Error (`Sent_but_not_checkpointed (2, _)) -> ()
   | _ -> failwith "checkpoint ambiguity did not terminate the session");
+  assert (Session.Sequence_state.next_outgoing (Session.Client.state client) = 3);
   Unix.unlink directory
 
 let decimal value =

@@ -118,7 +118,8 @@ module Client : sig
       the socket flush succeeds. [`Sent_but_not_checkpointed] means the message
       reached the socket but its sequence state did not become durable; callers
       must reconcile and must not blindly retry. Application messages are
-      rejected until Kraken's Logon response arrives. *)
+      rejected until Kraken's Logon response arrives. Once [stop] or a terminal
+      live-session failure is observed, no further message is written. *)
 
   val stop : t -> unit
 

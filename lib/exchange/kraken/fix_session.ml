@@ -413,6 +413,11 @@ module Client = struct
     Ivar.fill_if_empty live.failed error;
     error
 
+  let terminal_error t live =
+    match Ivar.peek t.stop with
+    | Some () -> Some `Stopped
+    | None -> Ivar.peek live.failed
+
   let add_to_journal t ~sequence_number ~wire ~orig_sending_time ~replay_kind =
     let entry =
       match replay_kind with
@@ -454,47 +459,55 @@ module Client = struct
         Error (`Wrong_session_type "order request on market-data session")
 
   let write_encoded_unlocked t live ~replay_kind ~encode =
-    match t.live with
-    | None -> return (Error `Not_connected)
-    | Some current when not (phys_equal current live) ->
-        return (Error `Not_connected)
-    | Some _ -> (
-        let sequence_number = t.sequence_state.next_outgoing in
-        let now = Time_ns.now () in
-        let sending_time = fix_timestamp now in
-        let result =
-          let open Result.Let_syntax in
-          let%bind header =
-            Fix.Header.create ~sender_comp_id:t.config.sender_comp_id
-              ~msg_seq_num:sequence_number ~sending_time
-            |> Result.map_error ~f:(fun error -> `Fix error)
-          in
-          encode ~now ~header
-        in
-        match result with
-        | Error _ as error -> return error
-        | Ok wire -> (
-            let%bind written =
-              Monitor.try_with_or_error (fun () ->
-                  Writer.write live.connection.writer wire;
-                  Writer.flushed live.connection.writer)
+    match terminal_error t live with
+    | Some error -> return (Error error)
+    | None -> (
+        match t.live with
+        | None -> return (Error `Not_connected)
+        | Some current when not (phys_equal current live) ->
+            return (Error `Not_connected)
+        | Some _ -> (
+            let sequence_number = t.sequence_state.next_outgoing in
+            let now = Time_ns.now () in
+            let sending_time = fix_timestamp now in
+            let result =
+              let open Result.Let_syntax in
+              let%bind header =
+                Fix.Header.create ~sender_comp_id:t.config.sender_comp_id
+                  ~msg_seq_num:sequence_number ~sending_time
+                |> Result.map_error ~f:(fun error -> `Fix error)
+              in
+              encode ~now ~header
             in
-            match written with
-            | Error error -> return (Error (`Io error))
-            | Ok () -> (
-                t.sequence_state <-
-                  { t.sequence_state with next_outgoing = sequence_number + 1 };
-                t.messages_since_checkpoint <- t.messages_since_checkpoint + 1;
-                add_to_journal t ~sequence_number ~wire
-                  ~orig_sending_time:sending_time ~replay_kind;
-                let%map checkpointed = maybe_checkpoint_unlocked t in
-                match checkpointed with
-                | Ok () -> Ok ()
-                | Error (`State cause) ->
-                    Error
-                      (fail_live live
-                         (`Sent_but_not_checkpointed (sequence_number, cause)))
-                | Error error -> Error error)))
+            match result with
+            | Error _ as error -> return error
+            | Ok wire -> (
+                let%bind written =
+                  Monitor.try_with_or_error (fun () ->
+                      Writer.write live.connection.writer wire;
+                      Writer.flushed live.connection.writer)
+                in
+                match written with
+                | Error error -> return (Error (`Io error))
+                | Ok () -> (
+                    t.sequence_state <-
+                      {
+                        t.sequence_state with
+                        next_outgoing = sequence_number + 1;
+                      };
+                    t.messages_since_checkpoint <-
+                      t.messages_since_checkpoint + 1;
+                    add_to_journal t ~sequence_number ~wire
+                      ~orig_sending_time:sending_time ~replay_kind;
+                    let%map checkpointed = maybe_checkpoint_unlocked t in
+                    match checkpointed with
+                    | Ok () -> Ok ()
+                    | Error (`State cause) ->
+                        Error
+                          (fail_live live
+                             (`Sent_but_not_checkpointed
+                               (sequence_number, cause)))
+                    | Error error -> Error error))))
 
   let write_encoded t live ~replay_kind ~encode =
     Throttle.enqueue t.sequencer (fun () ->
@@ -1038,11 +1051,18 @@ module Client = struct
         result
 
   let send t outbound =
-    match t.live with
-    | None -> return (Error `Not_connected)
-    | Some live when Ivar.is_empty live.logged_on ->
-        return (Error `Not_logged_on)
-    | Some live -> send_internal t live outbound
+    match Ivar.peek t.stop with
+    | Some () -> return (Error `Stopped)
+    | None -> (
+        match t.live with
+        | None -> return (Error `Not_connected)
+        | Some live -> (
+            match Ivar.peek live.failed with
+            | Some error -> return (Error error)
+            | None -> (
+                match Ivar.is_empty live.logged_on with
+                | true -> return (Error `Not_logged_on)
+                | false -> send_internal t live outbound)))
 
   let stop t = Ivar.fill_if_empty t.stop ()
 
