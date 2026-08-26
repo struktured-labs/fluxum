@@ -532,7 +532,9 @@ module Client = struct
                 ~reset_sequence_numbers ~cancel_on_disconnect ?client_id ()
               |> Result.map_error ~f:(fun error -> `Fix error))
     in
-    Result.iter result ~f:(fun () -> t.reset_logon <- false);
+    (match result with
+    | Ok () -> t.reset_logon <- false
+    | Error _ -> ());
     result
 
   let update_incoming_sequence_unlocked t frame =
@@ -732,8 +734,9 @@ module Client = struct
                  end_sequence_number = requested_through;
                })
         in
-        Result.iter result ~f:(fun () ->
-            t.resend_requested_through <- Some requested_through);
+        (match result with
+        | Ok () -> t.resend_requested_through <- Some requested_through
+        | Error _ -> ());
         result
 
   let buffer_gap_unlocked t live frame ~expected ~received =
