@@ -482,7 +482,8 @@ let test_tls_defaults () =
       | Async_ssl.Ssl.Verify_mode.Verify_peer -> true
       | Verify_none | Verify_fail_if_no_peer_cert | Verify_client_once -> false))
 
-let test_replay_unavailable path =
+let test_replay_unavailable path ~begin_sequence_number ~end_sequence_number
+    ~expected =
   let state =
     Session.Sequence_state.create ~next_outgoing:3 ~next_incoming:1 ()
   in
@@ -498,7 +499,12 @@ let test_replay_unavailable path =
             ~body_fields:[ (98, "0"); (108, "60") ] ());
        Writer.write server.writer
          (server_message ~sequence:2 ~msg_type:"2"
-            ~body_fields:[ (7, "1"); (16, "2") ] ());
+            ~body_fields:
+              [
+                (7, Int.to_string begin_sequence_number);
+                (16, Int.to_string end_sequence_number);
+              ]
+            ());
        Writer.flushed server.writer);
     Ok client
   in
@@ -507,7 +513,10 @@ let test_replay_unavailable path =
   in
   let%map result = Session.Client.run client in
   match result with
-  | Error (`Replay_unavailable (1, 2)) -> ()
+  | Error (`Replay_unavailable (actual_begin, actual_end)) ->
+      let expected_begin, expected_end = expected in
+      assert (actual_begin = expected_begin);
+      assert (actual_end = expected_end)
   | _ -> failwith "missing replay history did not fail closed"
 
 let test_sent_but_not_checkpointed () =
@@ -686,7 +695,14 @@ let run () =
   let%bind () = test_sequence_reset_discards_buffered path in
   let%bind () = test_outbound_replay path in
   let%bind () = test_journal_eviction path in
-  let%bind () = test_replay_unavailable path in
+  let%bind () =
+    test_replay_unavailable path ~begin_sequence_number:1
+      ~end_sequence_number:2 ~expected:(1, 2)
+  in
+  let%bind () =
+    test_replay_unavailable path ~begin_sequence_number:5
+      ~end_sequence_number:0 ~expected:(5, 5)
+  in
   let%bind () = test_logon_timeout path in
   let%bind () = test_liveness_timeout path in
   let%bind () = test_event_bound path in

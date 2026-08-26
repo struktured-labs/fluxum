@@ -252,13 +252,29 @@ module Frame = struct
   let validate_singleton_fields fields =
     let rec loop index seen =
       match index = Array.length fields with
-      | true -> Ok ()
+      | true -> (
+          match seen land singleton_bit 49 = 0 with
+          | true -> Error (`Missing_field 49)
+          | false -> (
+              match seen land singleton_bit 56 = 0 with
+              | true -> Error (`Missing_field 56)
+              | false -> (
+                  match seen land singleton_bit 52 = 0 with
+                  | true -> Error (`Missing_field 52)
+                  | false -> Ok ())))
       | false ->
-          let tag = Field.tag fields.(index) in
+          let field = fields.(index) in
+          let tag = Field.tag field in
           let bit = singleton_bit tag in
           (match (bit = 0, seen land bit = 0) with
           | true, _ -> loop (index + 1) seen
-          | false, true -> loop (index + 1) (seen lor bit)
+          | false, true -> (
+              match tag with
+              | 49 | 52 | 56 -> (
+                  match Field.value_length field = 0 with
+                  | true -> Error (`Invalid_value (tag, ""))
+                  | false -> loop (index + 1) (seen lor bit))
+              | _ -> loop (index + 1) (seen lor bit))
           | false, false -> Error (`Duplicate_field tag))
     in
     loop 0 0
@@ -266,7 +282,6 @@ module Frame = struct
   let decode raw =
     let open Result.Let_syntax in
     let%bind fields = parse_fields raw in
-    let%bind () = validate_singleton_fields fields in
     let%bind begin_field = validate_field_at fields 0 8 in
     let begin_string = Field.value ~message:raw begin_field in
     let%bind () =
@@ -279,8 +294,20 @@ module Frame = struct
       Field.int_value ~message:raw body_length_field
     in
     let%bind msg_type_field = validate_field_at fields 2 35 in
+    let%bind () = validate_singleton_fields fields in
     let last_index = Array.length fields - 1 in
-    let%bind checksum_field = validate_field_at fields last_index 10 in
+    let%bind checksum_field =
+      match Array.findi fields ~f:(fun _ field -> Field.tag field = 10) with
+      | None -> validate_field_at fields last_index 10
+      | Some (index, field) -> (
+          match index = last_index with
+          | true -> Ok field
+          | false ->
+              let trailing_position =
+                field.value_position + field.value_length + 1
+              in
+              Error (`Trailing_data (String.length raw - trailing_position)))
+    in
     let body_position =
       body_length_field.value_position + body_length_field.value_length + 1
     in
@@ -309,6 +336,11 @@ module Frame = struct
       | false -> Error (`Checksum_mismatch (declared_checksum, actual_checksum))
     in
     let msg_type = Field.value ~message:raw msg_type_field in
+    let%bind () =
+      match String.is_empty msg_type with
+      | true -> Error (`Invalid_value (35, msg_type))
+      | false -> Ok ()
+    in
     let sequence_field =
       Array.find fields ~f:(fun field -> Field.tag field = 34)
     in
@@ -341,13 +373,36 @@ module Encoder = struct
     Buffer.add_string buffer value;
     Buffer.add_char buffer soh
 
+  let validate_required_values ~sender_comp_id ~target_comp_id ~msg_type
+      ~sending_time ~poss_dup_orig_sending_time =
+    match String.is_empty msg_type with
+    | true -> Error (`Invalid_value (35, msg_type))
+    | false -> (
+        match String.is_empty sender_comp_id with
+        | true -> Error (`Invalid_value (49, sender_comp_id))
+        | false -> (
+            match String.is_empty target_comp_id with
+            | true -> Error (`Invalid_value (56, target_comp_id))
+            | false -> (
+                match String.is_empty sending_time with
+                | true -> Error (`Invalid_value (52, sending_time))
+                | false -> (
+                    match poss_dup_orig_sending_time with
+                    | None -> Ok ()
+                    | Some value -> (
+                        match String.is_empty value with
+                        | true -> Error (`Invalid_value (122, value))
+                        | false -> Ok ())))))
+
   let message_internal ~poss_dup_orig_sending_time ~sender_comp_id
       ~target_comp_id ~msg_type ~msg_seq_num ~sending_time ~body_fields =
     let open Result.Let_syntax in
     let%bind () =
       match msg_seq_num > 0 with
-      | true -> Ok ()
       | false -> Error (`Invalid_value (34, Int.to_string msg_seq_num))
+      | true ->
+          validate_required_values ~sender_comp_id ~target_comp_id ~msg_type
+            ~sending_time ~poss_dup_orig_sending_time
     in
     let header_fields =
       [

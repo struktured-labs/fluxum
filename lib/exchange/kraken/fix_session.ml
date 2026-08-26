@@ -623,6 +623,7 @@ module Client = struct
       | 0 -> last_sent
       | explicit -> Int.min explicit last_sent
     in
+    let unavailable_end = Int.max begin_sequence_number requested_end in
     let rec all_available sequence_number =
       match sequence_number > requested_end with
       | true -> true
@@ -638,7 +639,7 @@ module Client = struct
     with
     | false ->
         return
-          (Error (`Replay_unavailable (begin_sequence_number, requested_end)))
+          (Error (`Replay_unavailable (begin_sequence_number, unavailable_end)))
     | true ->
         let rec administrative_end sequence_number =
           match sequence_number > requested_end with
@@ -658,7 +659,7 @@ module Client = struct
                   return
                     (Error
                        (`Replay_unavailable
-                          (begin_sequence_number, requested_end)))
+                          (begin_sequence_number, unavailable_end)))
               | Some (`Application original_wire) -> (
                   let%bind replayed =
                     replay_frame_unlocked live original_wire

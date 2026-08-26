@@ -74,6 +74,28 @@ let%test_module "FIX codec" =
           true
       | _ -> false
 
+    let%test "required header values cannot be empty" =
+      let message ~sender_comp_id ~target_comp_id ~msg_type ~sending_time =
+        Fix.Encoder.message ~sender_comp_id ~target_comp_id ~msg_type
+          ~msg_seq_num:1 ~sending_time ~body_fields:[]
+      in
+      match
+        ( message ~sender_comp_id:"CLIENT" ~target_comp_id:"KRAKEN-MD"
+            ~msg_type:"" ~sending_time:"20260824-12:34:56.123",
+          message ~sender_comp_id:"" ~target_comp_id:"KRAKEN-MD" ~msg_type:"0"
+            ~sending_time:"20260824-12:34:56.123",
+          message ~sender_comp_id:"CLIENT" ~target_comp_id:"" ~msg_type:"0"
+            ~sending_time:"20260824-12:34:56.123",
+          message ~sender_comp_id:"CLIENT" ~target_comp_id:"KRAKEN-MD"
+            ~msg_type:"0" ~sending_time:"" )
+      with
+      | ( Error (`Invalid_value (35, "")),
+          Error (`Invalid_value (49, "")),
+          Error (`Invalid_value (56, "")),
+          Error (`Invalid_value (52, "")) ) ->
+          true
+      | _ -> false
+
     let%test "body length corruption is rejected" =
       let raw = encode "0" in
       let body_length =
@@ -194,6 +216,12 @@ let%test_module "FIX codec" =
       let malicious = insert_before_checksum (encode "0") (10, "111") in
       match Fix.Frame.decode malicious with
       | Error (`Duplicate_field 10) -> true
+      | _ -> false
+
+    let%test "bytes after the checksum are reported as trailing data" =
+      let trailing = sprintf "58=tail%c" Fix.soh in
+      match Fix.Frame.decode (encode "0" ^ trailing) with
+      | Error (`Trailing_data length) -> length = String.length trailing
       | _ -> false
 
     let%test "singleton session fields cannot be duplicated" =
