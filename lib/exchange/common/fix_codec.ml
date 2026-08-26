@@ -623,7 +623,12 @@ module Sequence = struct
         match Frame.value frame 43 with
         | Some "Y" -> (
             match Frame.find frame 122 with
-            | Some _ -> Ok (t, `Possible_duplicate)
+            | Some field -> (
+                match Field.value_length field > 0 with
+                | true -> Ok (t, `Possible_duplicate)
+                | false ->
+                    Error
+                      (`Possible_duplicate_without_orig_sending_time received))
             | None ->
                 Error (`Possible_duplicate_without_orig_sending_time received))
         | _ -> Error (`Duplicate_without_poss_dup (expected, received)))

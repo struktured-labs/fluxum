@@ -170,12 +170,21 @@ let%test_module "FIX codec" =
     let%test "possible duplicates require original sending time" =
       let state = Fix.Sequence.create ~incoming:2 () in
       let raw = encode ~seq:1 "0" in
-      let duplicate =
+      let missing =
         insert_before_checksum raw (43, "Y")
         |> Fix.Frame.decode |> or_fail
       in
-      match Fix.Sequence.accept_incoming state duplicate with
-      | Error (`Possible_duplicate_without_orig_sending_time 1) -> true
+      let empty =
+        insert_before_checksum (Fix.Frame.raw missing) (122, "")
+        |> Fix.Frame.decode |> or_fail
+      in
+      match
+        ( Fix.Sequence.accept_incoming state missing,
+          Fix.Sequence.accept_incoming state empty )
+      with
+      | ( Error (`Possible_duplicate_without_orig_sending_time 1),
+          Error (`Possible_duplicate_without_orig_sending_time 1) ) ->
+          true
       | _ -> false
 
     let%test "replay preserves intent and marks the duplicate" =
