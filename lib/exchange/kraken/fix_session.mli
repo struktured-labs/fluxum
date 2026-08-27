@@ -33,8 +33,8 @@ end
 module State_store : sig
   val load : string -> Sequence_state.t Deferred.Or_error.t
   (** Missing files load as a fresh [1, 1] session. Saves use an fsynced
-      same-directory temporary followed by atomic rename and containing-directory
-      fsync. *)
+      same-directory temporary followed by atomic rename and
+      containing-directory fsync. *)
 
   val save : string -> Sequence_state.t -> unit Deferred.Or_error.t
   val reset : string -> unit Deferred.Or_error.t
@@ -73,8 +73,8 @@ module Config : sig
       latency, at the cost of sequence rollback after a process or machine
       crash. Graceful disconnect and [stop] always checkpoint. Event, gap, and
       replay-journal capacities are hard bounds; crossing one fails closed. The
-      replay journal survives reconnects within this process, but is not restored
-      after a process restart. *)
+      replay journal survives reconnects within this process, but is not
+      restored after a process restart. *)
 
   val endpoint : t -> Fix.Endpoint.t
   val sender_comp_id : t -> string
@@ -99,11 +99,23 @@ end
 module Client : sig
   type t
 
+  type message = {
+    frame : Fix.Codec.Frame.t;
+    received_at : Time_ns.t;
+    decoded_at : Time_ns.t;
+    delivered_at : Time_ns.t;
+  }
+  (** Timing for one inbound frame. [received_at] is captured when the Async
+      reader returns the chunk containing the frame's final byte, [decoded_at]
+      after that chunk has been framed and validated, and [delivered_at] after
+      ordered session processing immediately before publication. Frames from the
+      same read may share [received_at] and [decoded_at]. *)
+
   type event =
     | Connecting
     | Connected
     | Disconnected of Error.t
-    | Message of Fix.Codec.Frame.t
+    | Message of message
 
   val create : Config.t -> (t, error) Deferred.Result.t
   val events : t -> event Pipe.Reader.t

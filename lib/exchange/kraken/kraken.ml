@@ -2,6 +2,7 @@ open Core
 module Cfg = Cfg
 module Fix = Fix
 module Fix_session = Fix_session
+module Fix_probe = Fix_probe
 module Common = Common
 module Rest = Rest
 module V1 = V1
@@ -35,6 +36,7 @@ let command : Command.t =
     ; V1.Withdraw_status.command
     ; V1.Withdraw_addresses.command
     ; Order.command
+    ; Fix_probe.command
     ; Ws_cmd.command
     ; Ledger.command
     ; Unified_cmd.command ]

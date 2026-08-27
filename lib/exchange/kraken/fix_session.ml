@@ -241,18 +241,28 @@ module Client = struct
     mutable last_inbound : Time_ns.t;
   }
 
-  type journal_entry =
-    [ `Administrative of string
-    | `Application of string
-    ]
+  type journal_entry = [ `Administrative of string | `Application of string ]
   (** Administrative entries retain only their original SendingTime; this is
       enough for a gap fill and avoids journaling Logon credentials. *)
+
+  type inbound = {
+    frame : Fix.Codec.Frame.t;
+    received_at : Time_ns.t;
+    decoded_at : Time_ns.t;
+  }
+
+  type message = {
+    frame : Fix.Codec.Frame.t;
+    received_at : Time_ns.t;
+    decoded_at : Time_ns.t;
+    delivered_at : Time_ns.t;
+  }
 
   type event =
     | Connecting
     | Connected
     | Disconnected of Error.t
-    | Message of Fix.Codec.Frame.t
+    | Message of message
 
   type connector =
     stop:unit Deferred.t ->
@@ -268,7 +278,7 @@ module Client = struct
     sequencer : unit Throttle.Sequencer.t;
     mutable messages_since_checkpoint : int;
     mutable journal : journal_entry Int.Map.t;
-    mutable pending_incoming : Fix.Codec.Frame.t Int.Map.t;
+    mutable pending_incoming : inbound Int.Map.t;
     mutable resend_requested_through : int option;
     (* Connection lifecycle mutation is confined to [run_connection]. *)
     mutable live : live option;
@@ -424,9 +434,7 @@ module Client = struct
       | `Administrative -> `Administrative orig_sending_time
       | `Application -> `Application wire
     in
-    let journal =
-      Map.set t.journal ~key:sequence_number ~data:entry
-    in
+    let journal = Map.set t.journal ~key:sequence_number ~data:entry in
     t.journal <-
       (match Map.length journal > t.config.journal_capacity with
       | false -> journal
@@ -505,8 +513,7 @@ module Client = struct
                     | Error (`State cause) ->
                         Error
                           (fail_live live
-                             (`Sent_but_not_checkpointed
-                               (sequence_number, cause)))
+                             (`Sent_but_not_checkpointed (sequence_number, cause)))
                     | Error error -> Error error))))
 
   let write_encoded t live ~replay_kind ~encode =
@@ -545,9 +552,7 @@ module Client = struct
                 ~reset_sequence_numbers ~cancel_on_disconnect ?client_id ()
               |> Result.map_error ~f:(fun error -> `Fix error))
     in
-    (match result with
-    | Ok () -> t.reset_logon <- false
-    | Error _ -> ());
+    (match result with Ok () -> t.reset_logon <- false | Error _ -> ());
     result
 
   let update_incoming_sequence_unlocked t frame =
@@ -711,7 +716,8 @@ module Client = struct
     | "2" -> handle_resend_request_unlocked t live frame
     | _ -> return (Ok ())
 
-  let process_accepted_unlocked t live frame accepted =
+  let process_accepted_unlocked t live (inbound : inbound) accepted =
+    let frame = inbound.frame in
     let%bind checkpointed =
       match accepted with
       | true -> maybe_checkpoint_unlocked t
@@ -733,7 +739,16 @@ module Client = struct
             let%bind response = handle_inbound_unlocked t live frame in
             match response with
             | Error _ as error -> return error
-            | Ok () -> publish t (Message frame) |> return))
+            | Ok () ->
+                publish t
+                  (Message
+                     {
+                       frame;
+                       received_at = inbound.received_at;
+                       decoded_at = inbound.decoded_at;
+                       delivered_at = Time_ns.now ();
+                     })
+                |> return))
 
   let request_gap_unlocked t live ~expected ~received =
     let requested_through = received - 1 in
@@ -753,7 +768,7 @@ module Client = struct
         | Error _ -> ());
         result
 
-  let buffer_gap_unlocked t live frame ~expected ~received =
+  let buffer_gap_unlocked t live inbound ~expected ~received =
     let already_buffered = Map.mem t.pending_incoming received in
     match
       ( already_buffered,
@@ -764,7 +779,7 @@ module Client = struct
     | true, _ -> request_gap_unlocked t live ~expected ~received
     | false, false ->
         t.pending_incoming <-
-          Map.set t.pending_incoming ~key:received ~data:frame;
+          Map.set t.pending_incoming ~key:received ~data:inbound;
         request_gap_unlocked t live ~expected ~received
 
   let clear_completed_resend t =
@@ -780,14 +795,15 @@ module Client = struct
       Map.filter_keys t.pending_incoming ~f:(fun sequence_number ->
           sequence_number >= expected);
     match Map.find t.pending_incoming expected with
-    | Some frame -> (
+    | Some inbound -> (
         t.pending_incoming <- Map.remove t.pending_incoming expected;
+        let frame = inbound.frame in
         let accepted = update_incoming_sequence_unlocked t frame in
         match accepted with
         | Error _ as error -> return error
         | Ok accepted -> (
             let%bind processed =
-              process_accepted_unlocked t live frame accepted
+              process_accepted_unlocked t live inbound accepted
             in
             match processed with
             | Error _ as error -> return error
@@ -815,7 +831,8 @@ module Client = struct
     in
     identity
 
-  let process_frame_unlocked t live frame =
+  let process_frame_unlocked t live (inbound : inbound) =
+    let frame = inbound.frame in
     match t.live with
     | None -> return (Error `Not_connected)
     | Some current when not (phys_equal current live) ->
@@ -829,21 +846,22 @@ module Client = struct
             let received = Fix.Codec.Frame.sequence_number frame in
             match Int.compare received expected with
             | comparison when comparison > 0 ->
-                buffer_gap_unlocked t live frame ~expected ~received
+                buffer_gap_unlocked t live inbound ~expected ~received
             | _ -> (
                 let accepted = update_incoming_sequence_unlocked t frame in
                 match accepted with
                 | Error _ as error -> return error
                 | Ok accepted -> (
                     let%bind processed =
-                      process_accepted_unlocked t live frame accepted
+                      process_accepted_unlocked t live inbound accepted
                     in
                     match processed with
                     | Error _ as error -> return error
                     | Ok () -> drain_pending_unlocked t live))))
 
-  let process_frame t live frame =
-    Throttle.enqueue t.sequencer (fun () -> process_frame_unlocked t live frame)
+  let process_frame t live inbound =
+    Throttle.enqueue t.sequencer (fun () ->
+        process_frame_unlocked t live inbound)
 
   let read_loop t live =
     let framer =
@@ -852,8 +870,8 @@ module Client = struct
     let buffer = Bytes.create 65_536 in
     let rec process = function
       | [] -> return (Ok ())
-      | frame :: frames -> (
-          let%bind result = process_frame t live frame in
+      | inbound :: frames -> (
+          let%bind result = process_frame t live inbound in
           match result with
           | Ok () -> process frames
           | Error _ as error -> return error)
@@ -863,11 +881,17 @@ module Client = struct
       match read with
       | `Eof -> return (Error (`Io (Error.of_string "Kraken FIX EOF")))
       | `Ok length -> (
+          let received_at = Time_ns.now () in
           let chunk = Bytes.To_string.sub buffer ~pos:0 ~len:length in
           match Fix.Codec.Framer.feed framer chunk with
           | Error error -> return (Error (`Fix (error :> Fix.error)))
           | Ok frames -> (
-              let%bind result = process frames in
+              let decoded_at = Time_ns.now () in
+              let inbound =
+                List.map frames ~f:(fun frame ->
+                    { frame; received_at; decoded_at })
+              in
+              let%bind result = process inbound in
               match result with
               | Ok () -> loop ()
               | Error _ as error -> return error))
@@ -940,7 +964,7 @@ module Client = struct
 
   let prefer_connection_error result closed =
     match (result, closed) with
-    | Error ((`Sent_but_not_checkpointed _) as error), _ -> Error error
+    | Error (`Sent_but_not_checkpointed _ as error), _ -> Error error
     | _, (Error _ as error) -> error
     | _, Ok () -> result
 
@@ -967,10 +991,10 @@ module Client = struct
     t.live <- Some live;
     let%bind logon = send_logon t live in
     match logon with
-    | Error _ as error -> (
+    | Error _ as error ->
         let%map closed = close_connection t live in
-        prefer_connection_error error closed)
-    | Ok () -> (
+        prefer_connection_error error closed
+    | Ok () ->
         let guarded_read =
           Monitor.try_with_or_error (fun () -> read_loop t live) >>| function
           | Ok result -> result
@@ -992,7 +1016,7 @@ module Client = struct
             ]
         in
         let%map closed = close_connection t live in
-        prefer_connection_error result closed)
+        prefer_connection_error result closed
 
   let rec reconnect_loop t =
     match Ivar.is_full t.stop with

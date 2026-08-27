@@ -22,6 +22,14 @@
   (pps ppx_jane))
  (flags :standard -open Core -open Async))
 
+(test
+ (name test_fix_probe)
+ (modules test_fix_probe)
+ (libraries core kraken exchange_common)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core))
+
 ; Integration tests - run manually with: dune exec ./lib/exchange/kraken/test/integration_test.exe
 
 (executable

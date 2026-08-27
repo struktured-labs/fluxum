@@ -90,9 +90,8 @@ let read_frame server =
 
 let server_message ?(sender_comp_id = "KRAKEN-MD") ~sequence ~msg_type
     ~body_fields () =
-  Fix.Codec.Encoder.message ~sender_comp_id ~target_comp_id:"CLIENT"
-    ~msg_type ~msg_seq_num:sequence ~sending_time:"20260825-12:34:56.123"
-    ~body_fields
+  Fix.Codec.Encoder.message ~sender_comp_id ~target_comp_id:"CLIENT" ~msg_type
+    ~msg_seq_num:sequence ~sending_time:"20260825-12:34:56.123" ~body_fields
   |> Result.map_error ~f:(fun error -> (error :> Fix.error))
   |> Result.map_error ~f:(fun error -> Error.create_s (Fix.sexp_of_error error))
   |> or_error_exn
@@ -124,9 +123,11 @@ let rec take_message_sequences events remaining sequences =
       let%bind result = Pipe.read events in
       match result with
       | `Eof -> failwith "session events closed before expected messages"
-      | `Ok (Session.Client.Message frame) ->
+      | `Ok (Session.Client.Message message) ->
+          assert (Time_ns.(message.received_at <= message.decoded_at));
+          assert (Time_ns.(message.decoded_at <= message.delivered_at));
           take_message_sequences events (remaining - 1)
-            (Fix.Codec.Frame.sequence_number frame :: sequences)
+            (Fix.Codec.Frame.sequence_number message.frame :: sequences)
       | `Ok _ -> take_message_sequences events remaining sequences)
 
 let run_client client =
@@ -160,7 +161,8 @@ let test_reconnect path =
        assert (String.equal (Fix.Codec.Frame.msg_type logon) "A");
        Writer.write server.writer
          (server_message ~sequence:number ~msg_type:"A"
-            ~body_fields:[ (98, "0"); (108, "60") ] ());
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
        let%bind () = Writer.flushed server.writer in
        match number with
        | 1 ->
@@ -172,7 +174,8 @@ let test_reconnect path =
        | _ ->
            Writer.write server.writer
              (server_message ~sequence:3 ~msg_type:"1"
-                ~body_fields:[ (112, "health-check") ] ());
+                ~body_fields:[ (112, "health-check") ]
+                ());
            let%bind () = Writer.flushed server.writer in
            let%map heartbeat = read_frame server in
            assert (Fix.Codec.Frame.sequence_number heartbeat = 4);
@@ -240,7 +243,8 @@ let test_gap_buffer path =
       (let%bind _logon = read_frame server in
        Writer.write server.writer
          (server_message ~sequence:1 ~msg_type:"A"
-            ~body_fields:[ (98, "0"); (108, "60") ] ());
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
        Writer.write server.writer
          (server_message ~sequence:3 ~msg_type:"0" ~body_fields:[] ());
        let%bind () = Writer.flushed server.writer in
@@ -275,7 +279,8 @@ let test_sequence_reset_discards_buffered path =
       (let%bind _logon = read_frame server in
        Writer.write server.writer
          (server_message ~sequence:1 ~msg_type:"A"
-            ~body_fields:[ (98, "0"); (108, "60") ] ());
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
        Writer.write server.writer
          (server_message ~sequence:3 ~msg_type:"0" ~body_fields:[] ());
        let%bind () = Writer.flushed server.writer in
@@ -283,7 +288,8 @@ let test_sequence_reset_discards_buffered path =
        assert (String.equal (Fix.Codec.Frame.msg_type first_resend) "2");
        Writer.write server.writer
          (server_message ~sequence:2 ~msg_type:"4"
-            ~body_fields:[ (123, "Y"); (36, "4") ] ());
+            ~body_fields:[ (123, "Y"); (36, "4") ]
+            ());
        Writer.write server.writer
          (server_message ~sequence:5 ~msg_type:"0" ~body_fields:[] ());
        let%bind () = Writer.flushed server.writer in
@@ -323,13 +329,15 @@ let test_outbound_replay path =
       (let%bind _logon = read_frame server in
        Writer.write server.writer
          (server_message ~sequence:1 ~msg_type:"A"
-            ~body_fields:[ (98, "0"); (108, "60") ] ());
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
        let%bind () = Writer.flushed server.writer in
        let%bind original_request = read_frame server in
        assert (Fix.Codec.Frame.sequence_number original_request = 2);
        Writer.write server.writer
          (server_message ~sequence:2 ~msg_type:"2"
-            ~body_fields:[ (7, "1"); (16, "2") ] ());
+            ~body_fields:[ (7, "1"); (16, "2") ]
+            ());
        let%bind () = Writer.flushed server.writer in
        let%bind gap_fill = read_frame server in
        assert (String.equal (Fix.Codec.Frame.msg_type gap_fill) "4");
@@ -384,14 +392,16 @@ let test_journal_eviction path =
       (let%bind _logon = read_frame server in
        Writer.write server.writer
          (server_message ~sequence:1 ~msg_type:"A"
-            ~body_fields:[ (98, "0"); (108, "60") ] ());
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
        let%bind () = Writer.flushed server.writer in
        let%bind request = read_frame server in
        assert (Fix.Codec.Frame.sequence_number request = 2);
        Ivar.fill_if_empty request_received ();
        Writer.write server.writer
          (server_message ~sequence:2 ~msg_type:"2"
-            ~body_fields:[ (7, "1"); (16, "2") ] ());
+            ~body_fields:[ (7, "1"); (16, "2") ]
+            ());
        Writer.flushed server.writer);
     Ok client
   in
@@ -449,7 +459,8 @@ let test_event_bound path =
       (let%bind _logon = read_frame server in
        Writer.write server.writer
          (server_message ~sequence:1 ~msg_type:"A"
-            ~body_fields:[ (98, "0"); (108, "60") ] ());
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
        Writer.flushed server.writer);
     Ok client
   in
@@ -496,7 +507,8 @@ let test_replay_unavailable path ~begin_sequence_number ~end_sequence_number
        assert (Fix.Codec.Frame.sequence_number logon = 3);
        Writer.write server.writer
          (server_message ~sequence:1 ~msg_type:"A"
-            ~body_fields:[ (98, "0"); (108, "60") ] ());
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
        Writer.write server.writer
          (server_message ~sequence:2 ~msg_type:"2"
             ~body_fields:
@@ -535,7 +547,8 @@ let test_sent_but_not_checkpointed () =
       (let%bind _logon = read_frame server in
        Writer.write server.writer
          (server_message ~sequence:1 ~msg_type:"A"
-            ~body_fields:[ (98, "0"); (108, "60") ] ());
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
        let%bind () = Writer.flushed server.writer in
        let%map request = read_frame server in
        assert (String.equal (Fix.Codec.Frame.msg_type request) "V");
@@ -552,11 +565,12 @@ let test_sent_but_not_checkpointed () =
   let%bind () = Writer.save directory ~contents:"blocks the state directory" in
   let request =
     Fix.Market_data.
-      { request_id = "AMBIGUOUS-BOOK"
-      ; action = Subscribe
-      ; depth = Top
-      ; entries = [ Book ]
-      ; symbols = [ "BTC/USD" ]
+      {
+        request_id = "AMBIGUOUS-BOOK";
+        action = Subscribe;
+        depth = Top;
+        entries = [ Book ];
+        symbols = [ "BTC/USD" ];
       }
   in
   let%bind sent = Session.Client.send client (Market_data_request request) in
@@ -569,7 +583,8 @@ let test_sent_but_not_checkpointed () =
   (match second_send with
   | Error (`Sent_but_not_checkpointed (2, _))
   | Error `Not_connected
-  | Error `Stopped -> ()
+  | Error `Stopped ->
+      ()
   | _ -> failwith "send was accepted after a terminal checkpoint failure");
   let%bind () = Ivar.read request_received in
   let%bind run_result = Ivar.read run_finished in
@@ -591,16 +606,15 @@ let test_trading_session path =
     |> Result.map_error ~f:(fun error -> `Fix error)
     |> session_exn
   in
-  let endpoint =
-    Fix.Endpoint.create ~environment:Uat ~service:Spot_trading
-  in
+  let endpoint = Fix.Endpoint.create ~environment:Uat ~service:Spot_trading in
   let config =
     Session.Config.create ~endpoint ~sender_comp_id:"CLIENT"
       ~authentication:
         (Trading
-           { credentials
-           ; cancel_on_disconnect = Fix.Session.Cancel
-           ; client_id = None
+           {
+             credentials;
+             cancel_on_disconnect = Fix.Session.Cancel;
+             client_id = None;
            })
       ~state_path:path ~checkpoint_every:1 ()
     |> session_exn
@@ -610,12 +624,16 @@ let test_trading_session path =
     let%map client, server = in_memory_connection () in
     don't_wait_for
       (let%bind logon = read_frame server in
-       assert (Option.equal String.equal (Fix.Codec.Frame.value logon 553) (Some "APIKEY"));
+       assert (
+         Option.equal String.equal
+           (Fix.Codec.Frame.value logon 553)
+           (Some "APIKEY"));
        assert (Option.is_some (Fix.Codec.Frame.value logon 554));
        assert (Option.is_some (Fix.Codec.Frame.value logon 5025));
        Writer.write server.writer
          (server_message ~sender_comp_id:"KRAKEN-TRD" ~sequence:1 ~msg_type:"A"
-            ~body_fields:[ (98, "0"); (108, "60") ] ());
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
        let%bind () = Writer.flushed server.writer in
        let%map order = read_frame server in
        assert (String.equal (Fix.Codec.Frame.msg_type order) "D");
@@ -631,18 +649,18 @@ let test_trading_session path =
   let client_order_id =
     match client_order_id with
     | Ok id -> id
-    | Error error ->
-        failwith (Sexp.to_string_hum (Fix.sexp_of_error error))
+    | Error error -> failwith (Sexp.to_string_hum (Fix.sexp_of_error error))
   in
   let order =
     Fix.Order.
-      { client_order_id
-      ; kind = Limit { price = decimal "84000.00"; post_only = true }
-      ; quantity = decimal "0.00100000"
-      ; side = Buy
-      ; symbol = "BTC/USD"
-      ; time_in_force = Gtc
-      ; self_trade_prevention = Some Cancel_newest
+      {
+        client_order_id;
+        kind = Limit { price = decimal "84000.00"; post_only = true };
+        quantity = decimal "0.00100000";
+        side = Buy;
+        symbol = "BTC/USD";
+        time_in_force = Gtc;
+        self_trade_prevention = Some Cancel_newest;
       }
   in
   let%bind () = Session.Client.send client (New_order order) >>| session_exn in
@@ -669,7 +687,8 @@ let test_liveness_timeout path =
       (let%bind _logon = read_frame server in
        Writer.write server.writer
          (server_message ~sequence:1 ~msg_type:"A"
-            ~body_fields:[ (98, "0"); (108, "1") ] ());
+            ~body_fields:[ (98, "0"); (108, "1") ]
+            ());
        Writer.flushed server.writer);
     Ok client
   in
@@ -679,7 +698,8 @@ let test_liveness_timeout path =
   let run_finished = run_client client in
   let%bind disconnected = wait_disconnected (Session.Client.events client) in
   assert (
-    String.is_substring (Error.to_string_hum disconnected)
+    String.is_substring
+      (Error.to_string_hum disconnected)
       ~substring:"Liveness_timeout");
   Session.Client.stop client;
   let%map result = Ivar.read run_finished in
@@ -696,12 +716,12 @@ let run () =
   let%bind () = test_outbound_replay path in
   let%bind () = test_journal_eviction path in
   let%bind () =
-    test_replay_unavailable path ~begin_sequence_number:1
-      ~end_sequence_number:2 ~expected:(1, 2)
+    test_replay_unavailable path ~begin_sequence_number:1 ~end_sequence_number:2
+      ~expected:(1, 2)
   in
   let%bind () =
-    test_replay_unavailable path ~begin_sequence_number:5
-      ~end_sequence_number:0 ~expected:(5, 5)
+    test_replay_unavailable path ~begin_sequence_number:5 ~end_sequence_number:0
+      ~expected:(5, 5)
   in
   let%bind () = test_logon_timeout path in
   let%bind () = test_liveness_timeout path in

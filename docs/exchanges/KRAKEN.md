@@ -90,6 +90,42 @@ Run the local codec benchmark with:
 dune exec --profile=release ./bench/kraken_fix_codec.exe -- 200000
 ```
 
+### Read-only FIX latency probe
+
+The probe command connects only to the Spot L2 market-data service. It has no
+trading credentials or order path, defaults to UAT, resubscribes after a
+reconnect, and stops after a bounded duration:
+
+```bash
+dune exec fluxum -- kraken fix probe \
+  --sender-comp-id YOUR_SENDER_COMP_ID \
+  --symbols BTC/USD,ETH/USD \
+  --environment uat \
+  --state-path var/kraken-fix-probe-uat.sexp \
+  --duration 60
+```
+
+The final report includes connection attempts, reconnects, FIX message-type
+counts, possible duplicates, sequence discontinuities, message rate, and
+p50/p95/p99 measurements for:
+
+- TLS read completion to validated frame decode;
+- TLS read completion to ordered event delivery;
+- inbound message interarrival time.
+
+Samples are kept in bounded circular arrays. `--sample-capacity` controls the
+number retained per latency metric and defaults to 250,000. Frames completed by
+the same TLS read share a receive timestamp, so their interarrival measurement
+may correctly be zero.
+
+The delivery measurement includes sequence checkpointing. Keep
+`--checkpoint-every 1` for the durability-first baseline; a larger interval can
+measure the batching tradeoff but permits sequence rollback after a crash. Use
+`--reset-on-start` only for a sequence reset coordinated with Kraken. Neither
+flag changes the probe's read-only market-data authentication.
+Use a distinct state path for each environment and SenderCompID; never share a
+sequence-state file between UAT and production sessions.
+
 ## Quick Start
 
 ### WebSocket Order Book
