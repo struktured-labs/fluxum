@@ -159,12 +159,14 @@ module Metrics = struct
         t.connection_attempts <- t.connection_attempts + 1;
         t.previous_received_at <- None;
         t.previous_sequence_number <- None
-    | Connected -> t.connections <- t.connections + 1
-    | Disconnected _ ->
+    | Fix_session.Client.Timed_event.Connected ->
+        t.connections <- t.connections + 1
+    | Fix_session.Client.Timed_event.Disconnected _ ->
         t.disconnects <- t.disconnects + 1;
         t.previous_received_at <- None;
         t.previous_sequence_number <- None
-    | Message message -> observe_message t message
+    | Fix_session.Client.Timed_event.Message message ->
+        observe_message t message
 
   let percentile values probability =
     let length = Array.length values in
@@ -307,7 +309,10 @@ let consume_until_deadline ~client ~events ~metrics ~request ~deadline =
             match sent with
             | Error error -> return (Error (`Session error))
             | Ok () -> loop ())
-        | Connecting | Disconnected _ | Message _ -> loop ())
+        | Fix_session.Client.Timed_event.Connecting
+        | Fix_session.Client.Timed_event.Disconnected _
+        | Fix_session.Client.Timed_event.Message _ ->
+            loop ())
   in
   loop ()
 
@@ -379,18 +384,18 @@ let run ~environment ~sender_comp_id ~symbols ~depth ~state_path
 
 let environment_arg =
   Command.Arg_type.of_alist_exn
-    [ ("uat", Fix.Endpoint.Uat); ("production", Production) ]
+    [ ("uat", Fix.Endpoint.Uat); ("production", Fix.Endpoint.Production) ]
 
 let depth_arg =
   Command.Arg_type.of_alist_exn
     [
       ("full", Fix.Market_data.Full);
-      ("top", Top);
-      ("10", Levels_10);
-      ("25", Levels_25);
-      ("100", Levels_100);
-      ("500", Levels_500);
-      ("1000", Levels_1000);
+      ("top", Fix.Market_data.Top);
+      ("10", Fix.Market_data.Levels_10);
+      ("25", Fix.Market_data.Levels_25);
+      ("100", Fix.Market_data.Levels_100);
+      ("500", Fix.Market_data.Levels_500);
+      ("1000", Fix.Market_data.Levels_1000);
     ]
 
 let probe_command =
