@@ -48,7 +48,7 @@ module Metrics : sig
       sampler is full, newer observations replace the oldest retained values.
       Capacities from 1 through 1,000,000 are accepted. *)
 
-  val observe : t -> Fix_session.Client.event -> unit
+  val observe : t -> Fix_session.Client.Timed_event.t -> unit
   val snapshot : t -> elapsed:Time_ns.Span.t -> snapshot
   val report : snapshot -> string
 end
@@ -59,7 +59,7 @@ val run :
   symbols:string list ->
   depth:Fix.Market_data.depth ->
   state_path:string ->
-  duration:Time_ns.Span.t ->
+  duration_seconds:float ->
   sample_capacity:int ->
   checkpoint_every:int ->
   reset_on_start:bool ->

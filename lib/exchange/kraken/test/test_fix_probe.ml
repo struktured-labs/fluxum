@@ -1,6 +1,8 @@
 open Core
+open Async
 module Fix = Kraken.Fix
 module Probe = Kraken.Fix_probe
+module Timed_event = Kraken.Fix_session.Client.Timed_event
 
 let result_exn result ~sexp_of_error =
   match result with
@@ -57,25 +59,25 @@ let test_metrics () =
     Probe.Metrics.create ~sample_capacity:2
     |> result_exn ~sexp_of_error:Probe.sexp_of_error
   in
-  Probe.Metrics.observe metrics Kraken.Fix_session.Client.Connecting;
-  Probe.Metrics.observe metrics Connected;
+  Probe.Metrics.observe metrics Timed_event.Connecting;
+  Probe.Metrics.observe metrics Timed_event.Connected;
   Probe.Metrics.observe metrics
-    (Message
+    (Timed_event.Message
        (message
           (frame ~sequence:1 ~msg_type:"A")
           ~received_us:1_000. ~decode_us:10. ~delivery_us:30.));
   Probe.Metrics.observe metrics
-    (Message
+    (Timed_event.Message
        (message
           (frame ~sequence:3 ~msg_type:"X")
           ~received_us:1_100. ~decode_us:20. ~delivery_us:60.));
   Probe.Metrics.observe metrics
-    (Message
+    (Timed_event.Message
        (message
           (possible_duplicate_frame ~sequence:2 ~msg_type:"X")
           ~received_us:1_500. ~decode_us:40. ~delivery_us:80.));
   Probe.Metrics.observe metrics
-    (Disconnected (Error.of_string "test disconnect"));
+    (Timed_event.Disconnected (Error.of_string "test disconnect"));
   let snapshot =
     Probe.Metrics.snapshot metrics ~elapsed:(Time_ns.Span.of_sec 2.)
   in
@@ -109,7 +111,40 @@ let test_metrics () =
   assert (String.is_substring report ~substring:"rate=1.50/s");
   assert (String.is_substring report ~substring:"types=[A=1, X=2]")
 
-let () =
+let run_probe ?(duration_seconds = 1.) ?(symbols = [ "BTC/USD" ]) () =
+  Probe.run ~environment:Fix.Endpoint.Uat ~sender_comp_id:"CLIENT" ~symbols
+    ~depth:Fix.Market_data.Top ~state_path:"/tmp/fluxum-invalid-probe.sexp"
+    ~duration_seconds ~sample_capacity:2 ~checkpoint_every:1
+    ~reset_on_start:false
+
+let expect_invalid_duration duration_seconds =
+  let%map result = run_probe ~duration_seconds () in
+  match result with
+  | Error (`Invalid_duration actual) ->
+      assert (
+        match Float.is_nan duration_seconds with
+        | true -> Float.is_nan actual
+        | false -> Float.equal actual duration_seconds)
+  | Error error -> failwith (Sexp.to_string_hum (Probe.sexp_of_error error))
+  | Ok _ -> failwith "invalid probe duration was accepted"
+
+let expect_invalid_symbols symbols =
+  let%map result = run_probe ~symbols () in
+  match result with
+  | Error `Invalid_symbols -> ()
+  | Error error -> failwith (Sexp.to_string_hum (Probe.sexp_of_error error))
+  | Ok _ -> failwith "invalid probe symbols were accepted"
+
+let run_tests () =
   test_invalid_capacity ();
   test_metrics ();
-  print_endline "Kraken FIX probe tests passed"
+  let%bind () = expect_invalid_duration 0. in
+  let%bind () = expect_invalid_duration Float.nan in
+  let%bind () = expect_invalid_symbols [] in
+  let%bind () = expect_invalid_symbols [ "   " ] in
+  print_endline "Kraken FIX probe tests passed";
+  Shutdown.exit 0
+
+let () =
+  don't_wait_for (run_tests ());
+  never_returns (Scheduler.go ())

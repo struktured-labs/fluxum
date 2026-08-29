@@ -123,12 +123,24 @@ let rec take_message_sequences events remaining sequences =
       let%bind result = Pipe.read events in
       match result with
       | `Eof -> failwith "session events closed before expected messages"
-      | `Ok (Session.Client.Message message) ->
+      | `Ok (Session.Client.Message frame) ->
+          take_message_sequences events (remaining - 1)
+            (Fix.Codec.Frame.sequence_number frame :: sequences)
+      | `Ok _ -> take_message_sequences events remaining sequences)
+
+let rec take_timed_message_sequences events remaining sequences =
+  match remaining with
+  | 0 -> return (List.rev sequences)
+  | _ -> (
+      let%bind result = Pipe.read events in
+      match result with
+      | `Eof -> failwith "timed events closed before expected messages"
+      | `Ok (Session.Client.Timed_event.Message message) ->
           assert (Time_ns.(message.received_at <= message.decoded_at));
           assert (Time_ns.(message.decoded_at <= message.delivered_at));
-          take_message_sequences events (remaining - 1)
+          take_timed_message_sequences events (remaining - 1)
             (Fix.Codec.Frame.sequence_number message.frame :: sequences)
-      | `Ok _ -> take_message_sequences events remaining sequences)
+      | `Ok _ -> take_timed_message_sequences events remaining sequences)
 
 let run_client client =
   let finished = Ivar.create () in
@@ -221,7 +233,8 @@ let test_reconnect path =
 
 let market_data_config path ?(event_capacity = 4_096)
     ?(gap_buffer_capacity = 4_096) ?(journal_capacity = 65_536)
-    ?(logon_timeout_ms = 500.) ?(liveness_timeout_ms = 180_000.) () =
+    ?(logon_timeout_ms = 500.) ?(liveness_timeout_ms = 180_000.)
+    ?(capture_timing = false) () =
   let endpoint =
     Fix.Endpoint.create ~environment:Uat ~service:Spot_market_data_l2
   in
@@ -231,8 +244,50 @@ let market_data_config path ?(event_capacity = 4_096)
     ~gap_buffer_capacity ~journal_capacity
     ~logon_timeout:(Time_ns.Span.of_ms logon_timeout_ms)
     ~liveness_timeout:(Time_ns.Span.of_ms liveness_timeout_ms)
-    ()
+    ~capture_timing ()
   |> session_exn
+
+let test_timed_events path =
+  let%bind () = Session.State_store.reset path >>| or_error_exn in
+  let config = market_data_config path ~capture_timing:true () in
+  let connector ~stop:_ _endpoint =
+    let%map client, server = in_memory_connection () in
+    don't_wait_for
+      (let%bind _logon = read_frame server in
+       Writer.write server.writer
+         (server_message ~sequence:1 ~msg_type:"A"
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
+       Writer.write server.writer
+         (server_message ~sequence:2 ~msg_type:"0" ~body_fields:[] ());
+       Writer.flushed server.writer);
+    Ok client
+  in
+  let%bind client =
+    Session.Client.For_testing.create config ~connector >>| session_exn
+  in
+  let timed_events = Session.Client.timed_events client |> session_exn in
+  let legacy_sequences =
+    take_message_sequences (Session.Client.events client) 2 []
+  in
+  let timed_sequences = take_timed_message_sequences timed_events 2 [] in
+  let run_finished = run_client client in
+  let%bind legacy_sequences, timed_sequences =
+    Deferred.both legacy_sequences timed_sequences
+  in
+  assert (List.equal Int.equal legacy_sequences [ 1; 2 ]);
+  assert (List.equal Int.equal timed_sequences [ 1; 2 ]);
+  Session.Client.stop client;
+  let%bind result = Ivar.read run_finished in
+  session_exn result;
+  let config = market_data_config path () in
+  let%map client =
+    Session.Client.For_testing.create config ~connector >>| session_exn
+  in
+  match Session.Client.timed_events client with
+  | Error `Timing_not_enabled -> ()
+  | Error error -> failwith (Sexp.to_string_hum (Session.sexp_of_error error))
+  | Ok _ -> failwith "timed events were enabled without explicit configuration"
 
 let test_gap_buffer path =
   let%bind () = Session.State_store.reset path >>| or_error_exn in
@@ -471,6 +526,34 @@ let test_event_bound path =
   match result with
   | Error (`Event_queue_full 1) -> ()
   | _ -> failwith "expected the bounded event queue to fail closed"
+
+let test_timed_event_bound path =
+  let%bind () = Session.State_store.reset path >>| or_error_exn in
+  let config =
+    market_data_config path ~event_capacity:1 ~capture_timing:true ()
+  in
+  let connector ~stop:_ _endpoint =
+    let%map client, server = in_memory_connection () in
+    don't_wait_for
+      (let%bind _logon = read_frame server in
+       Writer.write server.writer
+         (server_message ~sequence:1 ~msg_type:"A"
+            ~body_fields:[ (98, "0"); (108, "60") ]
+            ());
+       Writer.flushed server.writer);
+    Ok client
+  in
+  let%bind client =
+    Session.Client.For_testing.create config ~connector >>| session_exn
+  in
+  let legacy_events_finished =
+    Pipe.iter_without_pushback (Session.Client.events client) ~f:(fun _ -> ())
+  in
+  let%bind result = Session.Client.run client in
+  let%map () = legacy_events_finished in
+  match result with
+  | Error (`Event_queue_full 1) -> ()
+  | _ -> failwith "expected the bounded timed-event queue to fail closed"
 
 let test_corrupt_state path =
   let%bind () = Writer.save path ~contents:"not a sequence-state sexp" in
@@ -711,6 +794,7 @@ let run () =
   let%bind () = test_state_store path in
   let%bind () = Session.State_store.reset path >>| or_error_exn in
   let%bind () = test_reconnect path in
+  let%bind () = test_timed_events path in
   let%bind () = test_gap_buffer path in
   let%bind () = test_sequence_reset_discards_buffered path in
   let%bind () = test_outbound_replay path in
@@ -726,6 +810,7 @@ let run () =
   let%bind () = test_logon_timeout path in
   let%bind () = test_liveness_timeout path in
   let%bind () = test_event_bound path in
+  let%bind () = test_timed_event_bound path in
   let%bind () = test_sent_but_not_checkpointed () in
   let%bind () = test_trading_session path in
   let%bind () = test_corrupt_state path in

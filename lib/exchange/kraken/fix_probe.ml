@@ -155,7 +155,7 @@ module Metrics = struct
     observe_sequence t frame
 
   let observe t = function
-    | Fix_session.Client.Connecting ->
+    | Fix_session.Client.Timed_event.Connecting ->
         t.connection_attempts <- t.connection_attempts + 1;
         t.previous_received_at <- None;
         t.previous_sequence_number <- None
@@ -278,8 +278,7 @@ let validate_duration_seconds duration_seconds =
   | true -> Ok ()
   | false -> Error (`Invalid_duration duration_seconds)
 
-let consume_until_deadline ~client ~metrics ~request ~deadline =
-  let events = Fix_session.Client.events client in
+let consume_until_deadline ~client ~events ~metrics ~request ~deadline =
   let rec loop () =
     let%bind next =
       Deferred.any
@@ -294,7 +293,7 @@ let consume_until_deadline ~client ~metrics ~request ~deadline =
     | `Event (`Ok event) -> (
         Metrics.observe metrics event;
         match event with
-        | Fix_session.Client.Connected -> (
+        | Fix_session.Client.Timed_event.Connected -> (
             let%bind sent =
               Fix_session.Client.send client
                 (Fix_session.Outbound.Market_data_request request)
@@ -306,9 +305,8 @@ let consume_until_deadline ~client ~metrics ~request ~deadline =
   in
   loop ()
 
-let run ~environment ~sender_comp_id ~symbols ~depth ~state_path ~duration
-    ~sample_capacity ~checkpoint_every ~reset_on_start =
-  let duration_seconds = Time_ns.Span.to_sec duration in
+let run ~environment ~sender_comp_id ~symbols ~depth ~state_path
+    ~duration_seconds ~sample_capacity ~checkpoint_every ~reset_on_start =
   let validated =
     let open Result.Let_syntax in
     let%bind () = validate_duration_seconds duration_seconds in
@@ -319,13 +317,14 @@ let run ~environment ~sender_comp_id ~symbols ~depth ~state_path ~duration
   match validated with
   | Error _ as error -> return error
   | Ok (symbols, metrics) -> (
+      let duration = Time_ns.Span.of_sec duration_seconds in
       let endpoint =
         Fix.Endpoint.create ~environment ~service:Spot_market_data_l2
       in
       let config =
         Fix_session.Config.create ~endpoint ~sender_comp_id
           ~authentication:Market_data ~state_path ~checkpoint_every
-          ~reset_on_start ()
+          ~reset_on_start ~capture_timing:true ()
         |> Result.map_error ~f:(fun error -> `Session error)
       in
       match config with
@@ -335,33 +334,43 @@ let run ~environment ~sender_comp_id ~symbols ~depth ~state_path ~duration
           match created with
           | Error error -> return (Error (`Session error))
           | Ok client -> (
-              let started_at = Time_ns.now () in
-              let deadline = Time_ns.add started_at duration in
-              let request =
-                Fix.Market_data.
-                  {
-                    request_id =
-                      "fluxum-probe-"
-                      ^ (started_at |> Time_ns.to_int63_ns_since_epoch
-                       |> Int63.to_string);
-                    action = Subscribe;
-                    depth;
-                    entries = [ Book ];
-                    symbols;
-                  }
-              in
-              let run_finished = Fix_session.Client.run client in
-              let%bind consumed =
-                consume_until_deadline ~client ~metrics ~request ~deadline
-              in
-              Fix_session.Client.stop client;
-              let%bind session = run_finished in
-              let elapsed = Time_ns.diff (Time_ns.now ()) started_at in
-              let snapshot = Metrics.snapshot metrics ~elapsed in
-              match (consumed, session) with
-              | (Error _ as error), _ -> return error
-              | Ok (), Error error -> return (Error (`Session error))
-              | Ok (), Ok () -> return (Ok snapshot))))
+              let events = Fix_session.Client.timed_events client in
+              match events with
+              | Error error -> return (Error (`Session error))
+              | Ok events -> (
+                  let started_at = Time_ns.now () in
+                  let deadline = Time_ns.add started_at duration in
+                  let request =
+                    Fix.Market_data.
+                      {
+                        request_id =
+                          "fluxum-probe-"
+                          ^ (started_at |> Time_ns.to_int63_ns_since_epoch
+                           |> Int63.to_string);
+                        action = Subscribe;
+                        depth;
+                        entries = [ Book ];
+                        symbols;
+                      }
+                  in
+                  let legacy_events_finished =
+                    Pipe.iter_without_pushback
+                      (Fix_session.Client.events client) ~f:(fun _event -> ())
+                  in
+                  let run_finished = Fix_session.Client.run client in
+                  let%bind consumed =
+                    consume_until_deadline ~client ~events ~metrics ~request
+                      ~deadline
+                  in
+                  Fix_session.Client.stop client;
+                  let%bind session = run_finished in
+                  let%bind () = legacy_events_finished in
+                  let elapsed = Time_ns.diff (Time_ns.now ()) started_at in
+                  let snapshot = Metrics.snapshot metrics ~elapsed in
+                  match (consumed, session) with
+                  | (Error _ as error), _ -> return error
+                  | Ok (), Error error -> return (Error (`Session error))
+                  | Ok (), Ok () -> return (Ok snapshot)))))
 
 let environment_arg =
   Command.Arg_type.of_alist_exn
@@ -424,9 +433,8 @@ let probe_command =
         | Ok () ->
             Deferred.map
               (run ~environment ~sender_comp_id ~symbols ~depth ~state_path
-                 ~duration:(Time_ns.Span.of_sec duration_seconds)
-                 ~sample_capacity ~checkpoint_every ~reset_on_start)
-              ~f:(fun result ->
+                 ~duration_seconds ~sample_capacity ~checkpoint_every
+                 ~reset_on_start) ~f:(fun result ->
                 Result.map result ~f:(fun snapshot ->
                     print_endline (Metrics.report snapshot))
                 |> Result.map_error ~f:(fun error ->

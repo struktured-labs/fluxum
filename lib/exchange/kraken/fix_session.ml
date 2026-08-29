@@ -18,6 +18,7 @@ type error =
   | `Sent_but_not_checkpointed of int * Error.t
   | `State of Error.t
   | `Stopped
+  | `Timing_not_enabled
   | `Wrong_session_identity of string
   | `Wrong_session_type of string ]
 [@@deriving sexp_of]
@@ -132,6 +133,7 @@ module Config = struct
     logon_timeout : Time_ns.Span.t;
     liveness_timeout : Time_ns.Span.t;
     reset_on_start : bool;
+    capture_timing : bool;
   }
 
   let create ~endpoint ~sender_comp_id ~authentication ~state_path
@@ -140,7 +142,7 @@ module Config = struct
       ?(max_frame_length = 1024 * 1024) ?(checkpoint_every = 1)
       ?(event_capacity = 4_096) ?(gap_buffer_capacity = 4_096)
       ?(journal_capacity = 65_536) ?(logon_timeout = Time_ns.Span.of_sec 10.)
-      ?liveness_timeout ?(reset_on_start = false) () =
+      ?liveness_timeout ?(reset_on_start = false) ?(capture_timing = false) () =
     let open Result.Let_syntax in
     let%bind () =
       Fix.Header.create ~sender_comp_id ~msg_seq_num:1
@@ -202,6 +204,7 @@ module Config = struct
         logon_timeout;
         liveness_timeout;
         reset_on_start;
+        capture_timing;
       }
 
   let endpoint t = t.endpoint
@@ -245,11 +248,7 @@ module Client = struct
   (** Administrative entries retain only their original SendingTime; this is
       enough for a gap fill and avoids journaling Logon credentials. *)
 
-  type inbound = {
-    frame : Fix.Codec.Frame.t;
-    received_at : Time_ns.t;
-    decoded_at : Time_ns.t;
-  }
+  type timing = { received_at : Time_ns.t; decoded_at : Time_ns.t }
 
   type message = {
     frame : Fix.Codec.Frame.t;
@@ -262,7 +261,15 @@ module Client = struct
     | Connecting
     | Connected
     | Disconnected of Error.t
-    | Message of message
+    | Message of Fix.Codec.Frame.t
+
+  module Timed_event = struct
+    type t =
+      | Connecting
+      | Connected
+      | Disconnected of Error.t
+      | Message of message
+  end
 
   type connector =
     stop:unit Deferred.t ->
@@ -278,7 +285,8 @@ module Client = struct
     sequencer : unit Throttle.Sequencer.t;
     mutable messages_since_checkpoint : int;
     mutable journal : journal_entry Int.Map.t;
-    mutable pending_incoming : inbound Int.Map.t;
+    mutable pending_incoming : Fix.Codec.Frame.t Int.Map.t;
+    mutable pending_timings : timing Int.Map.t;
     mutable resend_requested_through : int option;
     (* Connection lifecycle mutation is confined to [run_connection]. *)
     mutable live : live option;
@@ -287,19 +295,70 @@ module Client = struct
     stop : unit Ivar.t;
     events_reader : event Pipe.Reader.t;
     events_writer : event Pipe.Writer.t;
+    timed_events_reader : Timed_event.t Pipe.Reader.t;
+    timed_events_writer : Timed_event.t Pipe.Writer.t;
   }
 
   let error_to_error error = Error.create_s (sexp_of_error error)
 
-  let publish t event =
-    match Pipe.is_closed t.events_writer with
+  let writer_error t writer =
+    match Pipe.is_closed writer with
     | true -> Error `Event_stream_closed
     | false -> (
-        match Pipe.length t.events_writer >= t.config.event_capacity with
+        match Pipe.length writer >= t.config.event_capacity with
         | true -> Error (`Event_queue_full t.config.event_capacity)
-        | false ->
-            Pipe.write_without_pushback t.events_writer event;
-            Ok ())
+        | false -> Ok ())
+
+  let publish t event timed_event =
+    let open Result.Let_syntax in
+    let%bind timed_event =
+      match (t.config.capture_timing, timed_event) with
+      | false, _ -> Ok None
+      | true, Some timed_event -> Ok (Some timed_event)
+      | true, None ->
+          Error
+            (`State
+               (Error.of_string
+                  "FIX timing publication was missing from the timed event \
+                   stream"))
+    in
+    let%bind () = writer_error t t.events_writer in
+    let%bind () =
+      match timed_event with
+      | None -> Ok ()
+      | Some _ -> writer_error t t.timed_events_writer
+    in
+    Pipe.write_without_pushback t.events_writer event;
+    (match timed_event with
+    | None -> ()
+    | Some timed_event ->
+        Pipe.write_without_pushback t.timed_events_writer timed_event);
+    Ok ()
+
+  let publish_connecting t = publish t Connecting (Some Timed_event.Connecting)
+  let publish_connected t = publish t Connected (Some Timed_event.Connected)
+
+  let publish_disconnected t error =
+    publish t (Disconnected error) (Some (Timed_event.Disconnected error))
+
+  let publish_message t frame timing =
+    match (t.config.capture_timing, timing) with
+    | false, None | false, Some _ -> publish t (Message frame) None
+    | true, Some ({ received_at; decoded_at } : timing) ->
+        publish t (Message frame)
+          (Some
+             (Timed_event.Message
+                {
+                  frame;
+                  received_at;
+                  decoded_at;
+                  delivered_at = Time_ns.now ();
+                }))
+    | true, None ->
+        Error
+          (`State
+             (Error.of_string
+                "FIX message timing was missing from the timed event stream"))
 
   let create_with_connector config ~connector =
     let%bind state =
@@ -316,6 +375,9 @@ module Client = struct
         let events_reader, events_writer =
           Pipe.create ~size_budget:config.event_capacity ()
         in
+        let timed_events_reader, timed_events_writer =
+          Pipe.create ~size_budget:config.event_capacity ()
+        in
         return
           (Ok
              {
@@ -326,6 +388,7 @@ module Client = struct
                messages_since_checkpoint = 0;
                journal = Int.Map.empty;
                pending_incoming = Int.Map.empty;
+               pending_timings = Int.Map.empty;
                resend_requested_through = None;
                live = None;
                running = false;
@@ -333,6 +396,8 @@ module Client = struct
                stop = Ivar.create ();
                events_reader;
                events_writer;
+               timed_events_reader;
+               timed_events_writer;
              })
 
   let tls_config endpoint =
@@ -378,6 +443,12 @@ module Client = struct
       ~connector:(tls_connector ~connect_timeout:config.Config.connect_timeout)
 
   let events t = t.events_reader
+
+  let timed_events t =
+    match t.config.capture_timing with
+    | true -> Ok t.timed_events_reader
+    | false -> Error `Timing_not_enabled
+
   let state t = t.sequence_state
 
   let session_target t =
@@ -716,8 +787,7 @@ module Client = struct
     | "2" -> handle_resend_request_unlocked t live frame
     | _ -> return (Ok ())
 
-  let process_accepted_unlocked t live (inbound : inbound) accepted =
-    let frame = inbound.frame in
+  let process_accepted_unlocked t live frame timing accepted =
     let%bind checkpointed =
       match accepted with
       | true -> maybe_checkpoint_unlocked t
@@ -730,7 +800,7 @@ module Client = struct
           match Fix.Codec.Frame.msg_type frame with
           | "A" when Ivar.is_empty live.logged_on ->
               Ivar.fill_exn live.logged_on ();
-              publish t Connected
+              publish_connected t
           | _ -> Ok ()
         in
         match connected with
@@ -739,16 +809,7 @@ module Client = struct
             let%bind response = handle_inbound_unlocked t live frame in
             match response with
             | Error _ as error -> return error
-            | Ok () ->
-                publish t
-                  (Message
-                     {
-                       frame;
-                       received_at = inbound.received_at;
-                       decoded_at = inbound.decoded_at;
-                       delivered_at = Time_ns.now ();
-                     })
-                |> return))
+            | Ok () -> publish_message t frame timing |> return))
 
   let request_gap_unlocked t live ~expected ~received =
     let requested_through = received - 1 in
@@ -768,7 +829,7 @@ module Client = struct
         | Error _ -> ());
         result
 
-  let buffer_gap_unlocked t live inbound ~expected ~received =
+  let buffer_gap_unlocked t live frame timing ~expected ~received =
     let already_buffered = Map.mem t.pending_incoming received in
     match
       ( already_buffered,
@@ -779,7 +840,12 @@ module Client = struct
     | true, _ -> request_gap_unlocked t live ~expected ~received
     | false, false ->
         t.pending_incoming <-
-          Map.set t.pending_incoming ~key:received ~data:inbound;
+          Map.set t.pending_incoming ~key:received ~data:frame;
+        (match timing with
+        | None -> ()
+        | Some timing ->
+            t.pending_timings <-
+              Map.set t.pending_timings ~key:received ~data:timing);
         request_gap_unlocked t live ~expected ~received
 
   let clear_completed_resend t =
@@ -794,16 +860,20 @@ module Client = struct
     t.pending_incoming <-
       Map.filter_keys t.pending_incoming ~f:(fun sequence_number ->
           sequence_number >= expected);
+    t.pending_timings <-
+      Map.filter_keys t.pending_timings ~f:(fun sequence_number ->
+          sequence_number >= expected);
     match Map.find t.pending_incoming expected with
-    | Some inbound -> (
+    | Some frame -> (
         t.pending_incoming <- Map.remove t.pending_incoming expected;
-        let frame = inbound.frame in
+        let timing = Map.find t.pending_timings expected in
+        t.pending_timings <- Map.remove t.pending_timings expected;
         let accepted = update_incoming_sequence_unlocked t frame in
         match accepted with
         | Error _ as error -> return error
         | Ok accepted -> (
             let%bind processed =
-              process_accepted_unlocked t live inbound accepted
+              process_accepted_unlocked t live frame timing accepted
             in
             match processed with
             | Error _ as error -> return error
@@ -831,8 +901,7 @@ module Client = struct
     in
     identity
 
-  let process_frame_unlocked t live (inbound : inbound) =
-    let frame = inbound.frame in
+  let process_frame_unlocked t live frame timing =
     match t.live with
     | None -> return (Error `Not_connected)
     | Some current when not (phys_equal current live) ->
@@ -846,34 +915,34 @@ module Client = struct
             let received = Fix.Codec.Frame.sequence_number frame in
             match Int.compare received expected with
             | comparison when comparison > 0 ->
-                buffer_gap_unlocked t live inbound ~expected ~received
+                buffer_gap_unlocked t live frame timing ~expected ~received
             | _ -> (
                 let accepted = update_incoming_sequence_unlocked t frame in
                 match accepted with
                 | Error _ as error -> return error
                 | Ok accepted -> (
                     let%bind processed =
-                      process_accepted_unlocked t live inbound accepted
+                      process_accepted_unlocked t live frame timing accepted
                     in
                     match processed with
                     | Error _ as error -> return error
                     | Ok () -> drain_pending_unlocked t live))))
 
-  let process_frame t live inbound =
+  let process_frame t live frame timing =
     Throttle.enqueue t.sequencer (fun () ->
-        process_frame_unlocked t live inbound)
+        process_frame_unlocked t live frame timing)
 
   let read_loop t live =
     let framer =
       Fix.Codec.Framer.create ~max_frame_length:t.config.max_frame_length ()
     in
     let buffer = Bytes.create 65_536 in
-    let rec process = function
+    let rec process timing = function
       | [] -> return (Ok ())
-      | inbound :: frames -> (
-          let%bind result = process_frame t live inbound in
+      | frame :: frames -> (
+          let%bind result = process_frame t live frame timing in
           match result with
-          | Ok () -> process frames
+          | Ok () -> process timing frames
           | Error _ as error -> return error)
     in
     let rec loop () =
@@ -881,17 +950,20 @@ module Client = struct
       match read with
       | `Eof -> return (Error (`Io (Error.of_string "Kraken FIX EOF")))
       | `Ok length -> (
-          let received_at = Time_ns.now () in
+          let received_at =
+            match t.config.capture_timing with
+            | false -> None
+            | true -> Some (Time_ns.now ())
+          in
           let chunk = Bytes.To_string.sub buffer ~pos:0 ~len:length in
           match Fix.Codec.Framer.feed framer chunk with
           | Error error -> return (Error (`Fix (error :> Fix.error)))
           | Ok frames -> (
-              let decoded_at = Time_ns.now () in
-              let inbound =
-                List.map frames ~f:(fun frame ->
-                    { frame; received_at; decoded_at })
+              let timing =
+                Option.map received_at ~f:(fun received_at ->
+                    { received_at; decoded_at = Time_ns.now () })
               in
-              let%bind result = process inbound in
+              let%bind result = process timing frames in
               match result with
               | Ok () -> loop ()
               | Error _ as error -> return error))
@@ -987,6 +1059,7 @@ module Client = struct
       }
     in
     t.pending_incoming <- Int.Map.empty;
+    t.pending_timings <- Int.Map.empty;
     t.resend_requested_through <- None;
     t.live <- Some live;
     let%bind logon = send_logon t live in
@@ -1022,7 +1095,7 @@ module Client = struct
     match Ivar.is_full t.stop with
     | true -> return (Ok ())
     | false -> (
-        let connecting = publish t Connecting in
+        let connecting = publish_connecting t in
         match connecting with
         | Error _ as error -> return error
         | Ok () -> (
@@ -1031,7 +1104,7 @@ module Client = struct
             in
             match connected with
             | Error error -> (
-                match publish t (Disconnected error) with
+                match publish_disconnected t error with
                 | Error _ as publish_error -> return publish_error
                 | Ok () ->
                     let%bind () =
@@ -1052,7 +1125,7 @@ module Client = struct
                     return (Error error)
                 | Error `Stopped -> return (Ok ())
                 | Error error -> (
-                    match publish t (Disconnected (error_to_error error)) with
+                    match publish_disconnected t (error_to_error error) with
                     | Error _ as publish_error -> return publish_error
                     | Ok () ->
                         let%bind () =
@@ -1073,6 +1146,7 @@ module Client = struct
         let%map result = reconnect_loop t in
         t.running <- false;
         Pipe.close t.events_writer;
+        Pipe.close t.timed_events_writer;
         result
 
   let send t outbound =
