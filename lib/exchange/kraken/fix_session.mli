@@ -133,8 +133,8 @@ module Client : sig
 
   val timed_events : t -> (Timed_event.t Pipe.Reader.t, error) Result.t
   (** Available only when the config was created with [capture_timing:true].
-      Timed and legacy streams are independently bounded, so a caller that
-      requests both must consume both. *)
+      Enabling timing publishes both the timed and legacy streams. They are
+      independently bounded, so callers must continuously consume both. *)
 
   val state : t -> Sequence_state.t
 

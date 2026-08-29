@@ -287,13 +287,11 @@ let duration_span duration_seconds =
   |> Result.map_error ~f:(fun _error -> `Invalid_duration duration_seconds)
 
 let consume_until_deadline ~client ~events ~metrics ~request ~deadline =
+  let deadline_reached = Clock_ns.at deadline >>| fun () -> `Deadline in
   let rec loop () =
     let%bind next =
       Deferred.any
-        [
-          (Pipe.read events >>| fun event -> `Event event);
-          (Clock_ns.at deadline >>| fun () -> `Deadline);
-        ]
+        [ (Pipe.read events >>| fun event -> `Event event); deadline_reached ]
     in
     match next with
     | `Deadline -> return (Ok ())
