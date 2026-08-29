@@ -140,6 +140,7 @@ let run_tests () =
   test_metrics ();
   let%bind () = expect_invalid_duration 0. in
   let%bind () = expect_invalid_duration Float.nan in
+  let%bind () = expect_invalid_duration Float.max_value in
   let%bind () = expect_invalid_symbols [] in
   let%bind () = expect_invalid_symbols [ "   " ] in
   print_endline "Kraken FIX probe tests passed";

@@ -278,6 +278,12 @@ let validate_duration_seconds duration_seconds =
   | true -> Ok ()
   | false -> Error (`Invalid_duration duration_seconds)
 
+let duration_span duration_seconds =
+  let open Result.Let_syntax in
+  let%bind () = validate_duration_seconds duration_seconds in
+  Or_error.try_with (fun () -> Time_ns.Span.of_sec duration_seconds)
+  |> Result.map_error ~f:(fun _error -> `Invalid_duration duration_seconds)
+
 let consume_until_deadline ~client ~events ~metrics ~request ~deadline =
   let rec loop () =
     let%bind next =
@@ -309,15 +315,14 @@ let run ~environment ~sender_comp_id ~symbols ~depth ~state_path
     ~duration_seconds ~sample_capacity ~checkpoint_every ~reset_on_start =
   let validated =
     let open Result.Let_syntax in
-    let%bind () = validate_duration_seconds duration_seconds in
+    let%bind duration = duration_span duration_seconds in
     let%bind symbols = normalize_symbols symbols in
     let%map metrics = Metrics.create ~sample_capacity in
-    (symbols, metrics)
+    (duration, symbols, metrics)
   in
   match validated with
   | Error _ as error -> return error
-  | Ok (symbols, metrics) -> (
-      let duration = Time_ns.Span.of_sec duration_seconds in
+  | Ok (duration, symbols, metrics) -> (
       let endpoint =
         Fix.Endpoint.create ~environment ~service:Spot_market_data_l2
       in
