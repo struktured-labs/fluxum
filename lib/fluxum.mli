@@ -7,6 +7,7 @@ module Exchange_intf = Exchange_intf
 module Json = Json
 module Cli_args = Cli_args
 module Normalize_common = Normalize_common
+module Market_making = Market_making
 module Order_book_incremental = Order_book_incremental
 
 (* Unified interfaces *)

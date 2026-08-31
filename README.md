@@ -9,6 +9,7 @@ A high-performance, multi-venue cryptocurrency trading library built with OCaml,
 - **Prediction Markets**: Gemini Predictions API with full trading, order book streaming, and normalized types
 - **Unified Order Book**: Common `Order_book_base` functor across all exchanges
 - **Consolidated Order Book**: Aggregate books from multiple exchanges in real-time with arbitrage detection
+- **Market-Making Toolkit**: Fair value, inventory-skewed multi-level quotes, risk limits, and quote reconciliation
 - **WebSocket Streaming**: Real-time market data with auto-reconnect and session management
 - **Ethereum Library**: ABI encoding, ERC-20, RLP, transaction building, JSON-RPC
 - **Normalized Types**: Exchange-agnostic `Types.Order`, `Types.Trade`, `Types.Balance`, etc. via `Exchange_intf.S`
@@ -166,6 +167,47 @@ dune exec fluxum -- pool --help
 dune exec fluxum -- uniswapv3 --help
 ```
 
+### Generate Market-Making Quotes
+
+`Fluxum.Market_making` is a pure, exchange-agnostic layer. It produces desired
+post-only quotes; callers retain control of order submission and cancellation.
+
+```ocaml
+let book =
+  Fluxum.Market_making.Top_of_book.create
+    ~bid_price:67_000. ~bid_qty:2.5
+    ~ask_price:67_001. ~ask_qty:1.0
+in
+let config =
+  Fluxum.Market_making.Config.{
+    default with
+    tick_size = 0.10;
+    lot_size = 0.0001;
+    base_order_qty = 0.01;
+    levels = 3;
+    max_position = 0.25;
+    maker_fee_bps = 1.0;
+    target_edge_bps = 2.0;
+  }
+in
+match Fluxum.Market_making.generate
+        ~config ~book ~inventory:0.05 ~volatility_bps:4.0 () with
+| Error error ->
+  eprintf "%s\n"
+    (Sexp.to_string_hum (Fluxum.Market_making.sexp_of_error error))
+| Ok desired ->
+  List.iter (Fluxum.Market_making.quotes desired) ~f:(fun quote ->
+    printf "%s %.4f @ %.2f\n"
+      (Fluxum.Types.Side.to_string quote.side) quote.qty quote.price)
+```
+
+The generator supports midpoint or microprice fair value, maker-fee and
+volatility spread floors, inventory-based price/size skew, tick and lot
+rounding, price bounds, minimum notional, multiple levels, and aggregate
+position caps. `Market_making.reconcile` compares desired quotes with working
+orders and returns separate cancel/keep/place lists with configurable churn
+tolerances.
+
 ## Architecture
 
 ### Core Layer (`lib/`)
@@ -181,6 +223,7 @@ dune exec fluxum -- uniswapv3 --help
 | `session_intf.ml` | WebSocket session management with auto-reconnect |
 | `normalize_common.ml` | Safe float parsing (`Float_conv`), shared normalization helpers |
 | `consolidated_order_book.ml` | Multi-exchange aggregation with exchange attribution |
+| `market_making.ml` | Inventory-aware quote generation and order reconciliation |
 | `consolidated_pools.ml` | Multi-protocol DeFi pool aggregation |
 
 ### Exchange Adapter Pattern

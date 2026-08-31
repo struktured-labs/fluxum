@@ -49,6 +49,14 @@
  (flags :standard -open Core))
 
 (test
+ (name test_market_making)
+ (modules test_market_making)
+ (libraries core fluxum)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core))
+
+(test
  (name test_order_book_incremental)
  (modules test_order_book_incremental)
  (libraries core fluxum)
