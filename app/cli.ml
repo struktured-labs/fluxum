@@ -2262,6 +2262,389 @@ let eth_wallet_transfers_cmd =
         <*> last_blocks
         <*> rpc_url)
 
+(* Polymarket — read-only data feed.
+   Exposes Feed_only_adapter operations (no trading) for the canonical
+   open prediction market. US persons can query data freely; trading is
+   geo-restricted (CFTC settlement Jan 2022). *)
+let polymarket_format_err = function
+  | `Http (code, body) -> sprintf "http %d: %s" code (String.prefix body 200)
+  | `Network m -> sprintf "network: %s" m
+  | `Json_parse m -> sprintf "parse: %s" m
+  | `Not_found m -> sprintf "not_found: %s" m
+  | `Rate_limited m -> sprintf "rate_limited: %s" (String.prefix m 200)
+
+let polymarket_print_err name err =
+  eprintf "ERROR [%s]: %s\n" name (polymarket_format_err err);
+  exit 1
+
+let polymarket_list_cmd =
+  Command.async
+    ~summary:"List active Polymarket events"
+    Command.Param.(
+      let limit =
+        flag
+          "-limit"
+          (optional_with_default 10 int)
+          ~doc:"N Maximum events to fetch (default 10)"
+      and category =
+        flag "-category" (optional string) ~doc:"STRING Filter to a category"
+      and include_resolved =
+        flag
+          "-include-resolved"
+          no_arg
+          ~doc:" Include recently-resolved events"
+      in
+        return (fun limit category include_resolved () ->
+          let filter =
+            { Feed_only_adapter.List_filter.limit = Some limit
+            ; category
+            ; include_resolved
+            }
+          in
+          let%bind r = Polymarket.list_events ~filter () in
+            match r with
+            | Error e -> polymarket_print_err "list" e
+            | Ok events ->
+              List.iter events ~f:(fun (e : Feed_only_adapter.Event.t) ->
+                printf
+                  "%s  %s  (%d outcomes%s)\n"
+                  e.id
+                  e.title
+                  (Array.length e.outcomes)
+                  (match e.is_resolved with
+                   | true -> ", resolved"
+                   | false -> ""));
+              Deferred.unit)
+        <*> limit
+        <*> category
+        <*> include_resolved)
+
+let polymarket_event_cmd =
+  Command.async
+    ~summary:"Show full details of one Polymarket event"
+    Command.Param.(
+      let event_id =
+        flag "-id" (required string) ~doc:"STRING Polymarket event id"
+      in
+        return (fun event_id () ->
+          let%bind r = Polymarket.get_event ~event_id in
+            match r with
+            | Error e -> polymarket_print_err "event" e
+            | Ok ev ->
+              printf "id:          %s\n" ev.id;
+              printf "title:       %s\n" ev.title;
+              printf "category:    %s\n"
+                (Option.value ev.category ~default:"-");
+              printf "is_resolved: %b\n" ev.is_resolved;
+              (match ev.resolution_ts with
+               | Some t -> printf "resolves_at: %s\n" (Time_float_unix.to_string t)
+               | None -> ());
+              printf "outcomes:\n";
+              Array.iter ev.outcomes ~f:(fun (o : Feed_only_adapter.Outcome.t) ->
+                printf "  - %s  (token_id=%s)\n"
+                  o.label
+                  (Option.value o.token_id ~default:o.id));
+              Deferred.unit)
+        <*> event_id)
+
+let polymarket_book_cmd =
+  Command.async
+    ~summary:"Show orderbook for one Polymarket outcome"
+    Command.Param.(
+      let outcome_id =
+        flag
+          "-outcome-id"
+          (required string)
+          ~doc:"STRING CLOB token_id of the outcome"
+      and depth =
+        flag "-depth" (optional int) ~doc:"N Max levels per side"
+      in
+        return (fun outcome_id depth () ->
+          let%bind r = Polymarket.get_book ~outcome_id ?depth () in
+            match r with
+            | Error e -> polymarket_print_err "book" e
+            | Ok (book : Feed_only_adapter.Book.t) ->
+              printf "%-12s %-12s\n" "BID size@px" "ASK size@px";
+              let n =
+                Int.max (Array.length book.bids) (Array.length book.asks)
+              in
+                for i = 0 to n - 1 do
+                  let bid_str =
+                    match
+                      match i < Array.length book.bids with
+                      | true -> Some book.bids.(i)
+                      | false -> None
+                    with
+                    | Some (l : Feed_only_adapter.Book_level.t) ->
+                      sprintf "%.2f@%.4f" l.size l.price
+                    | None -> "-"
+                  in
+                  let ask_str =
+                    match
+                      match i < Array.length book.asks with
+                      | true -> Some book.asks.(i)
+                      | false -> None
+                    with
+                    | Some (l : Feed_only_adapter.Book_level.t) ->
+                      sprintf "%.2f@%.4f" l.size l.price
+                    | None -> "-"
+                  in
+                    printf "%-12s %-12s\n" bid_str ask_str
+                done;
+                Deferred.unit)
+        <*> outcome_id
+        <*> depth)
+
+let polymarket_trades_cmd =
+  Command.async
+    ~summary:"Show recent trades for one Polymarket outcome"
+    Command.Param.(
+      let outcome_id =
+        flag
+          "-outcome-id"
+          (required string)
+          ~doc:"STRING CLOB token_id of the outcome"
+      and limit =
+        flag
+          "-limit"
+          (optional_with_default 20 int)
+          ~doc:"N Max trades to fetch (default 20)"
+      in
+        return (fun outcome_id limit () ->
+          let%bind r = Polymarket.get_recent_trades ~outcome_id ~limit () in
+            match r with
+            | Error e -> polymarket_print_err "trades" e
+            | Ok trades ->
+              List.iter trades ~f:(fun (t : Feed_only_adapter.Trade.t) ->
+                let side =
+                  match t.aggressor with
+                  | Some `Buy -> "BUY "
+                  | Some `Sell -> "SELL"
+                  | None -> "----"
+                in
+                  printf
+                    "%s  %s  %.4f @ %.6f  tx=%s\n"
+                    (Time_float_unix.to_string t.ts)
+                    side
+                    t.size
+                    t.price
+                    (Option.value t.trade_id ~default:"-"));
+              Deferred.unit)
+        <*> outcome_id
+        <*> limit)
+
+let polymarket_command =
+  Command.group
+    ~summary:"Polymarket — read-only data feed (US-geo-restricted for trading)"
+    [ ("list", polymarket_list_cmd)
+    ; ("event", polymarket_event_cmd)
+    ; ("book", polymarket_book_cmd)
+    ; ("trades", polymarket_trades_cmd) ]
+
+(* --- Pyth Network — Spot_feed --- *)
+
+let pyth_format_err = function
+  | `Http (c, b) -> sprintf "http %d: %s" c (String.prefix b 200)
+  | `Network m -> sprintf "network: %s" m
+  | `Json_parse m -> sprintf "parse: %s" m
+  | `Not_found m -> sprintf "not_found: %s" m
+  | `Rate_limited m -> sprintf "rate_limited: %s" (String.prefix m 200)
+  | `Symbol_unknown s -> sprintf "symbol_unknown: %s" s
+
+let pyth_print_err name e =
+  eprintf "ERROR [%s]: %s\n" name (pyth_format_err e);
+  exit 1
+
+let pyth_list_cmd =
+  Command.async
+    ~summary:"List Pyth price feeds (filter by query string)"
+    Command.Param.(
+      let query =
+        flag "-query" (optional_with_default "" string)
+          ~doc:"STRING Filter symbols (e.g. BTC, ETH, SOL)"
+      and limit =
+        flag "-limit" (optional_with_default 20 int)
+          ~doc:"N Max results (default 20)"
+      in
+        return (fun query limit () ->
+          let%bind r = Pyth.list_symbols ~query ~limit () in
+            match r with
+            | Error e -> pyth_print_err "list" e
+            | Ok syms ->
+              List.iter syms ~f:(fun (s : Feed_only_adapter.Spot_feed.Symbol_info.t) ->
+                printf "%s [%s]\n"
+                  s.symbol
+                  (Option.value s.asset_class ~default:"-"));
+              Deferred.unit)
+        <*> query
+        <*> limit)
+
+let pyth_price_cmd =
+  Command.async
+    ~summary:"Get latest price for a Pyth feed (by feed_id or symbol)"
+    Command.Param.(
+      let symbol =
+        flag "-symbol" (required string)
+          ~doc:"STRING Pyth feed_id (64-hex) or symbol"
+      in
+        return (fun symbol () ->
+          let%bind r = Pyth.get_price ~symbol in
+            match r with
+            | Error e -> pyth_print_err "price" e
+            | Ok (p : Feed_only_adapter.Spot_feed.Price.t) ->
+              printf
+                "%s  $%g  (conf=%s, ts=%s)\n"
+                p.symbol
+                p.price
+                (Option.value_map p.confidence ~default:"-" ~f:(sprintf "%g"))
+                (Time_float_unix.to_string p.ts);
+              Deferred.unit)
+        <*> symbol)
+
+let pyth_command =
+  Command.group
+    ~summary:"Pyth Network — read-only oracle price feeds"
+    [ ("list", pyth_list_cmd); ("price", pyth_price_cmd) ]
+
+(* --- Manifold — Feed_only_adapter (event shape) --- *)
+
+let manifold_format_err = function
+  | `Http (c, b) -> sprintf "http %d: %s" c (String.prefix b 200)
+  | `Network m -> sprintf "network: %s" m
+  | `Json_parse m -> sprintf "parse: %s" m
+  | `Not_found m -> sprintf "not_found: %s" m
+  | `Rate_limited m -> sprintf "rate_limited: %s" (String.prefix m 200)
+
+let manifold_print_err name e =
+  eprintf "ERROR [%s]: %s\n" name (manifold_format_err e);
+  exit 1
+
+let manifold_list_cmd =
+  Command.async
+    ~summary:"List active Manifold markets"
+    Command.Param.(
+      let limit =
+        flag "-limit" (optional_with_default 10 int) ~doc:"N Max events"
+      and include_resolved =
+        flag "-include-resolved" no_arg ~doc:" Include recently-resolved"
+      in
+        return (fun limit include_resolved () ->
+          let filter =
+            { Feed_only_adapter.List_filter.limit = Some limit
+            ; category = None
+            ; include_resolved
+            }
+          in
+          let%bind r = Manifold.list_events ~filter () in
+            match r with
+            | Error e -> manifold_print_err "list" e
+            | Ok evs ->
+              List.iter evs ~f:(fun (e : Feed_only_adapter.Event.t) ->
+                printf "%s  %s  (%d outcomes%s)\n"
+                  e.id
+                  (String.prefix e.title 80)
+                  (Array.length e.outcomes)
+                  (match e.is_resolved with true -> ", resolved" | false -> ""));
+              Deferred.unit)
+        <*> limit
+        <*> include_resolved)
+
+let manifold_event_cmd =
+  Command.async
+    ~summary:"Show full details of one Manifold market"
+    Command.Param.(
+      let event_id =
+        flag "-id" (required string) ~doc:"STRING Manifold market id"
+      in
+        return (fun event_id () ->
+          let%bind r = Manifold.get_event ~event_id in
+            match r with
+            | Error e -> manifold_print_err "event" e
+            | Ok ev ->
+              printf "id:           %s\n" ev.id;
+              printf "title:        %s\n" ev.title;
+              printf "is_resolved:  %b\n" ev.is_resolved;
+              (match ev.resolved_outcome_id with
+               | Some r -> printf "resolved_to:  %s\n" r
+               | None -> ());
+              printf "outcomes:\n";
+              Array.iter ev.outcomes ~f:(fun (o : Feed_only_adapter.Outcome.t) ->
+                printf "  - %-20s prob=%s\n"
+                  o.label
+                  (Option.value o.token_id ~default:"?"));
+              Deferred.unit)
+        <*> event_id)
+
+let manifold_command =
+  Command.group
+    ~summary:"Manifold Markets — read-only play-money prediction market"
+    [ ("list", manifold_list_cmd); ("event", manifold_event_cmd) ]
+
+(* --- DefiLlama — Aggregate_feed --- *)
+
+let defillama_format_err = function
+  | `Http (c, b) -> sprintf "http %d: %s" c (String.prefix b 200)
+  | `Network m -> sprintf "network: %s" m
+  | `Json_parse m -> sprintf "parse: %s" m
+  | `Not_found m -> sprintf "not_found: %s" m
+  | `Rate_limited m -> sprintf "rate_limited: %s" (String.prefix m 200)
+  | `Entity_unknown s -> sprintf "entity_unknown: %s" s
+
+let defillama_print_err name e =
+  eprintf "ERROR [%s]: %s\n" name (defillama_format_err e);
+  exit 1
+
+let defillama_list_cmd =
+  Command.async
+    ~summary:"List protocols (filter by category, sorted by TVL desc)"
+    Command.Param.(
+      let category =
+        flag "-category" (optional string) ~doc:"STRING Filter (e.g. DEX, Lending)"
+      and limit =
+        flag "-limit" (optional_with_default 20 int) ~doc:"N Max protocols"
+      in
+        return (fun category limit () ->
+          let%bind r = Defillama.list_entities ?category ~limit () in
+            match r with
+            | Error e -> defillama_print_err "list" e
+            | Ok ps ->
+              List.iter ps ~f:(fun (p : Feed_only_adapter.Aggregate_feed.Stats.t) ->
+                printf
+                  "%-30s  $%-12s  %s\n"
+                  (String.prefix p.name 30)
+                  (Option.value_map p.tvl_usd ~default:"-"
+                     ~f:(fun x -> sprintf "%.0f" x))
+                  (Option.value p.category ~default:"-"));
+              Deferred.unit)
+        <*> category
+        <*> limit)
+
+let defillama_protocol_cmd =
+  Command.async
+    ~summary:"Show one protocol's TVL + metadata"
+    Command.Param.(
+      let slug =
+        flag "-slug" (required string) ~doc:"STRING Protocol slug (e.g. uniswap)"
+      in
+        return (fun slug () ->
+          let%bind r = Defillama.get_entity ~slug in
+            match r with
+            | Error e -> defillama_print_err "protocol" e
+            | Ok (p : Feed_only_adapter.Aggregate_feed.Stats.t) ->
+              printf "name:     %s\n" p.name;
+              printf "category: %s\n" (Option.value p.category ~default:"-");
+              printf "chain:    %s\n" (Option.value p.chain ~default:"-");
+              printf "tvl_usd:  $%s\n"
+                (Option.value_map p.tvl_usd ~default:"-" ~f:(sprintf "%.0f"));
+              Deferred.unit)
+        <*> slug)
+
+let defillama_command =
+  Command.group
+    ~summary:"DefiLlama — read-only TVL/protocol aggregator"
+    [ ("list", defillama_list_cmd)
+    ; ("protocol", defillama_protocol_cmd) ]
+
 let eth_wallet_command =
   Command.group
     ~summary:"Read-only Ethereum wallet introspection"
@@ -2288,6 +2671,10 @@ let command =
     ; ("1inch", oneinch_command)
     ; ("uniswapv3", uniswapv3_command)
     ; ("kalshi", kalshi_command)
+    ; ("polymarket", polymarket_command)
+    ; ("manifold", manifold_command)
+    ; ("pyth", pyth_command)
+    ; ("defillama", defillama_command)
     ; ("gateio", gateio_command)
     ; ("kucoin", kucoin_command)
     ; ("eth-wallet", eth_wallet_command)

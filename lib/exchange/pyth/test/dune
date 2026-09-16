@@ -1,0 +1,7 @@
+(test
+ (name test_pyth)
+ (modules test_pyth)
+ (libraries core_unix.command_unix async pyth feed_only_adapter)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))

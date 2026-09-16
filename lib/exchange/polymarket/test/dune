@@ -1,0 +1,7 @@
+(test
+ (name test_polymarket)
+ (modules test_polymarket)
+ (libraries core_unix.command_unix async polymarket feed_only_adapter)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core -open Async))
