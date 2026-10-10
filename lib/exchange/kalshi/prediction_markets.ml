@@ -392,29 +392,42 @@ module Error = struct
     [ `Http of int * string
     | `Json_parse_error of string
     | `Api_error of string
+    | `Network of string
     | `Not_found
     | `Unauthorized
     | `Rate_limited ]
   [@@deriving sexp]
 end
 
+(** Wrap a cohttp call in [Monitor.try_with] so that uncaught network
+    exceptions (connection drops, DNS failures, TLS handshake errors)
+    become [`Network msg] error values rather than escaping and aborting
+    the calling monitor. Matches the pattern used by every other fluxum
+    REST adapter (kraken, coinbase, hyperliquid, jupiter, dydx, bitrue). *)
+let with_network_capture f =
+  Monitor.try_with f
+  >>| function
+  | Ok r -> r
+  | Error exn -> Error (`Network (Exn.to_string exn))
+
 let http_get ~host:_ uri =
-  Cohttp_async.Client.get uri
-  >>= fun (response, body) ->
-  let status = Cohttp.Response.status response in
-  let code = Cohttp.Code.code_of_status status in
-  Cohttp_async.Body.to_string body
-  >>| fun body_str ->
-  match code with
-  | 200 ->
-    (match Yojson.Safe.from_string body_str with
-     | json -> Ok json
-     | exception Yojson.Json_error msg ->
-       Error (`Json_parse_error (sprintf "JSON parse error: %s" msg)))
-  | 401 -> Error `Unauthorized
-  | 404 -> Error `Not_found
-  | 429 -> Error `Rate_limited
-  | _ -> Error (`Http (code, body_str))
+  with_network_capture (fun () ->
+    Cohttp_async.Client.get uri
+    >>= fun (response, body) ->
+    let status = Cohttp.Response.status response in
+    let code = Cohttp.Code.code_of_status status in
+    Cohttp_async.Body.to_string body
+    >>| fun body_str ->
+    match code with
+    | 200 ->
+      (match Yojson.Safe.from_string body_str with
+       | json -> Ok json
+       | exception Yojson.Json_error msg ->
+         Error (`Json_parse_error (sprintf "JSON parse error: %s" msg)))
+    | 401 -> Error `Unauthorized
+    | 404 -> Error `Not_found
+    | 429 -> Error `Rate_limited
+    | _ -> Error (`Http (code, body_str)))
 
 let http_get_public ~host path ?query () =
   let uri = Uri.make ~scheme:"https" ~host ~path ?query () in
@@ -424,22 +437,23 @@ let http_get_authed ~(cfg : (module Cfg.S)) path ?query () =
   let module Cfg = (val cfg : Cfg.S) in
   let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path ?query () in
   let headers = Auth.headers cfg ~http_method:"GET" ~path in
-  Cohttp_async.Client.call ~headers `GET uri
-  >>= fun (response, body) ->
-  let status = Cohttp.Response.status response in
-  let code = Cohttp.Code.code_of_status status in
-  Cohttp_async.Body.to_string body
-  >>| fun body_str ->
-  match code with
-  | 200 ->
-    (match Yojson.Safe.from_string body_str with
-     | json -> Ok json
-     | exception Yojson.Json_error msg ->
-       Error (`Json_parse_error (sprintf "JSON parse error: %s" msg)))
-  | 401 -> Error `Unauthorized
-  | 404 -> Error `Not_found
-  | 429 -> Error `Rate_limited
-  | _ -> Error (`Http (code, body_str))
+  with_network_capture (fun () ->
+    Cohttp_async.Client.call ~headers `GET uri
+    >>= fun (response, body) ->
+    let status = Cohttp.Response.status response in
+    let code = Cohttp.Code.code_of_status status in
+    Cohttp_async.Body.to_string body
+    >>| fun body_str ->
+    match code with
+    | 200 ->
+      (match Yojson.Safe.from_string body_str with
+       | json -> Ok json
+       | exception Yojson.Json_error msg ->
+         Error (`Json_parse_error (sprintf "JSON parse error: %s" msg)))
+    | 401 -> Error `Unauthorized
+    | 404 -> Error `Not_found
+    | 429 -> Error `Rate_limited
+    | _ -> Error (`Http (code, body_str)))
 
 module List_markets = struct
   type response = Market.t list [@@deriving sexp]
@@ -500,39 +514,41 @@ let http_post_authed ~(cfg : (module Cfg.S)) path ~body () =
   let headers = Auth.headers cfg ~http_method:"POST" ~path in
   let body_str = Yojson.Safe.to_string body in
   let cohttp_body = Cohttp_async.Body.of_string body_str in
-  Cohttp_async.Client.post ~headers ~body:cohttp_body uri
-  >>= fun (response, resp_body) ->
-  let status = Cohttp.Response.status response in
-  let code = Cohttp.Code.code_of_status status in
-  Cohttp_async.Body.to_string resp_body
-  >>| fun resp_str ->
-  match code with
-  | 200 | 201 ->
-    (match Yojson.Safe.from_string resp_str with
-     | json -> Ok json
-     | exception Yojson.Json_error msg ->
-       Error (`Json_parse_error (sprintf "JSON parse error: %s" msg)))
-  | 401 -> Error `Unauthorized
-  | 404 -> Error `Not_found
-  | 429 -> Error `Rate_limited
-  | _ -> Error (`Http (code, resp_str))
+  with_network_capture (fun () ->
+    Cohttp_async.Client.post ~headers ~body:cohttp_body uri
+    >>= fun (response, resp_body) ->
+    let status = Cohttp.Response.status response in
+    let code = Cohttp.Code.code_of_status status in
+    Cohttp_async.Body.to_string resp_body
+    >>| fun resp_str ->
+    match code with
+    | 200 | 201 ->
+      (match Yojson.Safe.from_string resp_str with
+       | json -> Ok json
+       | exception Yojson.Json_error msg ->
+         Error (`Json_parse_error (sprintf "JSON parse error: %s" msg)))
+    | 401 -> Error `Unauthorized
+    | 404 -> Error `Not_found
+    | 429 -> Error `Rate_limited
+    | _ -> Error (`Http (code, resp_str)))
 
 let http_delete_authed ~(cfg : (module Cfg.S)) path () =
   let module Cfg = (val cfg : Cfg.S) in
   let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path () in
   let headers = Auth.headers cfg ~http_method:"DELETE" ~path in
-  Cohttp_async.Client.call ~headers `DELETE uri
-  >>= fun (response, body) ->
-  let status = Cohttp.Response.status response in
-  let code = Cohttp.Code.code_of_status status in
-  Cohttp_async.Body.to_string body
-  >>| fun body_str ->
-  match code with
-  | 200 | 204 -> Ok `Deleted
-  | 401 -> Error `Unauthorized
-  | 404 -> Error `Not_found
-  | 429 -> Error `Rate_limited
-  | _ -> Error (`Http (code, body_str))
+  with_network_capture (fun () ->
+    Cohttp_async.Client.call ~headers `DELETE uri
+    >>= fun (response, body) ->
+    let status = Cohttp.Response.status response in
+    let code = Cohttp.Code.code_of_status status in
+    Cohttp_async.Body.to_string body
+    >>| fun body_str ->
+    match code with
+    | 200 | 204 -> Ok `Deleted
+    | 401 -> Error `Unauthorized
+    | 404 -> Error `Not_found
+    | 429 -> Error `Rate_limited
+    | _ -> Error (`Http (code, body_str)))
 
 module Place_order = struct
   type request =
