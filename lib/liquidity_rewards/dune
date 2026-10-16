@@ -1,0 +1,8 @@
+; Pure (no I/O, no Async) reward-scoring formulas for prediction-market liquidity programs.
+(library
+ (name liquidity_rewards)
+ (public_name fluxum.liquidity_rewards)
+ (libraries core)
+ (preprocess
+  (pps ppx_jane))
+ (flags :standard -open Core))

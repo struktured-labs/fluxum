@@ -1,0 +1,4 @@
+(test
+ (name test_liquidity_rewards)
+ (libraries core liquidity_rewards)
+ (flags :standard -open Core))
