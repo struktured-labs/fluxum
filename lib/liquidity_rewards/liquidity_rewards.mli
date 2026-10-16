@@ -11,8 +11,17 @@
     - quotes beyond the max spread or below the min size score zero;
     - daily payout = pool x daily score / total qualifying score, for makers above the uptime
       threshold; payouts under the minimum are not paid; rounded down to the cent.
-    Gemini says only that the spread weight is a "quadratic curve"; the default
-    [spread_weight] uses Polymarket's documented [((v - d) / v) ^ 2]. *)
+    Limitations (see README.md):
+    - Gemini says only that the spread weight is a "quadratic curve"; the default
+      [spread_weight] uses Polymarket's documented [((v - d) / v) ^ 2], which gives an
+      81/1/18% split on Gemini's worked example versus Gemini's published 74/5/21%.
+    - Competitor scores are unobservable (maker IDs hidden); shares computed from
+      public books are bounds, not measurements.
+    - How contract-level pools split across recurring instances is a caller assumption.
+    - Gemini scores every minute; callers sampling more coarsely (the fluxit shadow
+      recorder samples every ~5 minutes) miss intra-interval changes.
+    - Research result 2026-10-16: the fluxit shadow scored -$28.03 over 4 days under
+      this model; not evidence of a profitable strategy. *)
 module Gemini : sig
   type config =
     { max_spread_cents : float
