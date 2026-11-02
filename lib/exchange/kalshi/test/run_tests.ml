@@ -332,6 +332,113 @@ let () =
        (Option.is_none (List.Assoc.find assoc ~equal:String.equal "no_price"))
    | _ -> incr failed; printf "✗ request serialization\n");
 
+  (* ---------------- Trade API v2: signing ---------------- *)
+  printf "\n--- Signing (RSA-PSS SHA256) ---\n";
+  assert_equal "signing message format"
+    ~expected:"1700000000000GET/trade-api/v2/portfolio/balance"
+    (Kalshi.Auth.signing_message ~timestamp_ms:"1700000000000" ~http_method:"get"
+       ~path:"/trade-api/v2/portfolio/balance");
+  assert_equal "signing message strips query"
+    ~expected:"1700000000000DELETE/trade-api/v2/portfolio/events/orders/abc"
+    (Kalshi.Auth.signing_message ~timestamp_ms:"1700000000000" ~http_method:"DELETE"
+       ~path:"/trade-api/v2/portfolio/events/orders/abc?market_ticker=X");
+  let key = Mirage_crypto_pk.Rsa.generate ~bits:2048 () in
+  let pub = Mirage_crypto_pk.Rsa.pub_of_priv key in
+  let msg = "1700000000000POST/trade-api/v2/portfolio/events/orders" in
+  let sig_b64 = Kalshi.Auth.sign_message ~key msg in
+  assert_true "signature is base64 of 256 bytes"
+    (match Base64.decode sig_b64 with Ok s -> String.length s = 256 | Error _ -> false);
+  assert_true "PSS signature verifies" (Kalshi.Auth.verify_message ~pub ~signature_b64:sig_b64 msg);
+  assert_true "PSS signature rejects tampered message"
+    (not (Kalshi.Auth.verify_message ~pub ~signature_b64:sig_b64 (msg ^ "x")));
+  assert_true "PSS is randomized (salted)"
+    (not (String.equal sig_b64 (Kalshi.Auth.sign_message ~key msg)));
+  (* PEM round trip through the same loader used for real keys *)
+  let pem = X509.Private_key.encode_pem (`RSA key) in
+  let key' = Kalshi.Auth.load_private_key_pem pem in
+  assert_true "PEM-loaded key signs verifiably"
+    (Kalshi.Auth.verify_message ~pub ~signature_b64:(Kalshi.Auth.sign_message ~key:key' msg) msg);
+  (* Optional cross-check artifact for an external verifier (python/openssl) *)
+  (match Sys.getenv "KALSHI_SIGN_XCHECK_DIR" with
+   | Some dir ->
+     Out_channel.write_all (dir ^ "/pub.pem")
+       ~data:(X509.Public_key.encode_pem (`RSA pub));
+     Out_channel.write_all (dir ^ "/msg.txt") ~data:msg;
+     Out_channel.write_all (dir ^ "/sig.b64") ~data:sig_b64
+   | None -> ());
+
+  (* ---------------- Trade API v2: fixed point ---------------- *)
+  printf "\n--- Fixed point ---\n";
+  let module T = Kalshi.Trade_v2 in
+  assert_true "parse 0.5600" (Option.equal Int.equal (T.Fp.parse_scaled ~decimals:4 "0.5600") (Some 5600));
+  assert_true "parse 10.00 count" (Option.equal Int.equal (T.Fp.parse_scaled ~decimals:2 "10.00") (Some 1000));
+  assert_equal "price_to_string" ~expected:"0.0300" (T.Fp.price_to_string 0.03);
+  assert_equal "count_to_string" ~expected:"25.00" (T.Fp.count_to_string 25.);
+
+  (* ---------------- Fees ---------------- *)
+  printf "\n--- Fees ---\n";
+  let feq name ~expected got =
+    assert_true (sprintf "%s (expected %.4f got %.4f)" name expected got)
+      Float.(abs (expected - got) < 1e-9)
+  in
+  feq "taker 100 @ 0.50 = 1.75" ~expected:1.75 (T.Fees.taker_fee ~count:100. ~price:0.50 ());
+  feq "taker 1 @ 0.50 rounds up to 0.02" ~expected:0.02 (T.Fees.taker_fee ~count:1. ~price:0.50 ());
+  feq "taker 100 @ 0.10 = 0.63" ~expected:0.63 (T.Fees.taker_fee ~count:100. ~price:0.10 ());
+  feq "taker 100 @ 0.01 = 0.07" ~expected:0.07 (T.Fees.taker_fee ~count:100. ~price:0.01 ());
+  feq "taker centicent 1 @ 0.50" ~expected:0.0175
+    (T.Fees.taker_fee ~rounding:T.Fees.Centicent ~count:1. ~price:0.50 ());
+  feq "taker multiplier 0.5" ~expected:0.88 (T.Fees.taker_fee ~multiplier:0.5 ~count:100. ~price:0.50 ());
+  feq "maker on plain quadratic = 0" ~expected:0. (T.Fees.maker_fee ~count:100. ~price:0.50 ());
+  feq "maker on maker-fee series 100 @ 0.50" ~expected:0.44
+    (T.Fees.maker_fee ~fee_type:T.Fees.Quadratic_with_maker_fees ~count:100. ~price:0.50 ());
+
+  (* ---------------- Book / quote ---------------- *)
+  printf "\n--- Book / quote ---\n";
+  let ob : Kalshi.Prediction_markets.Orderbook.t =
+    { yes = [ ("0.4000", "50.00"); ("0.4200", "10.00") ]
+    ; no = [ ("0.5500", "20.00"); ("0.5000", "100.00") ] }
+  in
+  let book = T.Book.of_orderbook ob in
+  (match T.Book.best_ask book T.Yes with
+   | Some l -> feq "best YES ask = 1 - best NO bid" ~expected:0.45 l.price
+   | None -> assert_true "best YES ask exists" false);
+  (match T.Book.best_ask book T.No with
+   | Some l -> feq "best NO ask = 1 - best YES bid" ~expected:0.58 l.price
+   | None -> assert_true "best NO ask exists" false);
+  let q = T.Quote.buy ~book ~outcome:T.Yes ~count:30. () in
+  feq "quote fills 30" ~expected:30. q.filled;
+  feq "quote notional 20*.45+10*.50" ~expected:14.0 q.notional;
+  (* raw fee = .07*(20*.45*.55 + 10*.5*.5) = .07*(4.95+2.5) = .5215 -> .53 *)
+  feq "quote fee rounds once" ~expected:0.53 q.fee;
+  feq "quote total" ~expected:14.53 q.total_cost;
+  feq "quote multiple" ~expected:(30. /. 14.53) q.multiple;
+  let ql = T.Quote.buy ~book ~outcome:T.Yes ~count:30. ~limit:0.45 () in
+  feq "limit stops at 0.45" ~expected:20. ql.filled;
+
+  (* ---------------- V2 order JSON ---------------- *)
+  printf "\n--- V2 order request ---\n";
+  let r = T.Order.buy ~ticker:"KXTEST-1" ~outcome:T.No ~count:5. ~price:0.30 () in
+  let j = Yojson.Safe.to_string (T.Order.to_yojson r) in
+  assert_equal "buy NO @0.30 -> ask YES @0.70"
+    ~expected:{|{"ticker":"KXTEST-1","side":"ask","count":"5.00","price":"0.7000","time_in_force":"good_till_canceled","self_trade_prevention_type":"taker_at_cross"}|}
+    j;
+  assert_true "validate ok" (Result.is_ok (T.Order.validate r));
+  assert_true "reduce_only w/ GTC rejected"
+    (Result.is_error (T.Order.validate { r with reduce_only = true }));
+  assert_true "price 1.0 rejected" (Result.is_error (T.Order.validate { r with price = 1.0 }));
+
+  (* ---------------- Env guard / URL parsing ---------------- *)
+  printf "\n--- Env guard ---\n";
+  assert_true "production refused without flag"
+    (Result.is_error (T.Env.authed_cfg T.Env.Production));
+  assert_true "production refused with flag but no env confirmation"
+    (match Sys.getenv T.Env.allow_production_env_var with
+     | Some _ -> true
+     | None -> Result.is_error (T.Env.authed_cfg ~allow_production:true T.Env.Production));
+  assert_equal "url -> ticker" ~expected:"KXBTCD-26NOV0217"
+    (T.ticker_of_input "https://kalshi.com/markets/kxbtcd/bitcoin-price-abovebelow/kxbtcd-26nov0217");
+  assert_equal "plain ticker upper" ~expected:"KXFED-26DEC" (T.ticker_of_input " kxfed-26dec ");
+
   printf "\n=== Results: %d passed, %d failed (%d total) ===\n"
     !passed !failed (!passed + !failed);
   if !failed > 0 then exit 1

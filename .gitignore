@@ -5,3 +5,13 @@ logs
 tmp/
 .claude/settings.local.json
 reports/
+
+# Secrets guard (public repo): never commit API keys or private keys
+*.pem
+*.key
+*.p12
+.kalshi/
+.env
+.env.*
+**/kalshi*key*
+**/*private_key*
