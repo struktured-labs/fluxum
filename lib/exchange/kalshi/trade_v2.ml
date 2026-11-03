@@ -415,9 +415,7 @@ let parse_response code body : (Yojson.Safe.t, error) Result.t =
   | 429 -> Error `Rate_limited  (* no Retry-After; caller should back off *)
   | c -> Error (`Http (c, body))
 
-(** One request. [authed] signs with the cfg's key; the signature covers the
-    path only (never the query string). *)
-let call ?(authed = true) ?(query = []) ?body ~(cfg : (module Cfg.S)) ~meth path
+let once ?(authed = true) ?(query = []) ?body ~(cfg : (module Cfg.S)) ~meth path
   : (Yojson.Safe.t, error) Result.t Deferred.t =
   let module C = (val cfg : Cfg.S) in
   let path = base_path ^ path in
@@ -441,6 +439,25 @@ let call ?(authed = true) ?(query = []) ?body ~(cfg : (module Cfg.S)) ~meth path
   >>| function
   | Ok (code, s) -> parse_response code s
   | Error exn -> Error (`Network (Exn.to_string exn))
+
+(** Hook for observing retries (tests / logging). *)
+let on_retry : (attempt:int -> delay:float -> path:string -> unit) ref =
+  ref (fun ~attempt:_ ~delay:_ ~path:_ -> ())
+
+(** One logical request: client-side token-bucket throttling (per
+    [Rate_limit.default] tier, override with [?limiter]) then up to
+    [max_retries] retries on 429 with exponential backoff + full jitter.
+    Signs the path only (never the query string). *)
+let call ?authed ?(query = []) ?body ?limiter ?(max_retries = 5) ~(cfg : (module Cfg.S)) ~meth path
+  : (Yojson.Safe.t, error) Result.t Deferred.t =
+  let limiter = match limiter with Some l -> l | None -> Lazy.force Rate_limit.default in
+  let kind, cost = Rate_limit.classify ~meth ~path in
+  Rate_limit.with_retry ~max_retries
+    ~on_retry:(fun ~attempt ~delay -> !on_retry ~attempt ~delay ~path)
+    ~is_rate_limited:(function Error `Rate_limited -> true | _ -> false)
+    (fun () ->
+       let%bind () = Rate_limit.Limiter.acquire limiter kind ~cost in
+       once ?authed ~query ?body ~cfg ~meth path)
 
 let q_opt k f = function Some v -> [ (k, [ f v ]) ] | None -> []
 
@@ -477,19 +494,118 @@ let series_fee_params ~cfg series_ticker =
     (ft, m))
 
 (* Authenticated portfolio / account *)
-let get_balance ~cfg = call ~cfg ~meth:`GET "/portfolio/balance"
-let get_positions ~cfg ?ticker ?(limit = 100) () =
+(** Balance; [exchange_index] restricts to one shard. Response includes
+    [balance_breakdown : {exchange_index; balance}] per shard. *)
+let get_balance ?exchange_index ~cfg () =
+  call ~cfg ~meth:`GET ~query:(q_opt "exchange_index" Int.to_string exchange_index)
+    "/portfolio/balance"
+
+(** Per-shard balances in cents from a balance response's
+    [balance_breakdown] (sorted by index). *)
+let balance_breakdown (j : Yojson.Safe.t) : (int * int) list =
+  let open Yojson.Safe.Util in
+  let to_i = function `Int i -> Some i | `Intlit s | `String s -> Int.of_string_opt s
+    | `Float f -> Some (Float.iround_nearest_exn f) | _ -> None in
+  match member "balance_breakdown" j with
+  | `List l ->
+    List.filter_map l ~f:(fun e ->
+      match to_i (member "exchange_index" e), to_i (member "balance" e) with
+      | Some i, Some b -> Some (i, b) | _ -> None)
+    |> List.sort ~compare:(fun (a, _) (b, _) -> Int.compare a b)
+  | _ -> []
+
+(* ---- cursor pagination ---- *)
+
+(** Cursor from a page; [None] when empty/absent (= last page). *)
+let page_cursor (j : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member "cursor" j with
+  | `String "" | `Null -> None
+  | `String c -> Some c
+  | _ -> None
+
+(** Fetch pages via [fetch ?cursor] until the cursor is empty or [max_pages]
+    reached, concatenating the list field [key]. Returns (items, next_cursor). *)
+let paginate ?(max_pages = 50) ~key
+      (fetch : ?cursor:string -> unit -> (Yojson.Safe.t, error) Result.t Deferred.t) =
+  let rec go acc cursor n =
+    match%bind fetch ?cursor () with
+    | Error e -> return (Error e)
+    | Ok j ->
+      let items = match Yojson.Safe.Util.member key j with `List l -> l | _ -> [] in
+      let acc = List.rev_append items acc in
+      (match page_cursor j with
+       | Some c when n + 1 < max_pages -> go acc (Some c) (n + 1)
+       | next -> return (Ok (List.rev acc, next)))
+  in
+  go [] None 0
+
+let get_positions ~cfg ?ticker ?event_ticker ?count_filter ?settlement_status ?exchange_index
+      ?cursor ?(limit = 100) () =
   call ~cfg ~meth:`GET
-    ~query:(("limit", [ Int.to_string limit ]) :: q_opt "ticker" Fn.id ticker)
+    ~query:(("limit", [ Int.to_string limit ]) :: q_opt "ticker" Fn.id ticker
+            @ q_opt "event_ticker" Fn.id event_ticker @ q_opt "count_filter" Fn.id count_filter
+            @ q_opt "settlement_status" Fn.id settlement_status
+            @ q_opt "exchange_index" Int.to_string exchange_index @ q_opt "cursor" Fn.id cursor)
     "/portfolio/positions"
+
+let get_fills ~cfg ?ticker ?order_id ?min_ts ?max_ts ?exchange_index ?cursor ?(limit = 100) () =
+  call ~cfg ~meth:`GET
+    ~query:(("limit", [ Int.to_string limit ]) :: q_opt "ticker" Fn.id ticker
+            @ q_opt "order_id" Fn.id order_id @ q_opt "min_ts" Int.to_string min_ts
+            @ q_opt "max_ts" Int.to_string max_ts
+            @ q_opt "exchange_index" Int.to_string exchange_index @ q_opt "cursor" Fn.id cursor)
+    "/portfolio/fills"
+
+let all_fills ?max_pages ~cfg ?ticker ?order_id ?min_ts ?max_ts ?exchange_index ?limit () =
+  paginate ?max_pages ~key:"fills" (fun ?cursor () ->
+    get_fills ~cfg ?ticker ?order_id ?min_ts ?max_ts ?exchange_index ?cursor ?limit ())
+
+let all_market_positions ?max_pages ~cfg ?ticker ?event_ticker ?count_filter ?settlement_status
+      ?exchange_index ?limit () =
+  paginate ?max_pages ~key:"market_positions" (fun ?cursor () ->
+    get_positions ~cfg ?ticker ?event_ticker ?count_filter ?settlement_status ?exchange_index
+      ?cursor ?limit ())
+
+(* ---- shard transfers (POST /portfolio/intra_exchange_instance_transfer) ---- *)
+
+module Transfer = struct
+  (** Dollars -> centicents (1/10000 dollar), as the API's [amount]. *)
+  let centicents_of_dollars d = Float.iround_nearest_exn (d *. 10_000.)
+
+  let body ~amount_dollars ~source_shard ~destination_shard ?client_transfer_id () =
+    if Float.(amount_dollars <= 0.) then Or_error.error_string "amount must be > 0"
+    else if source_shard < 0 || source_shard > 100 || destination_shard < 0 || destination_shard > 100
+    then Or_error.error_string "shard index must be 0..100"
+    else if source_shard = destination_shard then Or_error.error_string "source = destination shard"
+    else
+      Ok (`Assoc ([ ("source", `String "event_contract")
+                  ; ("destination", `String "event_contract")
+                  ; ("amount", `Int (centicents_of_dollars amount_dollars))
+                  ; ("source_exchange_shard", `Int source_shard)
+                  ; ("destination_exchange_shard", `Int destination_shard) ]
+                  @ (match client_transfer_id with
+                     | Some id -> [ ("client_transfer_id", `String id) ] | None -> [])))
+end
+
+(** Move funds between exchange shards of the event-contract instance.
+    Processed asynchronously; returns [{transfer_id}]. *)
+let transfer_between_shards ~cfg ~amount_dollars ~source_shard ~destination_shard
+      ?client_transfer_id () =
+  match Transfer.body ~amount_dollars ~source_shard ~destination_shard ?client_transfer_id () with
+  | Error e -> return (Error (`Http (0, Error.to_string_hum e)))
+  | Ok body -> call ~cfg ~meth:`POST ~body "/portfolio/intra_exchange_instance_transfer"
+
+let get_shard_transfers ~cfg ?cursor ?(limit = 50) () =
+  call ~cfg ~meth:`GET ~query:(("limit", [ Int.to_string limit ]) :: q_opt "cursor" Fn.id cursor)
+    "/portfolio/intra_exchange_instance_transfers"
+
+let get_shard_transfer ~cfg transfer_id =
+  call ~cfg ~meth:`GET ("/portfolio/intra_exchange_instance_transfers/" ^ transfer_id)
+
 let get_orders ~cfg ?ticker ?status () =
   call ~cfg ~meth:`GET ~query:(q_opt "ticker" Fn.id ticker @ q_opt "status" Fn.id status)
     "/portfolio/orders"
 let get_order ~cfg order_id = call ~cfg ~meth:`GET ("/portfolio/orders/" ^ order_id)
-let get_fills ~cfg ?ticker ?(limit = 100) () =
-  call ~cfg ~meth:`GET
-    ~query:(("limit", [ Int.to_string limit ]) :: q_opt "ticker" Fn.id ticker)
-    "/portfolio/fills"
 let get_account_limits ~cfg = call ~cfg ~meth:`GET "/account/limits"
 
 (* V2 order entry *)

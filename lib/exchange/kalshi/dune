@@ -21,4 +21,5 @@
   x509
   base64
   fluxum
+  fluxum.websocket_curl
   exchange_common))

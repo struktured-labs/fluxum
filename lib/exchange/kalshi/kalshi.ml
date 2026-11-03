@@ -8,3 +8,5 @@ let command : Command.t =
   Command.group
     ~summary:"Kalshi Command System"
     [ Prediction_markets.command ]
+module Rate_limit = Rate_limit
+module Ws = Ws

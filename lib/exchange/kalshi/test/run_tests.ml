@@ -439,6 +439,121 @@ let () =
     (T.ticker_of_input "https://kalshi.com/markets/kxbtcd/bitcoin-price-abovebelow/kxbtcd-26nov0217");
   assert_equal "plain ticker upper" ~expected:"KXFED-26DEC" (T.ticker_of_input " kxfed-26dec ");
 
+
+  (* ---------------- Rate limiting ---------------- *)
+  printf "\n--- Rate limit ---\n";
+  let module R = Kalshi.Rate_limit in
+  let b = R.Bucket.create ~capacity:100. ~refill_per_s:100. ~now:0. in
+  assert_true "bucket: burst of 10x10 ok" (List.for_all (List.init 10 ~f:Fn.id) ~f:(fun _ -> Float.(R.Bucket.try_take b ~now:0. ~cost:10. = 0.)));
+  let w = R.Bucket.try_take b ~now:0. ~cost:10. in
+  assert_true "bucket: empty -> wait 0.1s" Float.(abs (w -. 0.1) < 1e-9);
+  assert_true "bucket: refused take consumes nothing" Float.(b.tokens = 0.);
+  assert_true "bucket: refills after 0.1s" Float.(R.Bucket.try_take b ~now:0.1 ~cost:10. = 0.);
+  assert_true "bucket: refill capped at capacity" (ignore (R.Bucket.try_take b ~now:100. ~cost:0.); Float.(b.tokens = 100.));
+  assert_true "bucket: cost > capacity clamps" Float.(R.Bucket.try_take b ~now:100. ~cost:500. = 0.);
+  assert_true "classify GET read" (Poly.equal (R.classify ~meth:`GET ~path:"/markets") (R.Read, 10.));
+  assert_true "classify balance" (Poly.equal (R.classify ~meth:`GET ~path:"/portfolio/balance") (R.Balance, 1.));
+  assert_true "classify create write" (Poly.equal (R.classify ~meth:`POST ~path:"/portfolio/events/orders") (R.Write, 10.));
+  assert_true "classify amend write" (Poly.equal (R.classify ~meth:`POST ~path:"/portfolio/events/orders/x/amend") (R.Write, 10.));
+  assert_true "classify cancel 2 tokens" (Poly.equal (R.classify ~meth:`DELETE ~path:"/portfolio/events/orders/x") (R.Write, 2.));
+  assert_true "classify transfer default read bucket" (Poly.equal (R.classify ~meth:`POST ~path:"/portfolio/intra_exchange_instance_transfer") (R.Read, 10.));
+  assert_true "tier basic read" (Poly.equal (R.Tier.read Basic) (200., 600.));
+  assert_true "tier basic write" (Poly.equal (R.Tier.write Basic) (100., 100.));
+  assert_true "tier of_string" (Poly.equal (R.Tier.of_string "expert") (Some R.Tier.Expert));
+  assert_true "backoff grows" Float.(R.backoff_delay ~attempt:3 ~rand:0.999 () > R.backoff_delay ~attempt:1 ~rand:0.999 ());
+  assert_true "backoff capped" Float.(R.backoff_delay ~attempt:30 ~rand:0.999 () <= 8.0);
+  assert_true "backoff jitter range" Float.(R.backoff_delay ~attempt:2 ~rand:0.5 () = 0.5);
+  assert_true "backoff floor" Float.(R.backoff_delay ~attempt:0 ~rand:0. () >= 0.01);
+  let retry_run ~fails ~max_retries =
+    let calls = ref 0 and sleeps = ref [] in
+    let r = Async.Thread_safe.block_on_async_exn (fun () ->
+      R.with_retry ~max_retries ~sleep:(fun d -> sleeps := d :: !sleeps; Async.return ()) ~rand:(fun () -> 0.999)
+        ~is_rate_limited:(fun r -> Poly.equal r `Rl)
+        (fun () -> incr calls; Async.return (if !calls <= fails then `Rl else `Ok))) in
+    (r, !calls, List.rev !sleeps)
+  in
+  let r, n, sl = retry_run ~fails:2 ~max_retries:5 in
+  assert_true "retry: succeeds after 2 429s" (Poly.equal r `Ok && n = 3);
+  assert_true "retry: exponential sleeps" (match sl with [ a; b ] -> Float.(b > a) | _ -> false);
+  let r, n, _ = retry_run ~fails:10 ~max_retries:3 in
+  assert_true "retry: gives up after max" (Poly.equal r `Rl && n = 4);
+  let lim = R.Limiter.create R.Tier.Basic in
+  let t0 = Time_float_unix.now () in
+  Async.Thread_safe.block_on_async_exn (fun () ->
+    Async.Deferred.List.iter ~how:`Sequential (List.init 12 ~f:Fn.id) ~f:(fun _ -> R.Limiter.acquire lim R.Write ~cost:10.));
+  let el = Time_float.Span.to_sec (Time_float.diff (Time_float_unix.now ()) t0) in
+  assert_true (sprintf "limiter throttles write burst (%.3fs >= 0.15s)" el) Float.(el >= 0.15 && el < 2.);
+
+  (* ---------------- Pagination / balance / transfer ---------------- *)
+  printf "\n--- Pagination & shards ---\n";
+  assert_true "cursor empty -> None" (Option.is_none (T.page_cursor (Yojson.Safe.from_string {|{"cursor":""}|})));
+  assert_true "cursor present" (Poly.equal (T.page_cursor (Yojson.Safe.from_string {|{"cursor":"abc"}|})) (Some "abc"));
+  let pages = [| {|{"fills":[{"a":1},{"a":2}],"cursor":"c1"}|}; {|{"fills":[{"a":3}],"cursor":"c2"}|}; {|{"fills":[],"cursor":""}|} |] in
+  let seen = ref [] in
+  let fetch ?cursor () =
+    seen := cursor :: !seen;
+    let i = match cursor with None -> 0 | Some "c1" -> 1 | _ -> 2 in
+    Async.return (Ok (Yojson.Safe.from_string pages.(i))) in
+  (match Async.Thread_safe.block_on_async_exn (fun () -> T.paginate ~key:"fills" fetch) with
+   | Ok (items, next) ->
+     assert_true "paginate: all 3 items in order" (List.length items = 3 && Poly.equal (List.hd items) (Some (`Assoc [("a", `Int 1)])));
+     assert_true "paginate: ends with no cursor" (Option.is_none next);
+     assert_true "paginate: passes cursors" (Poly.equal (List.rev !seen) [ None; Some "c1"; Some "c2" ])
+   | Error _ -> assert_true "paginate ok" false);
+  (match Async.Thread_safe.block_on_async_exn (fun () -> T.paginate ~max_pages:1 ~key:"fills" fetch) with
+   | Ok (items, next) -> assert_true "paginate: max_pages returns next cursor" (List.length items = 2 && Poly.equal next (Some "c1"))
+   | Error _ -> assert_true "paginate max" false);
+  assert_true "balance_breakdown" (Poly.equal
+    (T.balance_breakdown (Yojson.Safe.from_string {|{"balance":100000,"balance_breakdown":[{"exchange_index":2,"balance":1000},{"exchange_index":0,"balance":99000}]}|}))
+    [ (0, 99000); (2, 1000) ]);
+  assert_true "centicents $10" (T.Transfer.centicents_of_dollars 10. = 100_000);
+  (match T.Transfer.body ~amount_dollars:10. ~source_shard:0 ~destination_shard:2 () with
+   | Ok j -> assert_equal "transfer body" ~expected:{|{"source":"event_contract","destination":"event_contract","amount":100000,"source_exchange_shard":0,"destination_exchange_shard":2}|} (Yojson.Safe.to_string j)
+   | Error _ -> assert_true "transfer body" false);
+  assert_true "transfer rejects same shard" (Result.is_error (T.Transfer.body ~amount_dollars:1. ~source_shard:2 ~destination_shard:2 ()));
+  assert_true "transfer rejects <=0" (Result.is_error (T.Transfer.body ~amount_dollars:0. ~source_shard:0 ~destination_shard:2 ()));
+  assert_true "transfer rejects shard>100" (Result.is_error (T.Transfer.body ~amount_dollars:1. ~source_shard:0 ~destination_shard:101 ()));
+
+  (* ---------------- WebSocket book maintenance ---------------- *)
+  printf "\n--- WS book ---\n";
+  let module W = Kalshi.Ws in
+  let books = String.Table.create () and seqs = W.Seq_tracker.create () in
+  let feed s = W.handle ~books ~seqs (Yojson.Safe.from_string s) in
+  let snap = {|{"type":"orderbook_snapshot","sid":2,"seq":1,"msg":{"market_ticker":"M","yes_dollars_fp":[["0.0800","300.00"],["0.2200","333.00"]],"no_dollars_fp":[["0.5400","20.00"],["0.5600","146.00"]]}}|} in
+  let _, a = feed snap in
+  assert_true "snapshot continues" (Poly.equal a `Continue);
+  let bk = Hashtbl.find_exn books "M" in
+  assert_true "snapshot top" (Poly.equal (W.Local_book.top bk) (Some (2200, 333.), Some (4400, 146.)));
+  let _, a = feed {|{"type":"orderbook_delta","sid":2,"seq":2,"msg":{"market_ticker":"M","price_dollars":"0.2200","delta_fp":"-333.00","side":"yes"}}|} in
+  assert_true "delta removes level" (Poly.equal a `Continue && Poly.equal (fst (W.Local_book.top bk)) (Some (800, 300.)));
+  let _ = feed {|{"type":"orderbook_delta","sid":2,"seq":3,"msg":{"market_ticker":"M","price_dollars":"0.5700","delta_fp":"5.00","side":"no"}}|} in
+  assert_true "delta adds level" (Poly.equal (snd (W.Local_book.top bk)) (Some (4300, 5.)));
+  let _ = feed {|{"type":"orderbook_delta","sid":2,"seq":4,"msg":{"market_ticker":"M","price_dollars":"0.5700","delta_fp":"2.50","side":"no"}}|} in
+  assert_true "delta accumulates" (Poly.equal (snd (W.Local_book.top bk)) (Some (4300, 7.5)));
+  let evs, a = feed {|{"type":"orderbook_delta","sid":2,"seq":6,"msg":{"market_ticker":"M","price_dollars":"0.5700","delta_fp":"1.00","side":"no"}}|} in
+  assert_true "seq gap -> resync" (Poly.equal a `Resync && (match evs with [ W.Gap { expected = 5; got = 6; _ } ] -> true | _ -> false));
+  assert_true "gap delta not applied" (Poly.equal (snd (W.Local_book.top bk)) (Some (4300, 7.5)));
+  let _, a = feed {|{"type":"orderbook_snapshot","sid":2,"seq":7,"msg":{"market_ticker":"M","yes_dollars_fp":[],"no_dollars_fp":[]}}|} in
+  assert_true "snapshot resets seq + book" (Poly.equal a `Continue && Poly.equal (W.Local_book.top bk) (None, None));
+  let _, a = feed {|{"type":"ticker","sid":3,"msg":{"market_ticker":"M"}}|} in
+  assert_true "unsequenced ticker ok" (Poly.equal a `Continue);
+  let other = W.Seq_tracker.create () in
+  assert_true "independent sids" (Poly.equal (W.Seq_tracker.check other ~sid:1 ~seq:5 ~is_snapshot:false) `Ok
+    && Poly.equal (W.Seq_tracker.check other ~sid:9 ~seq:1 ~is_snapshot:false) `Ok
+    && Poly.equal (W.Seq_tracker.check other ~sid:1 ~seq:6 ~is_snapshot:false) `Ok);
+  let b2 = W.Local_book.create "M" in
+  W.Local_book.apply_snapshot b2 (Yojson.Safe.Util.member "msg" (Yojson.Safe.from_string snap));
+  assert_true "diff_with_rest equal" (List.is_empty (W.Local_book.diff_with_rest b2 (Yojson.Safe.from_string
+    {|{"orderbook_fp":{"yes_dollars":[["0.0800","300.00"],["0.2200","333.00"]],"no_dollars":[["0.5400","20.00"],["0.5600","146.00"]]}}|})));
+  assert_true "diff_with_rest detects mismatch" (List.length (W.Local_book.diff_with_rest b2 (Yojson.Safe.from_string
+    {|{"orderbook_fp":{"yes_dollars":[["0.0800","301.00"]],"no_dollars":[["0.5400","20.00"],["0.5600","146.00"]]}}|})) = 2);
+  assert_equal "subscribe msg" ~expected:{|{"id":1,"cmd":"subscribe","params":{"channels":["orderbook_delta"],"market_tickers":["M"]}}|}
+    (Yojson.Safe.to_string (W.subscribe_msg ~id:1 ~channels:[ "orderbook_delta" ] ~market_tickers:[ "M" ] ()));
+  (match feed {|{"type":"fill","sid":13,"msg":{"order_id":"o"}}|} with
+   | [ W.Fill _ ], `Continue -> assert_true "fill routed" true | _ -> assert_true "fill routed" false);
+  (match feed {|{"type":"user_order","sid":22,"msg":{"order_id":"o"}}|} with
+   | [ W.User_order _ ], `Continue -> assert_true "user_order routed" true | _ -> assert_true "user_order routed" false);
+
   printf "\n=== Results: %d passed, %d failed (%d total) ===\n"
     !passed !failed (!passed + !failed);
   if !failed > 0 then exit 1

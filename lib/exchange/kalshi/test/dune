@@ -1,5 +1,5 @@
 (test
  (name run_tests)
- (libraries kalshi fluxum yojson mirage-crypto-pk x509 base64)
+ (libraries async kalshi fluxum yojson mirage-crypto-pk x509 base64)
  (preprocess (pps ppx_jane))
  (flags :standard -open Core))
