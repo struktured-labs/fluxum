@@ -427,7 +427,7 @@ let with_cfg (choice : string option) (f : (module Cfg.S) -> unit Deferred.t) : 
   match Cfg.resolve choice with
   | Ok cfg -> f cfg
   | Error e ->
-    eprintf "kalshi: %s\n" (Core.Error.to_string_hum e);
+    eprintf "%s\n" (Core.Error.to_string_hum e);
     Shutdown.exit 2
 
 let http_get_authed ~(cfg : (module Cfg.S)) path ?query () =

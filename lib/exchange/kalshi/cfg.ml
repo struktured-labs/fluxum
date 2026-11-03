@@ -56,7 +56,23 @@ let host ~env =
   | "demo" | "sandbox" -> "external-api.demo.kalshi.co"
   | _ -> failwithf "Kalshi environment must be 'production' or 'demo'" ()
 
+let production_allowed () =
+  List.mem [ "1"; "yes"; "true" ]
+    (String.lowercase (String.strip (Option.value (Unix.getenv "KALSHI_ALLOW_PRODUCTION") ~default:"")))
+    ~equal:String.equal
+
+let is_production env =
+  match String.lowercase (String.strip env) with
+  | "production" | "prod" -> true
+  | _ -> false
+
+(** Every way of building an authenticated config ([make], [of_string],
+    [Production ()], [resolve], [or_default]) goes through here, so the
+    real-money guard can't be bypassed by using the library directly:
+    production raises unless KALSHI_ALLOW_PRODUCTION=1 (or yes/true). *)
 let make env =
+  if is_production env && not (production_allowed ()) then
+    failwith "Kalshi production config refused: real-money production requires KALSHI_ALLOW_PRODUCTION=1";
   let module M = struct
     let api_host = host ~env
     let api_key = param ~env ~name:"API_KEY" ()
@@ -69,6 +85,7 @@ let make env =
   in
   (module M : S)
 
+(** Raises unless KALSHI_ALLOW_PRODUCTION=1 (see [make]). *)
 module Production () = struct
   include (val make "production" : S)
 end
@@ -82,16 +99,6 @@ let of_string s =
   | "production" | "prod" -> make "production"
   | "demo" | "sandbox" -> make "demo"
   | env -> failwithf "Kalshi environment %S not supported" env ()
-
-let production_allowed () =
-  List.mem [ "1"; "yes"; "true" ]
-    (String.lowercase (String.strip (Option.value (Unix.getenv "KALSHI_ALLOW_PRODUCTION") ~default:"")))
-    ~equal:String.equal
-
-let is_production env =
-  match String.lowercase (String.strip env) with
-  | "production" | "prod" -> true
-  | _ -> false
 
 (** Resolve the authenticated config from [-cfg] (if given) or [KALSHI_ENV]
     (default demo). Production, from either source, additionally requires
@@ -108,7 +115,9 @@ let resolve (choice : string option) : (module S) Or_error.t =
   in
   if is_production env && not (production_allowed ()) then
     Or_error.errorf "Kalshi: %s refused: real-money production also requires KALSHI_ALLOW_PRODUCTION=1" source
-  else Or_error.try_with (fun () -> of_string env)
+  else
+    Or_error.try_with (fun () -> of_string env)
+    |> Result.map_error ~f:(fun e -> Error.tag e ~tag:"Kalshi")
 
 (** Kept for compatibility; [-cfg] values are resolved (and the production
     guard applied) by [resolve]. *)

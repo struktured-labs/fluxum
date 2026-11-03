@@ -1128,6 +1128,26 @@ let () =
   assert_true "N8: 'complete' in another field ignored"
     (Poly.equal (ts {|{"transfer":{"status":"pending","note":"complete"}}|}) `Pending);
   assert_true "N8: missing status unknown" (match ts {|{"transfer":{}}|} with `Unknown _ -> true | _ -> false);
+  (* S1b: direct library constructors are guarded too *)
+  let saved_allow = Sys.getenv "KALSHI_ALLOW_PRODUCTION" in
+  let saved_key = Sys.getenv "KALSHI_PRODUCTION_API_KEY" in
+  Core_unix.unsetenv "KALSHI_ALLOW_PRODUCTION";
+  let raises f = match f () with _ -> false | exception _ -> true in
+  assert_true "S1b: Cfg.Production () refused without KALSHI_ALLOW_PRODUCTION"
+    (raises (fun () -> let module P = Kalshi.Cfg.Production () in P.api_host));
+  assert_true "S1b: Cfg.make production refused" (raises (fun () -> Kalshi.Cfg.make "production"));
+  assert_true "S1b: Cfg.of_string prod refused" (raises (fun () -> Kalshi.Cfg.of_string "prod"));
+  assert_true "S1b: Cfg.or_default production refused" (raises (fun () -> Kalshi.Cfg.or_default (Some "production")));
+  Core_unix.putenv ~key:"KALSHI_ALLOW_PRODUCTION" ~data:"0";
+  assert_true "S1b: Production () refused with KALSHI_ALLOW_PRODUCTION=0"
+    (raises (fun () -> let module P = Kalshi.Cfg.Production () in P.api_host));
+  Core_unix.putenv ~key:"KALSHI_ALLOW_PRODUCTION" ~data:"1";
+  Core_unix.putenv ~key:"KALSHI_PRODUCTION_API_KEY" ~data:"dummy-not-a-key";
+  assert_true "S1b: Production () allowed with KALSHI_ALLOW_PRODUCTION=1 (no network, no key read)"
+    (match (let module P = Kalshi.Cfg.Production () in P.api_host) with
+     | h -> String.equal h "external-api.kalshi.com" | exception _ -> false);
+  (match saved_allow with Some v -> Core_unix.putenv ~key:"KALSHI_ALLOW_PRODUCTION" ~data:v | None -> Core_unix.unsetenv "KALSHI_ALLOW_PRODUCTION");
+  (match saved_key with Some v -> Core_unix.putenv ~key:"KALSHI_PRODUCTION_API_KEY" ~data:v | None -> Core_unix.unsetenv "KALSHI_PRODUCTION_API_KEY");
   Core.printf "\n=== Results: %d passed, %d failed (%d total) ===\n"
     !passed !failed (!passed + !failed);
   Core.Out_channel.flush Core.stdout;

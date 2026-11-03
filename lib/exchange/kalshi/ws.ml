@@ -490,7 +490,10 @@ let run_with (type c) (module T : Transport with type t = c) ~headers ~url ~tick
                    | j ->
                      let evs, action = handle ~books ~seqs j in
                      (match subscription_error j with
-                      | Some (id, msg) -> (evs @ [ Subscription_error { id; msg } ], `Resync, Some msg)
+                      | Some (id, msg) ->
+                        (* reported once, as Subscription_error (not also as Error_msg) *)
+                        let evs = List.filter evs ~f:(function Error_msg _ -> false | _ -> true) in
+                        (evs @ [ Subscription_error { id; msg } ], `Resync, Some msg)
                       | None -> (evs, action, None))
                  in
                  emit evs;

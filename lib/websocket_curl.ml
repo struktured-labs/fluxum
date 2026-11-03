@@ -59,7 +59,8 @@ type t =
   ; mutable leftover_len: int
   ; fragment_buf: Buffer.t (* Buffer for reassembling fragmented WebSocket messages *)
   ; inflight: Inflight.t (* workers currently using [curl]; [close] waits for them *)
-  ; mutable last_frame: Time_float.t (* when any frame (incl. ping/pong) was last read *) }
+  ; mutable last_frame: Time_float.t (* when any frame (incl. ping/pong) was last read *)
+  ; cleaned_up: unit Ivar.t (* filled once [close] has released [curl] *) }
 
 (** Time the last frame of any kind (including server pings, which are
     answered inside [receive] and never surface) was read. Lets callers
@@ -245,6 +246,7 @@ let connect ~url ?headers () =
                                  ; leftover_len= leftover_length
                                  ; fragment_buf= Buffer.create 4096
                                  ; inflight= Inflight.create ()
+                                 ; cleaned_up= Ivar.create ()
                                  ; last_frame= Time_float.now () })
                           | _ ->
                             bail (Error.of_string "Invalid Sec-WebSocket-Accept")))
@@ -533,10 +535,13 @@ let receive t =
 (** Close the connection. The handle is freed only after every in-flight
     send/receive worker has returned (see [Inflight]); the returned deferred
     is determined at that point. Idempotent. *)
+(** Idempotent: every call (including a second, concurrent one) is determined
+    only once in-flight workers have finished and [curl] has been released. *)
 let close t =
   match t.closed with
-  | true -> Deferred.unit
+  | true -> Ivar.read t.cleaned_up
   | false ->
     t.closed <- true;
     let%map () = Inflight.wait_idle t.inflight in
-    Curl.cleanup t.curl
+    Curl.cleanup t.curl;
+    Ivar.fill_if_empty t.cleaned_up ()

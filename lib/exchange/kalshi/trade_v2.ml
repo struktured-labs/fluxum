@@ -824,7 +824,7 @@ let effective_fee_params ~series:(series_ft, series_mult) ~event_ticker ~(change
 let get_event_fee_changes ~cfg event_ticker =
   paginate ~max_pages:10 ~key:"event_fee_changes" (fun ?cursor () ->
     call ~authed:false ~cfg ~meth:`GET
-      ~query:(("event_ticker", [ event_ticker ]) :: q_opt "cursor" Fn.id cursor)
+      ~query:(("event_ticker", [ event_ticker ]) :: ("limit", [ "1000" ]) :: q_opt "cursor" Fn.id cursor)
       "/events/fee_changes")
   >>| Result.bind ~f:(fun (l, _) ->
     List.map l ~f:fee_change_of_json |> Or_error.all
