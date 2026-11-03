@@ -82,24 +82,62 @@ end
 (* ------------------------------------------------------------------------- *)
 
 module Fp = struct
-  (** Parse a decimal string into an integer scaled by 10^decimals,
-      truncating extra digits. "0.5600" ~decimals:4 -> 5600. *)
+  (** Strictly parse a decimal string into an integer scaled by 10^decimals.
+      Accepts [-]?digits[.digits] (at least one digit overall, surrounding
+      whitespace ignored). Digits beyond [decimals] are accepted only when they
+      are all zero, so nothing is silently truncated. Anything else (empty,
+      "-", trailing garbage, exponents, overflow) is [None].
+      "0.5600" ~decimals:4 -> Some 5600; "0.5000garbage" -> None. *)
   let parse_scaled ~decimals s =
     let s = String.strip s in
     let neg, s =
       match String.chop_prefix s ~prefix:"-" with Some r -> (true, r) | None -> (false, s)
     in
     let ip, fp = match String.lsplit2 s ~on:'.' with Some (a, b) -> (a, b) | None -> (s, "") in
-    let fp =
-      if String.length fp >= decimals then String.prefix fp decimals
-      else fp ^ String.make (decimals - String.length fp) '0'
-    in
-    let ip = if String.is_empty ip then "0" else ip in
-    match Int.of_string_opt ip, (if decimals = 0 then Some 0 else Int.of_string_opt fp) with
-    | Some i, Some f ->
-      let v = (i * Int.pow 10 decimals) + f in
-      Some (if neg then -v else v)
-    | _ -> None
+    let all_digits x = String.for_all x ~f:Char.is_digit in
+    if String.is_empty ip && String.is_empty fp then None
+    else if not (all_digits ip && all_digits fp) then None
+    else if String.length ip > 15 then None (* keeps the scaled value far from overflow *)
+    else
+      let fp_kept, fp_extra =
+        if String.length fp > decimals then (String.prefix fp decimals, String.drop_prefix fp decimals)
+        else (fp ^ String.make (decimals - String.length fp) '0', "")
+      in
+      if not (String.for_all fp_extra ~f:(Char.equal '0')) then None
+      else
+        let ip = if String.is_empty ip then "0" else ip in
+        match Int.of_string_opt ip, (if decimals = 0 then Some 0 else Int.of_string_opt fp_kept) with
+        | Some i, Some f ->
+          let v = (i * Int.pow 10 decimals) + f in
+          Some (if neg then -v else v)
+        | _ -> None
+
+  (** Checked float -> integer scaled by 10^decimals (round to nearest).
+      Rejects NaN, infinities and magnitudes that can't be represented. *)
+  let scale_checked ~what ~decimals (x : float) =
+    if not (Float.is_finite x) then Or_error.errorf "%s is not a finite number" what
+    else
+      let v = x *. (10. ** Float.of_int decimals) in
+      if Float.(abs v > 1e15) then Or_error.errorf "%s %g is out of range" what x
+      else Ok (Float.iround_nearest_exn v)
+
+  (** A YES price in dollars as centicents, required to be strictly inside
+      (0, 1) {i after} rounding to 4 dp (0.00001 -> 0 and 0.99999 -> 10000
+      are rejected). *)
+  let price_key_checked (p : float) =
+    let open Or_error.Let_syntax in
+    let%bind k = scale_checked ~what:"price" ~decimals:4 p in
+    if k > 0 && k < 10_000 then Ok k
+    else Or_error.errorf "price %g rounds to %d centicents, outside (0, 1)" p k
+
+  (** A contract count in hundredths. Must be > 0 after rounding to 2 dp
+      (>= 0 when [allow_zero]). *)
+  let count_hundredths_checked ?(allow_zero = false) (c : float) =
+    let open Or_error.Let_syntax in
+    let%bind h = scale_checked ~what:"count" ~decimals:2 c in
+    if h > 0 || (allow_zero && h = 0) then Ok h
+    else Or_error.errorf "count %g rounds to %d hundredths; must be %s 0" c h
+           (if allow_zero then ">=" else ">")
 
   let price_to_string_scaled p = sprintf "%d.%04d" (p / 10_000) (p mod 10_000)
 
@@ -108,9 +146,9 @@ module Fp = struct
     price_to_string_scaled (Float.iround_nearest_exn (p *. 10_000.))
 
   (** Contract count as a 2-dp wire string, e.g. 10 -> "10.00". *)
-  let count_to_string (c : float) =
-    let h = Float.iround_nearest_exn (c *. 100.) in
-    sprintf "%d.%02d" (h / 100) (h mod 100)
+  let count_to_string_scaled h = sprintf "%d.%02d" (h / 100) (h mod 100)
+
+  let count_to_string (c : float) = count_to_string_scaled (Float.iround_nearest_exn (c *. 100.))
 
   let to_float s = Float.of_string_opt (String.strip s)
 end
@@ -333,13 +371,10 @@ module Order = struct
 
   let validate r =
     let open Or_error.Let_syntax in
-    let%bind () =
-      if Float.(r.price > 0. && r.price < 1.) then Ok ()
-      else Or_error.errorf "price %.4f outside (0,1)" r.price
-    in
-    let%bind () =
-      if Float.(r.count > 0.) then Ok () else Or_error.errorf "count must be > 0"
-    in
+    (* Validate the values that will actually go on the wire (rounded to
+       4 dp price / 2 dp count), not just the raw floats. *)
+    let%bind (_ : int) = Fp.price_key_checked r.price in
+    let%bind (_ : int) = Fp.count_hundredths_checked r.count in
     let%bind () =
       if r.reduce_only && not (equal_tif r.time_in_force Ioc)
       then Or_error.error_string "reduce_only requires immediate_or_cancel" else Ok ()
@@ -572,15 +607,23 @@ module Transfer = struct
   (** Dollars -> centicents (1/10000 dollar), as the API's [amount]. *)
   let centicents_of_dollars d = Float.iround_nearest_exn (d *. 10_000.)
 
+  (** Checked: finite, representable, and > 0 after rounding to centicents. *)
+  let centicents_checked d =
+    let open Or_error.Let_syntax in
+    let%bind k = Fp.scale_checked ~what:"amount" ~decimals:4 d in
+    if k > 0 then Ok k else Or_error.errorf "amount %g rounds to %d centicents; must be > 0" d k
+
   let body ~amount_dollars ~source_shard ~destination_shard ?client_transfer_id () =
-    if Float.(amount_dollars <= 0.) then Or_error.error_string "amount must be > 0"
-    else if source_shard < 0 || source_shard > 100 || destination_shard < 0 || destination_shard > 100
+    match centicents_checked amount_dollars with
+    | Error e -> Error e
+    | Ok amount ->
+    if source_shard < 0 || source_shard > 100 || destination_shard < 0 || destination_shard > 100
     then Or_error.error_string "shard index must be 0..100"
     else if source_shard = destination_shard then Or_error.error_string "source = destination shard"
     else
       Ok (`Assoc ([ ("source", `String "event_contract")
                   ; ("destination", `String "event_contract")
-                  ; ("amount", `Int (centicents_of_dollars amount_dollars))
+                  ; ("amount", `Int amount)
                   ; ("source_exchange_shard", `Int source_shard)
                   ; ("destination_exchange_shard", `Int destination_shard) ]
                   @ (match client_transfer_id with
@@ -623,20 +666,36 @@ let cancel_order ~cfg ?market_ticker order_id =
   call ~cfg ~meth:`DELETE ~query:(q_opt "market_ticker" Fn.id market_ticker)
     ("/portfolio/events/orders/" ^ order_id)
 
-let amend_order ~cfg ~order_id ~ticker ~side ~price ~count =
-  call ~cfg ~meth:`POST
-    ~body:(`Assoc [ ("ticker", `String ticker)
-                  ; ("side", `String (Order.book_side_to_string side))
-                  ; ("price", `String (Fp.price_to_string price))
-                  ; ("count", `String (Fp.count_to_string count)) ])
-    ("/portfolio/events/orders/" ^ order_id ^ "/amend")
+module Amend = struct
+  let body ~ticker ~side ~price ~count =
+    let open Or_error.Let_syntax in
+    let%bind p = Fp.price_key_checked price in
+    let%bind c = Fp.count_hundredths_checked count in
+    Ok (`Assoc [ ("ticker", `String ticker)
+               ; ("side", `String (Order.book_side_to_string side))
+               ; ("price", `String (Fp.price_to_string_scaled p))
+               ; ("count", `String (Fp.count_to_string_scaled c)) ])
 
-let decrease_order ~cfg ~order_id ?market_ticker (by : [ `Reduce_by of float | `Reduce_to of float ]) =
-  let k, v = match by with `Reduce_by c -> ("reduce_by", c) | `Reduce_to c -> ("reduce_to", c) in
-  call ~cfg ~meth:`POST
-    ~body:(`Assoc ((k, `String (Fp.count_to_string v))
-                   :: (match market_ticker with Some t -> [ ("market_ticker", `String t) ] | None -> [])))
-    ("/portfolio/events/orders/" ^ order_id ^ "/decrease")
+  (** [Reduce_by] must be > 0; [Reduce_to] may be 0 (= cancel the remainder). *)
+  let decrease_body ?market_ticker (by : [ `Reduce_by of float | `Reduce_to of float ]) =
+    let open Or_error.Let_syntax in
+    let k, v, allow_zero =
+      match by with `Reduce_by c -> ("reduce_by", c, false) | `Reduce_to c -> ("reduce_to", c, true)
+    in
+    let%bind h = Fp.count_hundredths_checked ~allow_zero v in
+    Ok (`Assoc ((k, `String (Fp.count_to_string_scaled h))
+                :: (match market_ticker with Some t -> [ ("market_ticker", `String t) ] | None -> [])))
+end
+
+let amend_order ~cfg ~order_id ~ticker ~side ~price ~count =
+  match Amend.body ~ticker ~side ~price ~count with
+  | Error e -> return (Error (`Http (0, Error.to_string_hum e)))
+  | Ok body -> call ~cfg ~meth:`POST ~body ("/portfolio/events/orders/" ^ order_id ^ "/amend")
+
+let decrease_order ~cfg ~order_id ?market_ticker by =
+  match Amend.decrease_body ?market_ticker by with
+  | Error e -> return (Error (`Http (0, Error.to_string_hum e)))
+  | Ok body -> call ~cfg ~meth:`POST ~body ("/portfolio/events/orders/" ^ order_id ^ "/decrease")
 
 (* ------------------------------------------------------------------------- *)
 (* Ticker / URL resolution                                                    *)

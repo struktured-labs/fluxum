@@ -533,8 +533,10 @@ let () =
   let evs, a = feed {|{"type":"orderbook_delta","sid":2,"seq":6,"msg":{"market_ticker":"M","price_dollars":"0.5700","delta_fp":"1.00","side":"no"}}|} in
   assert_true "seq gap -> resync" (Poly.equal a `Resync && (match evs with [ W.Gap { expected = 5; got = 6; _ } ] -> true | _ -> false));
   assert_true "gap delta not applied" (Poly.equal (snd (W.Local_book.top bk)) (Some (4300, 7.5)));
-  let _, a = feed {|{"type":"orderbook_snapshot","sid":2,"seq":7,"msg":{"market_ticker":"M","yes_dollars_fp":[],"no_dollars_fp":[]}}|} in
-  assert_true "snapshot resets seq + book" (Poly.equal a `Continue && Poly.equal (W.Local_book.top bk) (None, None));
+  (* after a gap the client reconnects, which resets sequence tracking *)
+  W.Seq_tracker.reset seqs;
+  let _, a = feed {|{"type":"orderbook_snapshot","sid":2,"seq":1,"msg":{"market_ticker":"M","yes_dollars_fp":[],"no_dollars_fp":[]}}|} in
+  assert_true "snapshot after resubscribe replaces book" (Poly.equal a `Continue && Poly.equal (W.Local_book.top bk) (None, None));
   let _, a = feed {|{"type":"ticker","sid":3,"msg":{"market_ticker":"M"}}|} in
   assert_true "unsequenced ticker ok" (Poly.equal a `Continue);
   let other = W.Seq_tracker.create () in
@@ -554,6 +556,256 @@ let () =
   (match feed {|{"type":"user_order","sid":22,"msg":{"order_id":"o"}}|} with
    | [ W.User_order _ ], `Continue -> assert_true "user_order routed" true | _ -> assert_true "user_order routed" false);
 
-  printf "\n=== Results: %d passed, %d failed (%d total) ===\n"
+
+  (* ---------------- Copilot round-1 fixes ---------------- *)
+  printf "\n--- Strict fixed-point parsing ---\n";
+  let ps ?(d = 4) x = T.Fp.parse_scaled ~decimals:d x in
+  let none x = Option.is_none (ps x) in
+  assert_true "parse rejects trailing garbage" (none "0.5000garbage");
+  assert_true "parse rejects empty" (none "");
+  assert_true "parse rejects lone -" (none "-");
+  assert_true "parse rejects lone ." (none ".");
+  assert_true "parse rejects exponent" (none "5e-1");
+  assert_true "parse rejects inner space" (none "0. 5");
+  assert_true "parse rejects double dot" (none "0.5.1");
+  assert_true "parse rejects +" (none "+0.5");
+  assert_true "parse rejects nonzero excess digits" (none "0.56001");
+  assert_true "parse accepts zero excess digits" (Poly.equal (ps "0.560000") (Some 5600));
+  assert_true "parse rejects overflow" (none "99999999999999999999.0");
+  assert_true "parse .5" (Poly.equal (ps ".5") (Some 5000));
+  assert_true "parse 1." (Poly.equal (ps "1.") (Some 10000));
+  assert_true "parse -0.25" (Poly.equal (ps "-0.25") (Some (-2500)));
+  printf "\n--- Checked order values ---\n";
+  let err r = Result.is_error r in
+  let base = T.Order.buy ~ticker:"M" ~outcome:T.Yes ~count:1. ~price:0.5 () in
+  assert_true "order ok baseline" (Result.is_ok (T.Order.validate base));
+  assert_true "order price 0.00001 (rounds to 0) rejected" (err (T.Order.validate { base with price = 0.00001 }));
+  assert_true "order price 0.99999 (rounds to 1) rejected" (err (T.Order.validate { base with price = 0.99999 }));
+  assert_true "order price 0.99994 (rounds to 0.9999) ok" (Result.is_ok (T.Order.validate { base with price = 0.99994 }));
+  assert_true "order price NaN rejected" (err (T.Order.validate { base with price = Float.nan }));
+  assert_true "order count 0.001 (rounds to 0) rejected" (err (T.Order.validate { base with count = 0.001 }));
+  assert_true "order count inf rejected" (err (T.Order.validate { base with count = Float.infinity }));
+  assert_true "order count nan rejected" (err (T.Order.validate { base with count = Float.nan }));
+  assert_true "order count 1e300 rejected" (err (T.Order.validate { base with count = 1e300 }));
+  assert_true "order count -1 rejected" (err (T.Order.validate { base with count = -1. }));
+  let ab ~price ~count = T.Amend.body ~ticker:"M" ~side:T.Order.Bid ~price ~count in
+  (match ab ~price:0.42 ~count:3. with
+   | Ok j -> assert_equal "amend body" ~expected:{|{"ticker":"M","side":"bid","price":"0.4200","count":"3.00"}|} (Yojson.Safe.to_string j)
+   | Error e -> assert_true ("amend body: " ^ Error.to_string_hum e) false);
+  assert_true "amend NaN price rejected" (err (ab ~price:Float.nan ~count:1.));
+  assert_true "amend inf price rejected" (err (ab ~price:Float.infinity ~count:1.));
+  assert_true "amend price rounds to 1 rejected" (err (ab ~price:0.99999 ~count:1.));
+  assert_true "amend inf count rejected" (err (ab ~price:0.5 ~count:Float.infinity));
+  assert_true "amend huge count rejected" (err (ab ~price:0.5 ~count:1e300));
+  assert_true "amend zero count rejected" (err (ab ~price:0.5 ~count:0.004));
+  assert_true "reduce_by 0 rejected" (err (T.Amend.decrease_body (`Reduce_by 0.)));
+  assert_true "reduce_by NaN rejected" (err (T.Amend.decrease_body (`Reduce_by Float.nan)));
+  assert_true "reduce_by inf rejected" (err (T.Amend.decrease_body (`Reduce_by Float.infinity)));
+  assert_true "reduce_to -1 rejected" (err (T.Amend.decrease_body (`Reduce_to (-1.))));
+  (match T.Amend.decrease_body (`Reduce_to 0.) with
+   | Ok j -> assert_equal "reduce_to 0 allowed" ~expected:{|{"reduce_to":"0.00"}|} (Yojson.Safe.to_string j)
+   | Error _ -> assert_true "reduce_to 0 allowed" false);
+  (match T.Amend.decrease_body ~market_ticker:"M" (`Reduce_by 2.) with
+   | Ok j -> assert_equal "reduce_by body" ~expected:{|{"reduce_by":"2.00","market_ticker":"M"}|} (Yojson.Safe.to_string j)
+   | Error _ -> assert_true "reduce_by body" false);
+  printf "\n--- Checked transfer amounts ---\n";
+  let tb a = T.Transfer.body ~amount_dollars:a ~source_shard:0 ~destination_shard:2 () in
+  assert_true "transfer NaN -> Error (no exn)" (err (tb Float.nan));
+  assert_true "transfer +inf -> Error" (err (tb Float.infinity));
+  assert_true "transfer -inf -> Error" (err (tb Float.neg_infinity));
+  assert_true "transfer 1e300 -> Error" (err (tb 1e300));
+  assert_true "transfer 0.00001 (rounds to 0) -> Error" (err (tb 0.00001));
+  assert_true "transfer -5 -> Error" (err (tb (-5.)));
+  (match tb 0.0001 with
+   | Ok (`Assoc l) -> assert_true "transfer 0.0001 -> 1 centicent" (Poly.equal (List.Assoc.find l ~equal:String.equal "amount") (Some (`Int 1)))
+   | _ -> assert_true "transfer 0.0001" false);
+
+  printf "\n--- WS strict decoding ---\n";
+  let books = String.Table.create () and seqs = W.Seq_tracker.create () in
+  let feed s = W.handle ~books ~seqs (Yojson.Safe.from_string s) in
+  let is_decode_resync = function [ W.Decode_error _ ], `Resync -> true | _ -> false in
+  ignore (feed {|{"type":"orderbook_snapshot","sid":1,"seq":1,"msg":{"market_ticker":"A","yes_dollars_fp":[["0.4000","10.00"]],"no_dollars_fp":[["0.5000","5.00"]]}}|});
+  let a = Hashtbl.find_exn books "A" in
+  let top0 = W.Local_book.top a in
+  let bad_delta seq fields =
+    sprintf {|{"type":"orderbook_delta","sid":1,"seq":%d,"msg":{"market_ticker":"A"%s}}|} seq fields
+  in
+  (* each bad message consumes one seq, so keep them in sequence *)
+  assert_true "unknown side -> decode error + resync"
+    (is_decode_resync (feed (bad_delta 2 {|,"price_dollars":"0.4000","delta_fp":"1.00","side":"unknown"|})));
+  assert_true "unknown side does not mutate YES book" (Poly.equal (W.Local_book.top a) top0);
+  assert_true "missing side -> decode error"
+    (is_decode_resync (feed (bad_delta 3 {|,"price_dollars":"0.4000","delta_fp":"1.00"|})));
+  assert_true "missing price_dollars -> decode error (no exn)"
+    (is_decode_resync (feed (bad_delta 4 {|,"delta_fp":"1.00","side":"yes"|})));
+  assert_true "nonnumeric delta_fp -> decode error (no exn)"
+    (is_decode_resync (feed (bad_delta 5 {|,"price_dollars":"0.4000","delta_fp":"abc","side":"yes"|})));
+  assert_true "garbage price -> decode error"
+    (is_decode_resync (feed (bad_delta 6 {|,"price_dollars":"0.5000garbage","delta_fp":"1","side":"yes"|})));
+  assert_true "empty price -> decode error"
+    (is_decode_resync (feed (bad_delta 7 {|,"price_dollars":"","delta_fp":"1","side":"yes"|})));
+  assert_true "price '-' -> decode error"
+    (is_decode_resync (feed (bad_delta 8 {|,"price_dollars":"-","delta_fp":"1","side":"yes"|})));
+  assert_true "price > 1 -> decode error"
+    (is_decode_resync (feed (bad_delta 9 {|,"price_dollars":"1.5000","delta_fp":"1","side":"yes"|})));
+  assert_true "book unchanged after all bad deltas" (Poly.equal (W.Local_book.top a) top0);
+  assert_true "bad snapshot level -> decode error, book kept"
+    (is_decode_resync (feed {|{"type":"orderbook_snapshot","sid":1,"seq":10,"msg":{"market_ticker":"A","yes_dollars_fp":[["x","1"]],"no_dollars_fp":[]}}|})
+     && Poly.equal (W.Local_book.top a) top0);
+  assert_true "book msg without market_ticker -> decode error"
+    (is_decode_resync (feed {|{"type":"orderbook_delta","sid":1,"seq":11,"msg":{"price_dollars":"0.4","delta_fp":"1","side":"yes"}}|}));
+  assert_true "non-object JSON -> decode error" (is_decode_resync (feed {|[1,2]|}));
+  assert_true "diff_with_rest bad REST -> reported, no exn"
+    (match W.Local_book.diff_with_rest a (Yojson.Safe.from_string {|{"orderbook_fp":{"yes_dollars":[["zz","1"]]}}|}) with
+     | [ m ] -> String.is_prefix m ~prefix:"rest decode error" | _ -> false);
+
+  printf "\n--- WS interleaved markets / per-sid sequence ---\n";
+  let books = String.Table.create () and seqs = W.Seq_tracker.create () in
+  let feed s = W.handle ~books ~seqs (Yojson.Safe.from_string s) in
+  let snapm sid seq m = sprintf {|{"type":"orderbook_snapshot","sid":%d,"seq":%d,"msg":{"market_ticker":"%s","yes_dollars_fp":[["0.1000","1.00"]],"no_dollars_fp":[]}}|} sid seq m in
+  let deltam sid seq m = sprintf {|{"type":"orderbook_delta","sid":%d,"seq":%d,"msg":{"market_ticker":"%s","price_dollars":"0.1000","delta_fp":"1.00","side":"yes"}}|} sid seq m in
+  let ok r = Poly.equal (snd r) `Continue in
+  assert_true "interleaved: snap A seq1" (ok (feed (snapm 5 1 "A")));
+  assert_true "interleaved: snap B seq2" (ok (feed (snapm 5 2 "B")));
+  assert_true "interleaved: delta A seq3" (ok (feed (deltam 5 3 "A")));
+  assert_true "interleaved: delta B seq4" (ok (feed (deltam 5 4 "B")));
+  (* seq 5 (a delta for A) is lost; a snapshot for B arrives with seq 6 *)
+  (match feed (snapm 5 6 "B") with
+   | [ W.Gap { sid = 5; expected = 5; got = 6 } ], `Resync -> assert_true "lost A delta then B snapshot -> gap/resync" true
+   | _ -> assert_true "lost A delta then B snapshot -> gap/resync" false);
+  assert_true "B book not replaced by out-of-sequence snapshot"
+    (Poly.equal (fst (W.Local_book.top (Hashtbl.find_exn books "B"))) (Some (1000, 2.)));
+  assert_true "A book reflects only in-sequence deltas"
+    (Poly.equal (fst (W.Local_book.top (Hashtbl.find_exn books "A"))) (Some (1000, 2.)));
+  let s2 = W.Seq_tracker.create () in
+  assert_true "first msg on new sid accepted (snapshot)" (Poly.equal (W.Seq_tracker.check s2 ~sid:1 ~seq:40 ~is_snapshot:true) `Ok);
+  assert_true "in-sequence snapshot on known sid ok" (Poly.equal (W.Seq_tracker.check s2 ~sid:1 ~seq:41 ~is_snapshot:true) `Ok);
+  assert_true "out-of-sequence snapshot on known sid -> gap" (Poly.equal (W.Seq_tracker.check s2 ~sid:1 ~seq:50 ~is_snapshot:true) (`Gap (42, 50)));
+  assert_true "other sid unaffected" (Poly.equal (W.Seq_tracker.check s2 ~sid:2 ~seq:1 ~is_snapshot:false) `Ok);
+
+  printf "\n--- WS run loop (fake transport) ---\n";
+  let module Fake = struct
+    type conn = { id : int; mutable inflight : bool; mutable closed : bool; inbox : string option Async.Ivar.t Queue.t }
+    type t = conn
+    let conns : conn list ref = ref []
+    let violations = ref 0  (* close while a receive is in flight = would be use-after-free *)
+    let connect_hook : (unit -> conn Or_error.t Async.Deferred.t) option ref = ref None
+    let script : (int -> string option list) ref = ref (fun _ -> [])  (* per-connection messages; then block *)
+    let next = ref 0
+    let fresh () =
+      incr next;
+      let c = { id = !next; inflight = false; closed = false; inbox = Queue.create () } in
+      List.iter (!script c.id) ~f:(fun m -> Queue.enqueue c.inbox (Async.Ivar.create_full m));
+      conns := c :: !conns; c
+    let connect ~url:_ ~headers:_ = match !connect_hook with Some f -> f () | None -> Async.return (Ok (fresh ()))
+    let send _ _ = Async.return ()
+    let receive c =
+      let iv = match Queue.dequeue c.inbox with Some iv -> iv | None -> Async.Ivar.create () in
+      c.inflight <- true;
+      Async.Deferred.map (Async.Ivar.read iv) ~f:(fun m -> c.inflight <- false; m)
+    let close c = if c.inflight then incr violations; c.closed <- true; Async.return ()
+    (* deliver to the receive currently blocked on [c] *)
+    let pending : (int, string option Async.Ivar.t) Hashtbl.t = Hashtbl.create (module Int)
+    let reset () = conns := []; violations := 0; connect_hook := None; script := (fun _ -> []); next := 0; Hashtbl.clear pending
+  end in
+  let module Fake_t = struct
+    type t = Fake.t
+    let connect = Fake.connect
+    let send = Fake.send
+    let close = Fake.close
+    let receive (c : Fake.conn) =
+      if Queue.is_empty c.inbox then begin
+        let iv = Async.Ivar.create () in
+        Hashtbl.set Fake.pending ~key:c.id ~data:iv;
+        Queue.enqueue c.inbox iv
+      end;
+      Fake.receive c
+  end in
+  let open Async in
+  let pol = { W.base = 0.005; cap = 0.2; healthy_after = 60.; stop_grace = 0.05 } in
+  let run_fake ?(policy = pol) ~stop ~on_event () =
+    W.run_with (module Fake_t) ~headers:(fun () -> []) ~url:"wss://fake" ~tickers:[ "A" ] ~user:false ~stop ~policy
+      ~rand:(fun () -> 1.0) ~on_event ()
+  in
+  let block f = Thread_safe.block_on_async_exn f in
+  (* 1. stop while a receive is in flight: no close under the receive *)
+  Fake.reset ();
+  let r = block (fun () ->
+    let stop = Ivar.create () in
+    let finished = run_fake ~stop:(Ivar.read stop) ~on_event:(fun _ -> ()) () in
+    let%bind () = Clock.after (Time_float.Span.of_ms 20.) in
+    let c = List.hd_exn !Fake.conns in
+    let inflight_before = c.inflight in
+    Ivar.fill_exn stop ();
+    let%bind () = finished in
+    let closed_while_inflight = c.closed in
+    (* the receive returns later (e.g. curl's 30 s poll timeout) *)
+    Ivar.fill_exn (Hashtbl.find_exn Fake.pending c.id) None;
+    let%bind () = Clock.after (Time_float.Span.of_ms 10.) in
+    return (inflight_before, closed_while_inflight, c.closed, !Fake.violations))
+  in
+  let inflight_before, closed_early, closed_after, viol = r in
+  assert_true "stop: receive was in flight" inflight_before;
+  assert_true "stop: run returns within grace without closing under receive" (not closed_early);
+  assert_true "stop: transport closed once receive returned" closed_after;
+  assert_true "stop: no close-while-receiving (no use-after-free)" (viol = 0);
+  (* 2. EOF closes before reconnecting; malformed data resyncs instead of escaping *)
+  Fake.reset ();
+  Fake.script := (fun id -> match id with
+    | 1 -> [ None ]
+    | 2 -> [ Some {|{"type":"orderbook_delta","sid":1,"seq":1,"msg":{"market_ticker":"A","price_dollars":"0.4","delta_fp":"x","side":"yes"}}|} ]
+    | 3 -> [ Some "not json" ]
+    | _ -> []);
+  let evs = ref [] in
+  let conns_closed = block (fun () ->
+    let stop = Ivar.create () in
+    let finished = run_fake ~stop:(Ivar.read stop) ~on_event:(fun e -> evs := e :: !evs) () in
+    let%bind () = Clock.after (Time_float.Span.of_ms 300.) in
+    Ivar.fill_exn stop ();
+    let%bind () = finished in
+    (match Hashtbl.find Fake.pending 4 with Some iv -> Ivar.fill_if_empty iv None | None -> ());
+    let%bind () = Clock.after (Time_float.Span.of_ms 10.) in
+    return (List.filter !Fake.conns ~f:(fun c -> c.id <= 3) |> List.for_all ~f:(fun c -> c.closed)))
+  in
+  assert_true "EOF / decode errors: reached 4th connection" (List.length !Fake.conns >= 4);
+  assert_true "EOF / decode errors: every lost connection closed" conns_closed;
+  assert_true "decode error surfaced as event (not exception)"
+    (List.count !evs ~f:(function W.Decode_error _ -> true | _ -> false) = 2);
+  assert_true "no close-while-receiving across reconnects" (!Fake.violations = 0);
+  (* 3. short-lived established connections back off exponentially *)
+  Fake.reset ();
+  Fake.script := (fun _ -> [ None ]);
+  let times = ref [] in
+  block (fun () ->
+    let stop = Ivar.create () in
+    let finished = run_fake ~stop:(Ivar.read stop)
+        ~on_event:(function W.Connected _ -> times := Time_float.now () :: !times | _ -> ()) () in
+    let%bind () = Clock.after (Time_float.Span.of_ms 400.) in
+    Ivar.fill_exn stop ();
+    finished);
+  let ts = List.rev !times in
+  let gaps = List.map2_exn (List.drop_last_exn ts) (List.tl_exn ts) ~f:(fun a b -> Time_float.Span.to_sec (Time_float.diff b a)) in
+  assert_true (sprintf "short-lived conns: bounded reconnects (%d in 400ms)" (List.length ts)) (List.length ts >= 4 && List.length ts <= 9);
+  assert_true "short-lived conns: delay grows" (match gaps with g0 :: _ -> Float.(List.last_exn gaps > 3. *. g0) | [] -> false);
+  (* 4. stop while the handshake is pending; late connection gets closed *)
+  Fake.reset ();
+  let hs = Ivar.create () in
+  Fake.connect_hook := Some (fun () -> Ivar.read hs);
+  let late = block (fun () ->
+    let stop = Ivar.create () in
+    let finished = run_fake ~stop:(Ivar.read stop) ~on_event:(fun _ -> ()) () in
+    let%bind () = Clock.after (Time_float.Span.of_ms 10.) in
+    Ivar.fill_exn stop ();
+    let%bind () = Clock.with_timeout (Time_float.Span.of_ms 200.) finished >>| function `Result () -> () | `Timeout -> failwith "stop ignored during handshake" in
+    Fake.connect_hook := None;
+    let c = Fake.fresh () in
+    Ivar.fill_exn hs (Ok c);
+    let%bind () = Clock.after (Time_float.Span.of_ms 10.) in
+    return c)
+  in
+  assert_true "stop during pending handshake returns promptly" true;
+  assert_true "late handshake closed, never subscribed/read" (late.closed && not late.inflight);
+  Core.printf "\n=== Results: %d passed, %d failed (%d total) ===\n"
     !passed !failed (!passed + !failed);
-  if !failed > 0 then exit 1
+  Core.Out_channel.flush Core.stdout;
+  Stdlib.exit (if !failed > 0 then 1 else 0)
