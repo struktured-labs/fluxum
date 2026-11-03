@@ -143,14 +143,21 @@ module Fp = struct
     else Or_error.errorf "count %g rounds to %d hundredths; must be %s 0" c h
            (if allow_zero then ">=" else ">")
 
-  let price_to_string_scaled p = sprintf "%d.%04d" (p / 10_000) (p mod 10_000)
+  (* Fixed-point to string with an explicit sign: OCaml's [/] and [mod]
+     truncate toward zero, so the naive form renders -5000 as "0.-5000". *)
+  let signed_fixed ~scale ~digits v =
+    let sign = if v < 0 then "-" else "" in
+    let a = Int.abs v in
+    sprintf "%s%d.%0*d" sign (a / scale) digits (a mod scale)
+
+  let price_to_string_scaled p = signed_fixed ~scale:10_000 ~digits:4 p
 
   (** Dollar price as a 4-dp wire string, e.g. 0.56 -> "0.5600". *)
   let price_to_string (p : float) =
     price_to_string_scaled (Float.iround_nearest_exn (p *. 10_000.))
 
   (** Contract count as a 2-dp wire string, e.g. 10 -> "10.00". *)
-  let count_to_string_scaled h = sprintf "%d.%02d" (h / 100) (h mod 100)
+  let count_to_string_scaled h = signed_fixed ~scale:100 ~digits:2 h
 
   let count_to_string (c : float) = count_to_string_scaled (Float.iround_nearest_exn (c *. 100.))
 
@@ -886,6 +893,25 @@ module Transfer = struct
                   ; ("destination_exchange_shard", `Int destination_shard) ]
                   @ (match client_transfer_id with
                      | Some id -> [ ("client_transfer_id", `String id) ] | None -> [])))
+
+  (** Status of a GET /portfolio/intra_exchange_instance_transfers/{id}
+      response ([{"transfer": {..., "status": ...}}]; a bare transfer object
+      is accepted too). Documented values are exactly "pending" and
+      "complete"; anything else is [`Unknown] so callers stop polling. *)
+  let status_of_json (j : Yojson.Safe.t) =
+    let status_of o = match o with
+      | `Assoc kv -> (match List.Assoc.find kv ~equal:String.equal "status" with
+          | Some (`String s) -> Some s | _ -> None)
+      | _ -> None in
+    let inner = match j with
+      | `Assoc kv -> (match List.Assoc.find kv ~equal:String.equal "transfer" with
+          | Some t -> t | None -> j)
+      | _ -> j in
+    match status_of inner with
+    | Some "pending" -> `Pending
+    | Some "complete" -> `Complete
+    | Some s -> `Unknown s
+    | None -> `Unknown "<missing status>"
 end
 
 (** Move funds between exchange shards of the event-contract instance.

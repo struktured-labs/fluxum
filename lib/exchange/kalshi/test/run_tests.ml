@@ -1109,6 +1109,25 @@ let () =
   assert_true "S8: latest applicable change wins; null type -> series type" (Poly.equal (eff "2026-07-01T00:00:00Z") (T.Fees.Quadratic, 0.25));
   assert_true "S8: other event's change ignored"
     (Poly.equal (T.effective_fee_params ~series:(T.Fees.Quadratic, 1.0) ~event_ticker:"OTHER" ~changes ~now:(at "2026-07-01T00:00:00Z")) (T.Fees.Quadratic, 1.0));
+  (* N6: negative fixed-point values keep their sign *)
+  assert_equal "N6: price -0.5" ~expected:"-0.5000" (T.Fp.price_to_string_scaled (-5000));
+  assert_equal "N6: price -1.5" ~expected:"-1.5000" (T.Fp.price_to_string_scaled (-15000));
+  assert_equal "N6: price -0.0001" ~expected:"-0.0001" (T.Fp.price_to_string_scaled (-1));
+  assert_equal "N6: price 0" ~expected:"0.0000" (T.Fp.price_to_string_scaled 0);
+  assert_equal "N6: price 1.2345" ~expected:"1.2345" (T.Fp.price_to_string_scaled 12345);
+  assert_equal "N6: price_to_string -0.03" ~expected:"-0.0300" (T.Fp.price_to_string (-0.03));
+  assert_equal "N6: count -1.5" ~expected:"-1.50" (T.Fp.count_to_string_scaled (-150));
+  assert_equal "N6: count -0.07" ~expected:"-0.07" (T.Fp.count_to_string_scaled (-7));
+  assert_equal "N6: count 10" ~expected:"10.00" (T.Fp.count_to_string 10.);
+  (* N8: exact transfer status *)
+  let ts s = T.Transfer.status_of_json (Yojson.Safe.from_string s) in
+  assert_true "N8: nested complete" (Poly.equal (ts {|{"transfer":{"transfer_id":"x","status":"complete"}}|}) `Complete);
+  assert_true "N8: nested pending" (Poly.equal (ts {|{"transfer":{"status":"pending"}}|}) `Pending);
+  assert_true "N8: bare complete" (Poly.equal (ts {|{"status":"complete"}|}) `Complete);
+  assert_true "N8: 'incomplete' is not complete" (Poly.equal (ts {|{"transfer":{"status":"incomplete"}}|}) (`Unknown "incomplete"));
+  assert_true "N8: 'complete' in another field ignored"
+    (Poly.equal (ts {|{"transfer":{"status":"pending","note":"complete"}}|}) `Pending);
+  assert_true "N8: missing status unknown" (match ts {|{"transfer":{}}|} with `Unknown _ -> true | _ -> false);
   Core.printf "\n=== Results: %d passed, %d failed (%d total) ===\n"
     !passed !failed (!passed + !failed);
   Core.Out_channel.flush Core.stdout;
