@@ -143,14 +143,21 @@ module Fp = struct
     else Or_error.errorf "count %g rounds to %d hundredths; must be %s 0" c h
            (if allow_zero then ">=" else ">")
 
-  let price_to_string_scaled p = sprintf "%d.%04d" (p / 10_000) (p mod 10_000)
+  (* Fixed-point to string with an explicit sign: OCaml's [/] and [mod]
+     truncate toward zero, so the naive form renders -5000 as "0.-5000". *)
+  let signed_fixed ~scale ~digits v =
+    let sign = if v < 0 then "-" else "" in
+    let a = Int.abs v in
+    sprintf "%s%d.%0*d" sign (a / scale) digits (a mod scale)
+
+  let price_to_string_scaled p = signed_fixed ~scale:10_000 ~digits:4 p
 
   (** Dollar price as a 4-dp wire string, e.g. 0.56 -> "0.5600". *)
   let price_to_string (p : float) =
     price_to_string_scaled (Float.iround_nearest_exn (p *. 10_000.))
 
   (** Contract count as a 2-dp wire string, e.g. 10 -> "10.00". *)
-  let count_to_string_scaled h = sprintf "%d.%02d" (h / 100) (h mod 100)
+  let count_to_string_scaled h = signed_fixed ~scale:100 ~digits:2 h
 
   let count_to_string (c : float) = count_to_string_scaled (Float.iround_nearest_exn (c *. 100.))
 
@@ -191,6 +198,14 @@ module Fees = struct
     | s -> Unknown s
 
   let taker_rate = 0.07
+
+  (** Taker rate for a series' fee_type. [None] for [Flat] (per-contract
+      amounts published only in Kalshi's "Specific Trading Fees Table", not
+      in the API) and for fee types this client does not know. *)
+  let taker_rate_of = function
+    | Quadratic | Quadratic_with_maker_fees | Quadratic_with_combo_maker_fees -> Some taker_rate
+    | Flat | Unknown _ -> None
+
   let maker_rate = function
     | Quadratic_with_maker_fees -> 0.0175
     | Quadratic_with_combo_maker_fees -> 0.035
@@ -316,7 +331,7 @@ module Quote = struct
   (** Walk the asks for [outcome] buying [count] contracts as a taker, stopping
       at [limit] (inclusive) if given. The fee is computed on the whole order
       (sum of raw per-level fees, rounded once). *)
-  let buy ?limit ?(multiplier = 1.0) ?(rounding = Fees.Cent) ~book ~outcome ~count () =
+  let buy ?limit ?(multiplier = 1.0) ?(fee_type = Fees.Quadratic) ?(rounding = Fees.Cent) ~book ~outcome ~count () =
     let rec walk remaining acc = function
       | [] -> List.rev acc
       | _ when Float.(remaining <= 0.) -> List.rev acc
@@ -330,11 +345,16 @@ module Quote = struct
     let levels = walk count [] (Book.asks book outcome) in
     let filled = List.sum (module Float) levels ~f:(fun l -> l.size) in
     let notional = List.sum (module Float) levels ~f:(fun l -> l.price *. l.size) in
-    let raw_fee =
-      List.sum (module Float) levels ~f:(fun l ->
-        Fees.raw ~rate:Fees.taker_rate ~multiplier ~count:l.size ~price:l.price)
+    (* [fee] is NaN when the series' fee_type has no known formula (Flat /
+       Unknown): callers must treat the cost as unknown, not fee-free. *)
+    let fee =
+      match Fees.taker_rate_of fee_type with
+      | None -> Float.nan
+      | Some rate ->
+        Fees.round_up ~rounding
+          (List.sum (module Float) levels ~f:(fun l ->
+             Fees.raw ~rate ~multiplier ~count:l.size ~price:l.price))
     in
-    let fee = Fees.round_up ~rounding raw_fee in
     let total_cost = notional +. fee in
     let payout = filled in
     let div a b = if Float.(b > 0.) then a /. b else Float.nan in
@@ -418,9 +438,26 @@ module Order = struct
       if r.reduce_only && not (equal_tif r.time_in_force Ioc)
       then Or_error.error_string "reduce_only requires immediate_or_cancel" else Ok ()
     in
-    if Option.is_some r.expiration_time && not (equal_tif r.time_in_force Gtc)
-    then Or_error.error_string "expiration_time requires good_till_canceled"
-    else Ok ()
+    let%bind () =
+      if r.post_only && not (equal_tif r.time_in_force Gtc)
+      then Or_error.error_string "post_only requires good_till_canceled (not IOC/FOK)" else Ok ()
+    in
+    let%bind () =
+      if String.is_empty (String.strip r.ticker) then Or_error.error_string "empty ticker" else Ok ()
+    in
+    match r.expiration_time with
+    | None -> Ok ()
+    | Some _ when not (equal_tif r.time_in_force Gtc) ->
+      Or_error.error_string "expiration_time requires good_till_canceled"
+    | Some t when t <= 0 -> Or_error.errorf "expiration_time %d must be a positive unix time" t
+    | Some _ -> Ok ()
+
+  (** Fill in a fresh UUID [client_order_id] if none is set, so the order can
+      be looked up after an ambiguous outcome (e.g. a timeout). *)
+  let ensure_client_order_id r =
+    match r.client_order_id with
+    | Some id when not (String.is_empty (String.strip id)) -> r
+    | _ -> { r with client_order_id = Some (Auth.uuid_v4 ()) }
 
   let to_yojson r : Yojson.Safe.t =
     let opt k f = function Some v -> [ (k, f v) ] | None -> [] in
@@ -471,6 +508,9 @@ type error =
   | `Unauthorized
   | `Not_found
   | `Rate_limited
+  | `Timeout of string
+    (** no response within the deadline. The request may or may not have
+        been applied by the exchange; it is never retried automatically. *)
   | `Network of string ]
 [@@deriving sexp]
 
@@ -492,7 +532,21 @@ let parse_response code body : (Yojson.Safe.t, error) Result.t =
   | 429 -> Error `Rate_limited  (* no Retry-After; caller should back off *)
   | c -> Error (`Http (c, body))
 
-let once ?(authed = true) ?(query = []) ?body ~(cfg : (module Cfg.S)) ~meth path
+(** The raw HTTP exchange (status code, body). Replaceable for tests. *)
+let http_impl
+  : (headers:Cohttp.Header.t -> ?body:Cohttp_async.Body.t -> Cohttp.Code.meth -> Uri.t
+     -> (int * string) Deferred.t) ref =
+  ref (fun ~headers ?body meth uri ->
+    let%bind resp, rb = Cohttp_async.Client.call ~headers ?body meth uri in
+    let%map s = Cohttp_async.Body.to_string rb in
+    (Cohttp.Code.code_of_status (Cohttp.Response.status resp), s))
+
+(** Default per-request deadline (seconds). *)
+let default_timeout = 10.
+
+(** One HTTP request with a deadline of [timeout] seconds. On expiry returns
+    [`Timeout]; the abandoned request may still reach the exchange. *)
+let once ?(authed = true) ?(query = []) ?body ?(timeout = default_timeout) ~(cfg : (module Cfg.S)) ~meth path
   : (Yojson.Safe.t, error) Result.t Deferred.t =
   let module C = (val cfg : Cfg.S) in
   let path = base_path ^ path in
@@ -510,11 +564,10 @@ let once ?(authed = true) ?(query = []) ?body ~(cfg : (module Cfg.S)) ~meth path
     let body =
       Option.map body ~f:(fun j -> Cohttp_async.Body.of_string (Yojson.Safe.to_string j))
     in
-    let%bind resp, rb = Cohttp_async.Client.call ~headers ?body meth uri in
-    let%map s = Cohttp_async.Body.to_string rb in
-    (Cohttp.Code.code_of_status (Cohttp.Response.status resp), s))
+    Clock.with_timeout (Time_float.Span.of_sec timeout) (!http_impl ~headers ?body meth uri))
   >>| function
-  | Ok (code, s) -> parse_response code s
+  | Ok (`Result (code, s)) -> parse_response code s
+  | Ok `Timeout -> Error (`Timeout (sprintf "%s %s: no response within %gs" method_s path timeout))
   | Error exn -> Error (`Network (Exn.to_string exn))
 
 (** Hook for observing retries (tests / logging). *)
@@ -524,8 +577,11 @@ let on_retry : (attempt:int -> delay:float -> path:string -> unit) ref =
 (** One logical request: client-side token-bucket throttling (per
     [Rate_limit.default] tier, override with [?limiter]) then up to
     [max_retries] retries on 429 with exponential backoff + full jitter.
-    Signs the path only (never the query string). *)
-let call ?authed ?(query = []) ?body ?limiter ?(max_retries = 5) ~(cfg : (module Cfg.S)) ~meth path
+    Only 429 (which the exchange rejected without applying) is retried: a
+    [`Timeout] or [`Network] error is returned as is, since the request may
+    have been applied (never blindly re-send a POST). Signs the path only
+    (never the query string). *)
+let call ?authed ?(query = []) ?body ?limiter ?(max_retries = 5) ?timeout ~(cfg : (module Cfg.S)) ~meth path
   : (Yojson.Safe.t, error) Result.t Deferred.t =
   let limiter = match limiter with Some l -> l | None -> Lazy.force Rate_limit.default in
   let kind, cost = Rate_limit.classify ~meth ~path in
@@ -534,7 +590,7 @@ let call ?authed ?(query = []) ?body ?limiter ?(max_retries = 5) ~(cfg : (module
     ~is_rate_limited:(function Error `Rate_limited -> true | _ -> false)
     (fun () ->
        let%bind () = Rate_limit.Limiter.acquire limiter kind ~cost in
-       once ?authed ~query ?body ~cfg ~meth path)
+       once ?authed ~query ?body ?timeout ~cfg ~meth path)
 
 let q_opt k f = function Some v -> [ (k, [ f v ]) ] | None -> []
 
@@ -702,6 +758,87 @@ let paginate ?(max_pages = 50) ~key
   in
   go [] None 0
 
+(** A scheduled per-event fee change (GET /events/fee_changes). A [None]
+    override means "use the series value". *)
+type fee_change =
+  { fc_event_ticker : string
+  ; fee_type_override : Fees.fee_type option
+  ; fee_multiplier_override : float option
+  ; scheduled_ts : Time_float.t
+  }
+
+let fee_change_of_json (j : Yojson.Safe.t) : fee_change Or_error.t =
+  let open Or_error.Let_syntax in
+  match j with
+  | `Assoc a ->
+    let field k = List.Assoc.find a ~equal:String.equal k in
+    let%bind fc_event_ticker =
+      match field "event_ticker" with
+      | Some (`String s) -> Ok s
+      | _ -> Or_error.error_string "fee change lacks event_ticker"
+    in
+    let%bind fee_type_override =
+      match field "fee_type_override" with
+      | None | Some `Null -> Ok None
+      | Some (`String s) -> Ok (Some (Fees.fee_type_of_string s))
+      | Some v -> Or_error.errorf "bad fee_type_override %s" (Yojson.Safe.to_string v)
+    in
+    let%bind fee_multiplier_override =
+      let chk f = if Float.is_finite f && Float.(f >= 0.) then Ok (Some f)
+        else Or_error.errorf "fee_multiplier_override %g out of range" f in
+      match field "fee_multiplier_override" with
+      | None | Some `Null -> Ok None
+      | Some (`Int i) -> chk (Float.of_int i)
+      | Some (`Float f) -> chk f
+      | Some (`String x) ->
+        (match Float.of_string_opt (String.strip x) with
+         | Some f -> chk f
+         | None -> Or_error.errorf "fee_multiplier_override %S is not a number" x)
+      | Some v -> Or_error.errorf "bad fee_multiplier_override %s" (Yojson.Safe.to_string v)
+    in
+    let%map scheduled_ts =
+      match field "scheduled_ts" with
+      | Some (`String s) ->
+        Or_error.try_with (fun () -> Time_float.of_string_with_utc_offset s)
+        |> Or_error.tag ~tag:"scheduled_ts"
+      | Some (`Int i) -> Ok (Time_float.of_span_since_epoch (Time_float.Span.of_int_sec i))
+      | _ -> Or_error.error_string "fee change lacks scheduled_ts"
+    in
+    { fc_event_ticker; fee_type_override; fee_multiplier_override; scheduled_ts }
+  | _ -> Or_error.error_string "fee change is not an object"
+
+(** Fee params in force at [now]: the most recent change scheduled at or
+    before [now] for [event_ticker] (if any) overrides the series values
+    field by field; a null override falls back to the series value. *)
+let effective_fee_params ~series:(series_ft, series_mult) ~event_ticker ~(changes : fee_change list) ~now =
+  let applicable =
+    List.filter changes ~f:(fun c ->
+      String.equal c.fc_event_ticker event_ticker && Time_float.( <= ) c.scheduled_ts now)
+  in
+  match List.max_elt applicable ~compare:(fun a b -> Time_float.compare a.scheduled_ts b.scheduled_ts) with
+  | None -> (series_ft, series_mult)
+  | Some c ->
+    ( Option.value c.fee_type_override ~default:series_ft
+    , Option.value c.fee_multiplier_override ~default:series_mult )
+
+let get_event_fee_changes ~cfg event_ticker =
+  paginate ~max_pages:10 ~key:"event_fee_changes" (fun ?cursor () ->
+    call ~authed:false ~cfg ~meth:`GET
+      ~query:(("event_ticker", [ event_ticker ]) :: ("limit", [ "1000" ]) :: q_opt "cursor" Fn.id cursor)
+      "/events/fee_changes")
+  >>| Result.bind ~f:(fun (l, _) ->
+    List.map l ~f:fee_change_of_json |> Or_error.all
+    |> Result.map_error ~f:(fun e -> `Json_parse_error (Error.to_string_hum e)))
+
+(** (fee_type, fee_multiplier) in force now for a market of [event_ticker]
+    in [series_ticker]: series values plus any per-event override. *)
+let event_fee_params ?(now = Time_float.now ()) ~cfg ~series_ticker event_ticker =
+  match%bind series_fee_params ~cfg series_ticker with
+  | Error e -> return (Error e)
+  | Ok series ->
+    get_event_fee_changes ~cfg event_ticker
+    >>| Result.map ~f:(fun changes -> effective_fee_params ~series ~event_ticker ~changes ~now)
+
 let get_positions ~cfg ?ticker ?event_ticker ?count_filter ?settlement_status ?exchange_index
       ?cursor ?(limit = 100) () =
   call ~cfg ~meth:`GET
@@ -756,6 +893,25 @@ module Transfer = struct
                   ; ("destination_exchange_shard", `Int destination_shard) ]
                   @ (match client_transfer_id with
                      | Some id -> [ ("client_transfer_id", `String id) ] | None -> [])))
+
+  (** Status of a GET /portfolio/intra_exchange_instance_transfers/{id}
+      response ([{"transfer": {..., "status": ...}}]; a bare transfer object
+      is accepted too). Documented values are exactly "pending" and
+      "complete"; anything else is [`Unknown] so callers stop polling. *)
+  let status_of_json (j : Yojson.Safe.t) =
+    let status_of o = match o with
+      | `Assoc kv -> (match List.Assoc.find kv ~equal:String.equal "status" with
+          | Some (`String s) -> Some s | _ -> None)
+      | _ -> None in
+    let inner = match j with
+      | `Assoc kv -> (match List.Assoc.find kv ~equal:String.equal "transfer" with
+          | Some t -> t | None -> j)
+      | _ -> j in
+    match status_of inner with
+    | Some "pending" -> `Pending
+    | Some "complete" -> `Complete
+    | Some s -> `Unknown s
+    | None -> `Unknown "<missing status>"
 end
 
 (** Move funds between exchange shards of the event-contract instance.
@@ -773,18 +929,40 @@ let get_shard_transfers ~cfg ?cursor ?(limit = 50) () =
 let get_shard_transfer ~cfg transfer_id =
   call ~cfg ~meth:`GET ("/portfolio/intra_exchange_instance_transfers/" ^ transfer_id)
 
-let get_orders ~cfg ?ticker ?status () =
-  call ~cfg ~meth:`GET ~query:(q_opt "ticker" Fn.id ticker @ q_opt "status" Fn.id status)
+let get_orders ~cfg ?ticker ?status ?min_ts ?cursor ?limit () =
+  call ~cfg ~meth:`GET
+    ~query:(q_opt "ticker" Fn.id ticker @ q_opt "status" Fn.id status
+            @ q_opt "min_ts" Int.to_string min_ts @ q_opt "cursor" Fn.id cursor
+            @ q_opt "limit" Int.to_string limit)
     "/portfolio/orders"
 let get_order ~cfg order_id = call ~cfg ~meth:`GET ("/portfolio/orders/" ^ order_id)
 let get_account_limits ~cfg = call ~cfg ~meth:`GET "/account/limits"
 
+(** The order (JSON) whose [client_order_id] is [id], if any, among the
+    orders on [ticker] (all statuses) created at or after [min_ts]. GET
+    /portfolio/orders has no client_order_id filter, so this pages through
+    and filters client-side. Use after a [`Timeout] on [create_order]. *)
+let find_order_by_client_order_id ?(max_pages = 10) ?fetch ~cfg ~ticker ?min_ts client_order_id =
+  let fetch = match fetch with Some f -> f | None -> (fun ?cursor () -> get_orders ~cfg ~ticker ?min_ts ?cursor ~limit:200 ()) in
+  paginate ~max_pages ~key:"orders" (fun ?cursor () -> fetch ?cursor ())
+  >>| Result.map ~f:(fun (orders, _) ->
+    List.find orders ~f:(fun o ->
+      match Yojson.Safe.Util.member "client_order_id" o with
+      | `String c -> String.equal c client_order_id
+      | _ -> false))
+
 (* V2 order entry *)
-let create_order ~cfg (r : Order.request) =
+
+(** Place an order. A missing [client_order_id] is filled with a fresh UUID
+    (use [Order.ensure_client_order_id] first to know it). A [`Timeout] is
+    ambiguous and never retried: look the order up with
+    [find_order_by_client_order_id] before deciding to re-send. *)
+let create_order ?timeout ~cfg (r : Order.request) =
+  let r = Order.ensure_client_order_id r in
   match Order.validate r with
   | Error e -> return (Error (`Http (0, Error.to_string_hum e)))
   | Ok () ->
-    call ~cfg ~meth:`POST ~body:(Order.to_yojson r) "/portfolio/events/orders"
+    call ?timeout ~cfg ~meth:`POST ~body:(Order.to_yojson r) "/portfolio/events/orders"
     >>| Result.bind ~f:(fun j ->
       Order.response_of_yojson j
       |> Result.map_error ~f:(fun e -> `Json_parse_error (Error.to_string_hum e)))

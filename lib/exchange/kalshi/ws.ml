@@ -7,7 +7,22 @@
     Consistency: every message on a subscription carries [sid] + [seq]; a seq
     gap means a dropped message, so we drop the connection and resubscribe,
     which yields a fresh snapshot. Disconnects reconnect with exponential
-    backoff + jitter. *)
+    backoff + jitter.
+
+    Liveness: a connection on which no frame at all (data, or the server's
+    10 s heartbeat ping) arrives for [policy.idle_timeout] seconds is treated
+    as dead and replaced. Every subscribed market must deliver a snapshot
+    within [policy.snapshot_timeout] seconds, and an [error] reply to one of
+    our subscribe commands is surfaced as [Subscription_error]; both force a
+    resubscribe on a new connection, and [policy.max_subscribe_failures] of
+    them in a row make [run] give up with an [Error].
+
+    Reconnects: after every reconnect, once the subscriptions have been sent,
+    a [Reconnected n] event is emitted. Fills and order updates that happened
+    while disconnected are NOT replayed by the socket, so on [Reconnected]
+    callers must re-sync orders (GET /portfolio/orders) and fills (GET
+    /portfolio/fills, from the last fill seen) over REST, de-duplicating by
+    fill / order id against what the socket delivers afterwards. *)
 
 let ws_path = "/trade-api/ws/v2"
 
@@ -172,6 +187,13 @@ type event =
   | Gap of { sid : int; expected : int; got : int }
   | Decode_error of string  (** malformed message; the client resyncs *)
   | Disconnected of string
+  | Reconnected of int
+    (** connection [n > 1] is live and subscribed: re-sync orders and fills
+        over REST (the socket does not replay what was missed) *)
+  | Subscription_error of { id : int; msg : string }
+    (** the exchange rejected subscribe command [id]; the client resyncs *)
+  | Subscribe_timeout of string list
+    (** no snapshot arrived in time for these markets; the client resyncs *)
   | Error_msg of Yojson.Safe.t
   | Other of Yojson.Safe.t
 
@@ -263,17 +285,28 @@ module type Transport = sig
   type t
 
   val connect : url:string -> headers:(string * string) list -> t Deferred.Or_error.t
-  val send : t -> string -> unit Deferred.t
+
+  val send : t -> string -> unit Or_error.t Deferred.t
+  (** must report a failed write *)
+
   val receive : t -> string option Deferred.t
+
+  val last_activity : t -> Time_float.t
+  (** when any frame (including pings answered inside [receive]) was last
+      read; used for the idle timeout *)
+
   val close : t -> unit Deferred.t
+  (** [run_with] never calls this while one of its own receives is in
+      flight *)
 end
 
 module Curl_transport : Transport with type t = Websocket_curl.t = struct
   type t = Websocket_curl.t
 
   let connect ~url ~headers = Websocket_curl.connect ~url ~headers ()
-  let send = Websocket_curl.send
+  let send = Websocket_curl.send_result
   let receive = Websocket_curl.receive
+  let last_activity = Websocket_curl.last_frame_time
   let close = Websocket_curl.close
 end
 
@@ -295,17 +328,50 @@ type policy =
     (** on stop, how long [run] waits for an in-flight receive to return
         so the transport can be closed before returning; the close still
         happens (later) if the receive outlives the grace period *)
+  ; idle_timeout : float
+    (** no frame at all for this long => the connection is dead; reconnect.
+        Kalshi pings every 10 s, so 30 s means three missed heartbeats. *)
+  ; snapshot_timeout : float
+    (** every subscribed market must get a snapshot within this long *)
+  ; max_subscribe_failures : int
+    (** consecutive subscribe errors / snapshot timeouts before [run] gives
+        up and returns [Error] *)
   }
 
-let default_policy = { base = 0.5; cap = 30.; healthy_after = 10.; stop_grace = 2. }
+let default_policy =
+  { base = 0.5; cap = 30.; healthy_after = 10.; stop_grace = 2.; idle_timeout = 30.
+  ; snapshot_timeout = 10.; max_subscribe_failures = 5 }
+
+(** [Some (id, msg)] if [j] is an [error] reply to one of our subscribe
+    commands (ids 1 = market channels, 2 = user channels). *)
+let subscription_error (j : Yojson.Safe.t) =
+  match j with
+  | `Assoc l ->
+    (match List.Assoc.find l ~equal:String.equal "type", List.Assoc.find l ~equal:String.equal "id" with
+     | Some (`String "error"), Some (`Int ((1 | 2) as id)) ->
+       let msg =
+         match List.Assoc.find l ~equal:String.equal "msg" with
+         | Some (`Assoc m) ->
+           (match List.Assoc.find m ~equal:String.equal "msg" with
+            | Some (`String s) -> s
+            | _ -> Yojson.Safe.to_string (`Assoc m))
+         | Some v -> Yojson.Safe.to_string v
+         | None -> "subscribe error"
+       in
+       Some (id, msg)
+     | _ -> None)
+  | _ -> None
 
 let run_with (type c) (module T : Transport with type t = c) ~headers ~url ~tickers ?(user = true)
       ?(stop = Deferred.never ()) ?(policy = default_policy) ?(rand = fun () -> Random.float 1.)
-      ~(on_event : event -> unit) () =
+      ~(on_event : event -> unit) () : unit Or_error.t Deferred.t =
   let books = String.Table.create () in
   let seqs = Seq_tracker.create () in
   let sec = Time_float.Span.of_sec in
   let now () = Time_float.now () in
+  let since t = Time_float.Span.to_sec (Time_float.diff (now ()) t) in
+  (* how often to check the idle / snapshot deadlines *)
+  let check_every = Float.max 0.001 (Float.min 1. (Float.min policy.idle_timeout policy.snapshot_timeout /. 4.)) in
   (* wait d seconds or until stop; true = stopped *)
   let wait d =
     let%map () = Deferred.any_unit [ Clock.after (sec d); stop ] in
@@ -314,8 +380,9 @@ let run_with (type c) (module T : Transport with type t = c) ~headers ~url ~tick
   let delay failures =
     Rate_limit.backoff_delay ~base:policy.base ~cap:policy.cap ~attempt:failures ~rand:(rand ()) ()
   in
+  let sub_failures = ref 0 in
   let rec connect_loop n failures =
-    if Deferred.is_determined stop then return ()
+    if Deferred.is_determined stop then return (Ok ())
     else
       let conn = T.connect ~url ~headers:(headers ()) in
       match%bind
@@ -325,19 +392,26 @@ let run_with (type c) (module T : Transport with type t = c) ~headers ~url ~tick
         (* A handshake that completes after stop must still be closed (no
            receive was started on it, so closing is safe). *)
         upon conn (function Ok ws -> don't_wait_for (T.close ws) | Error _ -> ());
-        return ()
+        return (Ok ())
       | `Conn (Error e) ->
         on_event (Disconnected (Error.to_string_hum e));
-        if%bind wait (delay failures) then return () else connect_loop n (failures + 1)
+        if%bind wait (delay failures) then return (Ok ()) else connect_loop n (failures + 1)
       | `Conn (Ok ws) ->
         let started = now () in
         Seq_tracker.reset seqs;
         Hashtbl.clear books;
-        let finish_lost why =
+        let finish_lost ~sub_failure why =
           on_event (Disconnected why);
-          let healthy = Float.(Time_float.Span.to_sec (Time_float.diff (now ()) started) >= policy.healthy_after) in
-          let failures = if healthy then 0 else failures + 1 in
-          if%bind wait (delay failures) then return () else connect_loop (n + 1) failures
+          if sub_failure then incr sub_failures;
+          if !sub_failures >= policy.max_subscribe_failures then
+            return
+              (Or_error.errorf "Kalshi WS: giving up after %d consecutive subscription failures (last: %s)"
+                 !sub_failures why)
+          else begin
+            let healthy = (not sub_failure) && Float.(since started >= policy.healthy_after) in
+            let failures = if healthy then 0 else failures + 1 in
+            if%bind wait (delay failures) then return (Ok ()) else connect_loop (n + 1) failures
+          end
         in
         let emit evs =
           (* if a callback raises, don't leak the connection (no receive is
@@ -345,50 +419,109 @@ let run_with (type c) (module T : Transport with type t = c) ~headers ~url ~tick
           try List.iter evs ~f:on_event
           with exn -> don't_wait_for (T.close ws); raise exn
         in
+        (* the receive is still in flight: close only once it returns *)
+        let close_after pending = don't_wait_for (pending >>= fun _ -> T.close ws) in
         emit [ Connected n ];
         let send j = T.send ws (Yojson.Safe.to_string j) in
-        let%bind () = send (subscribe_msg ~id:1 ~channels:market_channels ~market_tickers:tickers ()) in
-        let%bind () = if user then send (subscribe_msg ~id:2 ~channels:user_channels ()) else return () in
-        let rec read_loop () =
-          if Deferred.is_determined stop then (let%map () = T.close ws in `Stop) else
-          let pending = T.receive ws in
-          match%bind
-            Deferred.choose
-              [ Deferred.choice stop (fun () -> `Stop); Deferred.choice pending (fun m -> `Msg m) ]
-          with
-          | `Stop ->
-            (* Never free the transport under an in-flight receive: close
-               only once it has returned. *)
-            let closed = pending >>= fun _ -> T.close ws in
-            let%map () = Deferred.any_unit [ closed; Clock.after (sec policy.stop_grace) ] in
-            `Stop
-          | `Msg None ->
-            (* EOF / read error: the receive has returned, so close is safe
-               and releases the transport before reconnecting. *)
-            let%map () = T.close ws in
-            `Lost "connection closed"
-          | `Msg (Some s) ->
-            let evs, action =
-              match Yojson.Safe.from_string s with
-              | exception _ -> ([ Decode_error "invalid JSON" ], `Resync)
-              | j -> handle ~books ~seqs j
-            in
-            emit evs;
-            (match action with
-             | `Continue -> read_loop ()
-             | `Resync ->
-               let%map () = T.close ws in
-               `Lost (match evs with [ Gap _ ] -> "seq gap; resubscribing" | _ -> "decode error; resubscribing"))
+        let%bind sent =
+          match%bind send (subscribe_msg ~id:1 ~channels:market_channels ~market_tickers:tickers ()) with
+          | Error _ as e -> return e
+          | Ok () -> if user then send (subscribe_msg ~id:2 ~channels:user_channels ()) else return (Ok ())
         in
-        (match%bind read_loop () with
-         | `Stop -> return ()
-         | `Lost why -> finish_lost why)
+        (match sent with
+         | Error e ->
+           let%bind () = T.close ws in
+           finish_lost ~sub_failure:false ("subscribe send failed: " ^ Error.to_string_hum e)
+         | Ok () ->
+           if n > 1 then emit [ Reconnected n ];
+           let subscribed_at = now () in
+           let snapshot_ready = ref (List.is_empty tickers) in
+           let last_msg = ref subscribed_at in
+           let rec read_loop pending tick =
+             let pending =
+               match pending with
+               | Some p -> `Ok p
+               | None -> if Deferred.is_determined stop then `Stopped else `Ok (T.receive ws)
+             in
+             match pending with
+             | `Stopped -> let%map () = T.close ws in `Stop
+             | `Ok pending ->
+               match%bind
+                 Deferred.choose
+                   [ Deferred.choice stop (fun () -> `Stop)
+                   ; Deferred.choice pending (fun m -> `Msg m)
+                   ; Deferred.choice tick (fun () -> `Tick) ]
+               with
+               | `Stop ->
+                 (* Never free the transport under an in-flight receive: close
+                    only once it has returned. *)
+                 let closed = pending >>= fun _ -> T.close ws in
+                 let%map () = Deferred.any_unit [ closed; Clock.after (sec policy.stop_grace) ] in
+                 `Stop
+               | `Tick ->
+                 let last = Time_float.max !last_msg (T.last_activity ws) in
+                 let idle = since last in
+                 if Float.(idle >= policy.idle_timeout) then begin
+                   (* A dead socket may keep the receive blocked (the curl
+                      stub gives up after ~30 s); reconnect now and free the
+                      old transport once that receive returns. *)
+                   close_after pending;
+                   return (`Lost (false, sprintf "idle timeout: no frames for %.1fs" idle))
+                 end
+                 else if (not !snapshot_ready) && Float.(since subscribed_at >= policy.snapshot_timeout) then begin
+                   let missing = List.filter tickers ~f:(fun t -> not (Hashtbl.mem books t)) in
+                   emit [ Subscribe_timeout missing ];
+                   close_after pending;
+                   return
+                     (`Lost (true, sprintf "no snapshot within %gs for %s" policy.snapshot_timeout
+                                    (String.concat ~sep:"," missing)))
+                 end
+                 else read_loop (Some pending) (Clock.after (sec check_every))
+               | `Msg None ->
+                 (* EOF / read error: the receive has returned, so close is safe
+                    and releases the transport before reconnecting. *)
+                 let%map () = T.close ws in
+                 `Lost (false, "connection closed")
+               | `Msg (Some s) ->
+                 last_msg := now ();
+                 let evs, action, sub_err =
+                   match Yojson.Safe.from_string s with
+                   | exception _ -> ([ Decode_error "invalid JSON" ], `Resync, None)
+                   | j ->
+                     let evs, action = handle ~books ~seqs j in
+                     (match subscription_error j with
+                      | Some (id, msg) ->
+                        (* reported once, as Subscription_error (not also as Error_msg) *)
+                        let evs = List.filter evs ~f:(function Error_msg _ -> false | _ -> true) in
+                        (evs @ [ Subscription_error { id; msg } ], `Resync, Some msg)
+                      | None -> (evs, action, None))
+                 in
+                 emit evs;
+                 if (not !snapshot_ready) && List.for_all tickers ~f:(Hashtbl.mem books) then begin
+                   snapshot_ready := true;
+                   sub_failures := 0
+                 end;
+                 (match action with
+                  | `Continue -> read_loop None tick
+                  | `Resync ->
+                    let%map () = T.close ws in
+                    (match sub_err with
+                     | Some m -> `Lost (true, "subscription error: " ^ m)
+                     | None ->
+                       `Lost (false, match evs with [ Gap _ ] -> "seq gap; resubscribing" | _ -> "decode error; resubscribing")))
+           in
+           (match%bind read_loop None (Clock.after (sec check_every)) with
+            | `Stop -> return (Ok ())
+            | `Lost (sub_failure, why) -> finish_lost ~sub_failure why))
   in
   connect_loop 1 0
 
 (** Run until [stop] is determined. Reconnects with backoff on disconnect,
     on sequence gaps and on malformed messages (fresh snapshot after
-    resubscribe). Auth headers are re-signed for every connection attempt. *)
+    resubscribe), on idle connections and on subscription failures. Auth
+    headers are re-signed for every connection attempt. Returns [Error] only
+    after [policy.max_subscribe_failures] consecutive subscription failures.
+    See the module doc: on [Reconnected], re-sync orders and fills over REST. *)
 let run ~cfg ~url ~tickers ?user ?stop ?policy ~(on_event : event -> unit) () =
   run_with (module Curl_transport) ~headers:(fun () -> auth_headers cfg) ~url ~tickers ?user ?stop ?policy
     ~on_event ()

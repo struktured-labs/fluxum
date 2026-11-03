@@ -420,6 +420,16 @@ let http_get_public ~host path ?query () =
   let uri = Uri.make ~scheme:"https" ~host ~path ?query () in
   http_get ~host uri
 
+(** Resolve the [-cfg] choice for a command, printing a clean error and
+    exiting with status 2 (instead of raising) when it is refused or
+    incomplete, e.g. production without KALSHI_ALLOW_PRODUCTION=1. *)
+let with_cfg (choice : string option) (f : (module Cfg.S) -> unit Deferred.t) : unit Deferred.t =
+  match Cfg.resolve choice with
+  | Ok cfg -> f cfg
+  | Error e ->
+    eprintf "%s\n" (Core.Error.to_string_hum e);
+    Shutdown.exit 2
+
 let http_get_authed ~(cfg : (module Cfg.S)) path ?query () =
   let module Cfg = (val cfg : Cfg.S) in
   let uri = Uri.make ~scheme:"https" ~host:Cfg.api_host ~path ?query () in
@@ -588,7 +598,8 @@ module Place_order = struct
           and client_order_id = flag "-client-order-id" (optional string) ~doc:"STRING optional client order ID"
           in
           fun () ->
-            let cfg = Cfg.or_default config in
+            with_cfg config @@ fun cfg ->
+            let client_order_id = Some (Option.value client_order_id ~default:(Auth.uuid_v4 ())) in
             let request = { ticker; action; side; count; order_type; yes_price; no_price= None; client_order_id } in
             post ~cfg request
             >>= function
@@ -615,7 +626,7 @@ module Cancel_order = struct
           and order_id = flag "-order-id" (required string) ~doc:"STRING order ID to cancel"
           in
           fun () ->
-            let cfg = Cfg.or_default config in
+            with_cfg config @@ fun cfg ->
             delete ~cfg ~order_id ()
             >>= function
             | Ok `Deleted ->
@@ -661,7 +672,7 @@ module Get_orders = struct
           and limit = flag "-limit" (optional int) ~doc:"INT max orders to return"
           in
           fun () ->
-            let cfg = Cfg.or_default config in
+            with_cfg config @@ fun cfg ->
             get ~cfg ?status ?ticker ?limit ()
             >>= function
             | Ok orders ->
@@ -705,7 +716,7 @@ module Get_positions = struct
           and ticker = flag "-ticker" (optional string) ~doc:"STRING filter by ticker"
           in
           fun () ->
-            let cfg = Cfg.or_default config in
+            with_cfg config @@ fun cfg ->
             get ~cfg ?ticker ()
             >>= function
             | Ok positions ->
@@ -731,7 +742,7 @@ module Get_balance = struct
         [%map_open
           let config = Cfg.param in
           fun () ->
-            let cfg = Cfg.or_default config in
+            with_cfg config @@ fun cfg ->
             get ~cfg ()
             >>= function
             | Ok b ->

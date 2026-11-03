@@ -19,12 +19,53 @@ let compute_accept_key key =
   let hash = Digestif.SHA1.digest_string combined in
     Base64.encode_exn (Digestif.SHA1.to_raw_string hash)
 
+(** Tracks worker threads ([In_thread.run]) that are using a [Curl.t], so
+    the handle is only freed once none of them is still running (#20: a send
+    that outlived its 1.5 s timer could otherwise be freed under the worker). *)
+module Inflight = struct
+  type t = { mutable count : int; mutable waiters : unit Ivar.t list }
+
+  let create () = { count = 0; waiters = [] }
+  let count t = t.count
+
+  (** Run [f] (which starts a worker) and count it until its deferred is
+      determined, whatever the outcome. *)
+  let track t (f : unit -> 'a Deferred.t) : 'a Deferred.t =
+    t.count <- t.count + 1;
+    let d = f () in
+    upon d (fun _ ->
+      t.count <- t.count - 1;
+      if t.count = 0 then begin
+        let ws = t.waiters in
+        t.waiters <- [];
+        List.iter ws ~f:(fun iv -> Ivar.fill_if_empty iv ())
+      end);
+    d
+
+  (** Determined once no tracked worker is running. *)
+  let wait_idle t =
+    if t.count = 0 then Deferred.unit
+    else begin
+      let iv = Ivar.create () in
+      t.waiters <- iv :: t.waiters;
+      Ivar.read iv
+    end
+end
+
 type t =
   { curl: Curl.t
   ; mutable closed: bool
   ; leftover: bytes (* Bytes read during HTTP upgrade that belong to the first WS frame *)
   ; mutable leftover_len: int
-  ; fragment_buf: Buffer.t (* Buffer for reassembling fragmented WebSocket messages *) }
+  ; fragment_buf: Buffer.t (* Buffer for reassembling fragmented WebSocket messages *)
+  ; inflight: Inflight.t (* workers currently using [curl]; [close] waits for them *)
+  ; mutable last_frame: Time_float.t (* when any frame (incl. ping/pong) was last read *)
+  ; cleaned_up: unit Ivar.t (* filled once [close] has released [curl] *) }
+
+(** Time the last frame of any kind (including server pings, which are
+    answered inside [receive] and never surface) was read. Lets callers
+    detect a dead connection without mistaking a quiet one for it. *)
+let last_frame_time t = t.last_frame
 
 let connect ~url ?headers () =
   (* Parse URL for building WebSocket upgrade request *)
@@ -203,7 +244,10 @@ let connect ~url ?headers () =
                                  ; closed= false
                                  ; leftover= leftover_bytes
                                  ; leftover_len= leftover_length
-                                 ; fragment_buf= Buffer.create 4096 })
+                                 ; fragment_buf= Buffer.create 4096
+                                 ; inflight= Inflight.create ()
+                                 ; cleaned_up= Ivar.create ()
+                                 ; last_frame= Time_float.now () })
                           | _ ->
                             bail (Error.of_string "Invalid Sec-WebSocket-Accept")))
 
@@ -273,7 +317,7 @@ let send_ping t ?(payload = "") () =
   | false ->
     let send_with_timeout () =
       Deferred.any
-        [ Deferred.Or_error.try_with (fun () ->
+        [ Inflight.track t.inflight (fun () -> Deferred.Or_error.try_with (fun () ->
             In_thread.run (fun () ->
               let frame = encode_ping_frame payload in
               let bytes = Bytes.of_string frame in
@@ -288,41 +332,53 @@ let send_ping t ?(payload = "") () =
                      | true -> failwith "Connection closed"
                      | false -> send_all (offset + sent))
               in
-                send_all 0))
+                send_all 0)))
         ; (let%map () = after (Time_float.Span.of_sec 1.5) in
              Error (Error.of_string "WebSocket ping send timeout after 1.5s")) ]
     in
       send_with_timeout ()
 
+let send_frame_worker t payload =
+  Inflight.track t.inflight (fun () ->
+    Deferred.Or_error.try_with (fun () ->
+      In_thread.run (fun () ->
+        let frame = encode_text_frame payload in
+        let bytes = Bytes.of_string frame in
+        let rec send_all offset =
+          match offset >= Bytes.length bytes with
+          | true -> ()
+          | false ->
+            let sent =
+              Curl_ext.send t.curl bytes offset (Bytes.length bytes - offset)
+            in
+              (match sent = 0 with
+               | true -> failwith "Connection closed"
+               | false -> send_all (offset + sent))
+        in
+          send_all 0)))
+
+(** Send a text frame and report the real outcome. Waits for the worker
+    (each native send call is bounded at ~2 s by the stub), so a failed
+    write is visible to the caller instead of being swallowed. *)
+let send_result t payload =
+  match t.closed with
+  | true -> Deferred.Or_error.error_string "WebSocket connection closed"
+  | false -> send_frame_worker t payload
+
+(** Legacy fire-and-forget send: returns after at most 1.5 s and ignores
+    errors. The worker is still tracked, so a later [close] waits for it
+    rather than freeing the handle underneath it. Prefer [send_result]. *)
 let send t payload =
   match t.closed with
   | true -> Deferred.unit
   | false ->
-    let send_with_timeout () =
-      Deferred.any
-        [ Deferred.Or_error.try_with (fun () ->
-            In_thread.run (fun () ->
-              let frame = encode_text_frame payload in
-              let bytes = Bytes.of_string frame in
-              let rec send_all offset =
-                match offset >= Bytes.length bytes with
-                | true -> ()
-                | false ->
-                  let sent =
-                    Curl_ext.send t.curl bytes offset (Bytes.length bytes - offset)
-                  in
-                    (match sent = 0 with
-                     | true -> failwith "Connection closed"
-                     | false -> send_all (offset + sent))
-              in
-                send_all 0))
-        ; (let%map () = after (Time_float.Span.of_sec 1.5) in
-             Error (Error.of_string "WebSocket send timeout after 1.5s")) ]
-    in
-      send_with_timeout ()
-      >>| (function
-       | Ok () -> ()
-       | Error _ -> ())
+    Deferred.any
+      [ send_frame_worker t payload
+      ; (let%map () = after (Time_float.Span.of_sec 1.5) in
+           Error (Error.of_string "WebSocket send timeout after 1.5s")) ]
+    >>| (function
+     | Ok () -> ()
+     | Error _ -> ())
 
 (** Result type for receive operations that distinguishes message types *)
 type receive_result =
@@ -336,7 +392,7 @@ let receive_internal t ~on_pong =
   match t.closed with
   | true -> return Connection_closed
   | false ->
-    Deferred.Or_error.try_with (fun () ->
+    Inflight.track t.inflight (fun () -> Deferred.Or_error.try_with (fun () ->
       In_thread.run (fun () ->
         let header_buf = Bytes.create 14 in
         (* recv_exact: reads exactly len bytes, using leftover buffer first *)
@@ -364,6 +420,7 @@ let receive_internal t ~on_pong =
         (* Read one WebSocket frame and return (opcode, fin, payload) *)
         let read_frame () =
           recv_exact header_buf 0 2;
+          t.last_frame <- Time_float.now ();
           let byte0 = Bytes.get header_buf 0 |> Char.to_int in
           let byte1 = Bytes.get header_buf 1 |> Char.to_int in
           let opcode = byte0 land 0x0F in
@@ -441,7 +498,7 @@ let receive_internal t ~on_pong =
                  Buffer.add_string t.fragment_buf payload;
                  read_message ())
         in
-          read_message ()))
+          read_message ())))
     >>| (function
      | Ok (`Message payload) -> Message payload
      | Ok `Pong -> Pong_received
@@ -475,10 +532,16 @@ let receive t =
   in
     loop ()
 
+(** Close the connection. The handle is freed only after every in-flight
+    send/receive worker has returned (see [Inflight]); the returned deferred
+    is determined at that point. Idempotent. *)
+(** Idempotent: every call (including a second, concurrent one) is determined
+    only once in-flight workers have finished and [curl] has been released. *)
 let close t =
   match t.closed with
-  | true -> Deferred.unit
+  | true -> Ivar.read t.cleaned_up
   | false ->
     t.closed <- true;
+    let%map () = Inflight.wait_idle t.inflight in
     Curl.cleanup t.curl;
-    Deferred.unit
+    Ivar.fill_if_empty t.cleaned_up ()

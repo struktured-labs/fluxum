@@ -14,15 +14,34 @@ val connect
   -> unit
   -> t Deferred.Or_error.t
 
-(** Send a text message *)
+(** Send a text message (legacy fire-and-forget: returns within ~1.5 s and
+    ignores errors). Prefer [send_result]. *)
 val send : t -> string -> unit Deferred.t
+
+(** Send a text message and return the real outcome once the write worker
+    has finished. *)
+val send_result : t -> string -> unit Or_error.t Deferred.t
+
+(** When the last frame of any kind (data, ping, pong, close) was read. *)
+val last_frame_time : t -> Time_float.t
 
 (** Receive a message (None on close/error).
     Automatically responds to ping frames with pong (RFC 6455). *)
 val receive : t -> string option Deferred.t
 
-(** Close the connection *)
+(** Close the connection. Frees the curl handle only after every in-flight
+    send/receive/ping worker has returned, so it can never be freed under a
+    running worker (#20). Determined once the handle is freed. *)
 val close : t -> unit Deferred.t
+
+(** Counter of in-flight worker deferreds (exposed for testing). *)
+module Inflight : sig
+  type t
+  val create : unit -> t
+  val count : t -> int
+  val track : t -> (unit -> 'a Deferred.t) -> 'a Deferred.t
+  val wait_idle : t -> unit Deferred.t
+end
 
 (** {1 Frame Encoding (exposed for testing)} *)
 
