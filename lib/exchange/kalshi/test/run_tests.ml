@@ -505,7 +505,7 @@ let () =
    | Error _ -> assert_true "paginate max" false);
   assert_true "balance_breakdown" (Poly.equal
     (T.balance_breakdown (Yojson.Safe.from_string {|{"balance":100000,"balance_breakdown":[{"exchange_index":2,"balance":1000},{"exchange_index":0,"balance":99000}]}|}))
-    [ (0, 99000); (2, 1000) ]);
+    (Ok [ (0, 99000); (2, 1000) ]));
   assert_true "centicents $10" (T.Transfer.centicents_of_dollars 10. = 100_000);
   (match T.Transfer.body ~amount_dollars:10. ~source_shard:0 ~destination_shard:2 () with
    | Ok j -> assert_equal "transfer body" ~expected:{|{"source":"event_contract","destination":"event_contract","amount":100000,"source_exchange_shard":0,"destination_exchange_shard":2}|} (Yojson.Safe.to_string j)
@@ -878,6 +878,54 @@ let () =
   assert_true "delta after snapshot accepted" (match act with `Continue -> true | `Resync -> false);
   assert_true "ticker without seq still fine"
     (match snd (feed {|{"type":"ticker","sid":2,"msg":{"market_ticker":"A"}}|}) with `Continue -> true | `Resync -> false);
+  (* ---- third-round review fixes ---- *)
+  Core.printf "\n--- Round-3 fixes ---\n";
+  assert_true "REST book rejects duplicate NO level"
+    (Result.is_error (T.Book.of_json (Yojson.Safe.from_string {|{"orderbook_fp":{"no_dollars":[["0.5500","1.00"],["0.5500","1.00"]]}}|})));
+  assert_true "REST book rejects duplicate after normalisation (0.55 vs 0.5500)"
+    (Result.is_error (T.Book.of_json (Yojson.Safe.from_string {|{"orderbook_fp":{"yes_dollars":[["0.55","1.00"],["0.5500","2.00"]]}}|})));
+  assert_true "REST book same price on opposite sides ok"
+    (Result.is_ok (T.Book.of_json (Yojson.Safe.from_string {|{"orderbook_fp":{"yes_dollars":[["0.4000","1.00"]],"no_dollars":[["0.4000","1.00"]]}}|})));
+  let sf s = T.series_fee_params_of_json (Yojson.Safe.from_string s) in
+  assert_true "series ok" (match sf {|{"series":{"fee_type":"quadratic","fee_multiplier":1}}|} with Ok (_, m) -> Float.equal m 1. | Error _ -> false);
+  assert_true "series string multiplier ok" (match sf {|{"series":{"fee_multiplier":"0.5"}}|} with Ok (_, m) -> Float.equal m 0.5 | Error _ -> false);
+  assert_true "series defaults when fields absent" (match sf {|{"series":{}}|} with Ok (_, m) -> Float.equal m 1. | Error _ -> false);
+  List.iter [ "{}", {|{}|}; "null", {|null|}; "non-object series", {|{"series":[]}|}
+            ; "bad multiplier string", {|{"series":{"fee_multiplier":"abc"}}|}
+            ; "negative multiplier", {|{"series":{"fee_multiplier":-1}}|}
+            ; "non-string fee_type", {|{"series":{"fee_type":5}}|} ]
+    ~f:(fun (n, s) -> assert_true ("series rejects " ^ n ^ " (no exn)") (Result.is_error (sf s)));
+  let bb s = T.balance_breakdown (Yojson.Safe.from_string s) in
+  assert_true "balance: string ints ok" (Poly.equal (bb {|{"balance_breakdown":[{"exchange_index":"1","balance":"250"}]}|}) (Ok [ (1, 250) ]));
+  assert_true "balance: absent breakdown -> []" (Poly.equal (bb {|{"balance":5}|}) (Ok []));
+  List.iter [ "invalid numeric string", {|{"balance_breakdown":[{"exchange_index":0,"balance":"12x"}]}|}
+            ; "null entry", {|{"balance_breakdown":[null]}|}
+            ; "float 1e300", {|{"balance_breakdown":[{"exchange_index":0,"balance":1e300}]}|}
+            ; "huge int string", {|{"balance_breakdown":[{"exchange_index":0,"balance":"99999999999999999999999"}]}|}
+            ; "missing balance", {|{"balance_breakdown":[{"exchange_index":0}]}|}
+            ; "negative index", {|{"balance_breakdown":[{"exchange_index":-1,"balance":1}]}|}
+            ; "duplicate index", {|{"balance_breakdown":[{"exchange_index":0,"balance":1},{"exchange_index":0,"balance":2}]}|}
+            ; "breakdown not a list", {|{"balance_breakdown":{}}|}
+            ; "non-object response", {|null|} ]
+    ~f:(fun (n, s) -> assert_true ("balance rejects " ^ n ^ " (no exn)") (Result.is_error (bb s)));
+  let books = String.Table.create () and seqs = W.Seq_tracker.create () in
+  let feed s = W.handle ~books ~seqs (Yojson.Safe.from_string s) in
+  ignore (feed {|{"type":"orderbook_snapshot","sid":1,"seq":1,"msg":{"market_ticker":"A","yes_dollars_fp":[["0.4000","5.00"]],"no_dollars_fp":[]}}|});
+  let before = W.Local_book.to_levels (Hashtbl.find_exn books "A").yes in
+  let evs, act = feed {|{"type":"orderbook_snapshot","sid":1,"seq":2,"msg":{"market_ticker":"A","yes_dollars_fp":[["0.3000","2.00"],["0.4000","-1.00"]],"no_dollars_fp":[]}}|} in
+  assert_true "snapshot with negative size -> Decode_error + resync"
+    ((match act with `Resync -> true | `Continue -> false) && List.exists evs ~f:(function W.Decode_error _ -> true | _ -> false));
+  assert_true "negative snapshot leaves book unchanged"
+    (Poly.equal before (W.Local_book.to_levels (Hashtbl.find_exn books "A").yes));
+  let b = Hashtbl.find_exn books "A" in
+  List.iter [ "null", "null"; "{}", "{}"; "orderbook_fp list", {|{"orderbook_fp":[]}|}; "list", "[1]"
+            ; "level garbage", {|{"orderbook_fp":{"yes_dollars":[["x","1"]]}}|} ]
+    ~f:(fun (n, s) ->
+      let r = try `Ok (W.Local_book.diff_with_rest b (Yojson.Safe.from_string s)) with e -> `Exn e in
+      assert_true ("diff_with_rest " ^ n ^ " -> decode discrepancy, no exn")
+        (match r with `Ok [ m ] -> String.is_prefix m ~prefix:"rest decode error" | _ -> false));
+  assert_true "diff_with_rest valid equal book -> []"
+    (List.is_empty (W.Local_book.diff_with_rest b (Yojson.Safe.from_string {|{"orderbook_fp":{"yes_dollars":[["0.4000","5.00"]]}}|})));
   Core.printf "\n=== Results: %d passed, %d failed (%d total) ===\n"
     !passed !failed (!passed + !failed);
   Core.Out_channel.flush Core.stdout;

@@ -52,7 +52,8 @@ module Local_book = struct
         | `List [ `String p; q ] ->
           let p = key_of_price p in
           let q = num q in
-          if Float.(q > 0.) then Map.set m ~key:p ~data:q else m
+          if Float.(q < 0.) then bad "negative level size %g" q
+          else if Float.(q > 0.) then Map.set m ~key:p ~data:q else m
         | j -> bad "bad level %s" (Yojson.Safe.to_string j))
     | j -> bad "bad levels %s" (Yojson.Safe.to_string j)
 
@@ -107,13 +108,18 @@ module Local_book = struct
       yes_dollars/no_dollars). Returns list of discrepancies (empty = equal). *)
   let diff_with_rest t (rest : Yojson.Safe.t) =
     let open Yojson.Safe.Util in
-    let ob = match member "orderbook_fp" rest with `Null -> member "orderbook" rest | o -> o in
-    let pick a b = match member a ob with `Null -> member b ob | x -> x in
     match
+      (match rest with
+       | `Assoc _ -> ()
+       | _ -> bad "REST orderbook is not a JSON object");
+      let ob = match member "orderbook_fp" rest with `Null -> member "orderbook" rest | o -> o in
+      (match ob with `Assoc _ -> () | _ -> bad "REST response lacks an orderbook object");
+      let pick a b = match member a ob with `Null -> member b ob | x -> x in
       (levels_of_json (pick "yes_dollars" "yes_dollars_fp"),
        levels_of_json (pick "no_dollars" "no_dollars_fp"))
     with
     | exception Bad_message m -> [ "rest decode error: " ^ m ]
+    | exception Type_error (m, _) -> [ "rest decode error: " ^ m ]
     | ry, rn ->
     let cmp name local remote =
       Map.symmetric_diff local remote ~data_equal:(fun a b -> Float.(abs (a -. b) < 1e-6))

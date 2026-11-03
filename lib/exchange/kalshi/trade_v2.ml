@@ -265,8 +265,11 @@ module Book = struct
       match List.Assoc.find ob ~equal:String.equal k with
       | None | Some `Null -> Ok []
       | Some (`List ls) ->
-        let%map ls = List.map ls ~f:level |> Or_error.all in
-        List.sort ls ~compare:(fun a b -> Float.compare b.price a.price)
+        let%bind ls = List.map ls ~f:level |> Or_error.all in
+        let ls = List.sort ls ~compare:(fun a b -> Float.compare b.price a.price) in
+        (match List.find_consecutive_duplicate ls ~equal:(fun a b -> Float.equal a.price b.price) with
+         | Some (a, _) -> Or_error.errorf "orderbook %s has duplicate price level %.4f" k a.price
+         | None -> Ok ls)
       | Some _ -> Or_error.errorf "orderbook %s is not a list" k
     in
     match j with
@@ -552,18 +555,45 @@ let get_orderbook ~cfg ?depth ticker =
   >>| Result.bind ~f:(fun j ->
     Book.of_json j |> Result.map_error ~f:(fun e -> `Json_parse_error (Error.to_string_hum e)))
 
+(** Strictly decode (fee_type, fee_multiplier) from a [/series/{t}] response.
+    The response and its [series] must be objects. An absent/null fee_type
+    defaults to Quadratic and an absent/null multiplier to 1.0; a present but
+    wrongly typed, unparseable, non-finite or negative value is an error. *)
+let series_fee_params_of_json (j : Yojson.Safe.t) =
+  let field a k = List.Assoc.find a ~equal:String.equal k in
+  match j with
+  | `Assoc a ->
+    (match field a "series" with
+     | Some (`Assoc s) ->
+       let ft =
+         match field s "fee_type" with
+         | None | Some `Null -> Ok Fees.Quadratic
+         | Some (`String x) -> Ok (Fees.fee_type_of_string x)
+         | Some v -> Or_error.errorf "series fee_type is not a string: %s" (Yojson.Safe.to_string v)
+       in
+       let m =
+         let chk f = if Float.is_finite f && Float.(f >= 0.) then Ok f
+           else Or_error.errorf "series fee_multiplier %g out of range" f in
+         match field s "fee_multiplier" with
+         | None | Some `Null -> Ok 1.0
+         | Some (`Int i) -> chk (Float.of_int i)
+         | Some (`Float f) -> chk f
+         | Some (`String x) ->
+           (match Float.of_string_opt (String.strip x) with
+            | Some f -> chk f
+            | None -> Or_error.errorf "series fee_multiplier %S is not a number" x)
+         | Some v -> Or_error.errorf "series fee_multiplier has bad type: %s" (Yojson.Safe.to_string v)
+       in
+       Or_error.both ft m
+     | _ -> Or_error.error_string "series response lacks a series object")
+  | _ -> Or_error.error_string "series response is not a JSON object"
+
 (** (fee_type, fee_multiplier) for a series. *)
 let series_fee_params ~cfg series_ticker =
   get_series ~cfg series_ticker
-  >>| Result.map ~f:(fun j ->
-    let open Yojson.Safe.Util in
-    let s = member "series" j in
-    let ft = match member "fee_type" s with `String s -> Fees.fee_type_of_string s | _ -> Fees.Quadratic in
-    let m = match member "fee_multiplier" s with
-      | `Int i -> Float.of_int i | `Float f -> f
-      | `String x -> Option.value (Float.of_string_opt x) ~default:1.0
-      | _ -> 1.0 in
-    (ft, m))
+  >>| Result.bind ~f:(fun j ->
+    series_fee_params_of_json j
+    |> Result.map_error ~f:(fun e -> `Json_parse_error (Error.to_string_hum e)))
 
 (* Authenticated portfolio / account *)
 (** Balance; [exchange_index] restricts to one shard. Response includes
@@ -573,18 +603,45 @@ let get_balance ?exchange_index ~cfg () =
     "/portfolio/balance"
 
 (** Per-shard balances in cents from a balance response's
-    [balance_breakdown] (sorted by index). *)
-let balance_breakdown (j : Yojson.Safe.t) : (int * int) list =
-  let open Yojson.Safe.Util in
-  let to_i = function `Int i -> Some i | `Intlit s | `String s -> Int.of_string_opt s
-    | `Float f -> Some (Float.iround_nearest_exn f) | _ -> None in
-  match member "balance_breakdown" j with
-  | `List l ->
-    List.filter_map l ~f:(fun e ->
-      match to_i (member "exchange_index" e), to_i (member "balance" e) with
-      | Some i, Some b -> Some (i, b) | _ -> None)
-    |> List.sort ~compare:(fun (a, _) (b, _) -> Int.compare a b)
-  | _ -> []
+    [balance_breakdown] (sorted by index). Strict: the response must be an
+    object; an absent/null breakdown is empty; every entry must be an object
+    with a non-negative integer [exchange_index] (unique) and an integer
+    [balance] (JSON int or a plain integer string; checked conversion, no
+    floats). Any malformed entry is an error rather than being dropped. *)
+let balance_breakdown (j : Yojson.Safe.t) : (int * int) list Or_error.t =
+  let open Or_error.Let_syntax in
+  let field a k = List.Assoc.find a ~equal:String.equal k in
+  let int_of what = function
+    | Some (`Int i) -> Ok i
+    | Some (`String s) ->
+      let s' = String.strip s in
+      let digits = match String.chop_prefix s' ~prefix:"-" with Some r -> r | None -> s' in
+      if (not (String.is_empty digits)) && String.for_all digits ~f:Char.is_digit
+      then (match Int.of_string_opt s' with Some i -> Ok i | None -> Or_error.errorf "%s %S out of range" what s)
+      else Or_error.errorf "%s %S is not an integer" what s
+    | Some v -> Or_error.errorf "%s has bad value %s" what (Yojson.Safe.to_string v)
+    | None -> Or_error.errorf "%s missing" what
+  in
+  match j with
+  | `Assoc a ->
+    (match field a "balance_breakdown" with
+     | None | Some `Null -> Ok []
+     | Some (`List l) ->
+       let%bind entries =
+         List.map l ~f:(function
+           | `Assoc e ->
+             let%bind i = int_of "exchange_index" (field e "exchange_index") in
+             let%bind b = int_of "balance" (field e "balance") in
+             if i < 0 then Or_error.errorf "negative exchange_index %d" i else Ok (i, b)
+           | v -> Or_error.errorf "bad balance_breakdown entry %s" (Yojson.Safe.to_string v))
+         |> Or_error.all
+       in
+       let sorted = List.sort entries ~compare:(fun (a, _) (b, _) -> Int.compare a b) in
+       (match List.find_consecutive_duplicate sorted ~equal:(fun (a, _) (b, _) -> a = b) with
+        | Some ((i, _), _) -> Or_error.errorf "duplicate exchange_index %d in balance_breakdown" i
+        | None -> Ok sorted)
+     | Some _ -> Or_error.error_string "balance_breakdown is not a list")
+  | _ -> Or_error.error_string "balance response is not a JSON object"
 
 (* ---- cursor pagination ---- *)
 
