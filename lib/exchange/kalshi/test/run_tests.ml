@@ -505,7 +505,7 @@ let () =
    | Error _ -> assert_true "paginate max" false);
   assert_true "balance_breakdown" (Poly.equal
     (T.balance_breakdown (Yojson.Safe.from_string {|{"balance":100000,"balance_breakdown":[{"exchange_index":2,"balance":1000},{"exchange_index":0,"balance":99000}]}|}))
-    (Ok [ (0, 99000); (2, 1000) ]));
+    (Ok [ (0, 9_900_000); (2, 100_000) ]));
   assert_true "centicents $10" (T.Transfer.centicents_of_dollars 10. = 100_000);
   (match T.Transfer.body ~amount_dollars:10. ~source_shard:0 ~destination_shard:2 () with
    | Ok j -> assert_equal "transfer body" ~expected:{|{"source":"event_contract","destination":"event_contract","amount":100000,"source_exchange_shard":0,"destination_exchange_shard":2}|} (Yojson.Safe.to_string j)
@@ -896,12 +896,15 @@ let () =
             ; "non-string fee_type", {|{"series":{"fee_type":5}}|} ]
     ~f:(fun (n, s) -> assert_true ("series rejects " ^ n ^ " (no exn)") (Result.is_error (sf s)));
   let bb s = T.balance_breakdown (Yojson.Safe.from_string s) in
-  assert_true "balance: string ints ok" (Poly.equal (bb {|{"balance_breakdown":[{"exchange_index":"1","balance":"250"}]}|}) (Ok [ (1, 250) ]));
+  assert_true "balance: dollar strings -> centicents" (Poly.equal (bb {|{"balance_breakdown":[{"exchange_index":0,"balance":"989.7662"},{"exchange_index":"1","balance":"0.0000"}]}|}) (Ok [ (0, 9_897_662); (1, 0) ]));
+  assert_true "balance: int cents -> centicents" (Poly.equal (bb {|{"balance_breakdown":[{"exchange_index":1,"balance":250}]}|}) (Ok [ (1, 25_000) ]));
   assert_true "balance: absent breakdown -> []" (Poly.equal (bb {|{"balance":5}|}) (Ok []));
   List.iter [ "invalid numeric string", {|{"balance_breakdown":[{"exchange_index":0,"balance":"12x"}]}|}
             ; "null entry", {|{"balance_breakdown":[null]}|}
             ; "float 1e300", {|{"balance_breakdown":[{"exchange_index":0,"balance":1e300}]}|}
             ; "huge int string", {|{"balance_breakdown":[{"exchange_index":0,"balance":"99999999999999999999999"}]}|}
+            ; "too many decimals", {|{"balance_breakdown":[{"exchange_index":0,"balance":"1.00001"}]}|}
+            ; "huge int", {|{"balance_breakdown":[{"exchange_index":0,"balance":4611686018427387903}]}|}
             ; "missing balance", {|{"balance_breakdown":[{"exchange_index":0}]}|}
             ; "negative index", {|{"balance_breakdown":[{"exchange_index":-1,"balance":1}]}|}
             ; "duplicate index", {|{"balance_breakdown":[{"exchange_index":0,"balance":1},{"exchange_index":0,"balance":2}]}|}

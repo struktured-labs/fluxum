@@ -602,12 +602,14 @@ let get_balance ?exchange_index ~cfg () =
   call ~cfg ~meth:`GET ~query:(q_opt "exchange_index" Int.to_string exchange_index)
     "/portfolio/balance"
 
-(** Per-shard balances in cents from a balance response's
-    [balance_breakdown] (sorted by index). Strict: the response must be an
+(** Per-shard balances in {b centicents} (1e-4 dollars) from a balance
+    response's [balance_breakdown], sorted by index. The live API sends each
+    entry's [balance] as a fixed-point dollar string (e.g. ["989.7662"]); a
+    JSON integer is taken as cents (x100). Strict: the response must be an
     object; an absent/null breakdown is empty; every entry must be an object
-    with a non-negative integer [exchange_index] (unique) and an integer
-    [balance] (JSON int or a plain integer string; checked conversion, no
-    floats). Any malformed entry is an error rather than being dropped. *)
+    with a unique non-negative integer [exchange_index] and a balance that
+    parses exactly (checked, no floats). Malformed entries are an error
+    rather than being dropped. *)
 let balance_breakdown (j : Yojson.Safe.t) : (int * int) list Or_error.t =
   let open Or_error.Let_syntax in
   let field a k = List.Assoc.find a ~equal:String.equal k in
@@ -631,7 +633,15 @@ let balance_breakdown (j : Yojson.Safe.t) : (int * int) list Or_error.t =
          List.map l ~f:(function
            | `Assoc e ->
              let%bind i = int_of "exchange_index" (field e "exchange_index") in
-             let%bind b = int_of "balance" (field e "balance") in
+             let%bind b =
+               match field e "balance" with
+               | Some (`String s) ->
+                 (match Fp.parse_scaled ~decimals:4 s with
+                  | Some cc -> Ok cc
+                  | None -> Or_error.errorf "balance %S is not a fixed-point dollar amount" s)
+               | Some (`Int c) when abs c <= Int.max_value / 100 -> Ok (c * 100)
+               | v -> int_of "balance" v |> Or_error.bind ~f:(fun _ -> Or_error.error_string "balance out of range")
+             in
              if i < 0 then Or_error.errorf "negative exchange_index %d" i else Ok (i, b)
            | v -> Or_error.errorf "bad balance_breakdown entry %s" (Yojson.Safe.to_string v))
          |> Or_error.all
