@@ -805,6 +805,79 @@ let () =
   in
   assert_true "stop during pending handshake returns promptly" true;
   assert_true "late handshake closed, never subscribed/read" (late.closed && not late.inflight);
+  (* ---- second-round review fixes ---- *)
+  Core.printf "\n--- Round-2 fixes ---\n";
+  assert_true "parse_scaled overflow 922337203685477.5809 -> None"
+    (Option.is_none (T.Fp.parse_scaled ~decimals:4 "922337203685477.5809"));
+  assert_true "parse_scaled 999999999999999.9999 -> None"
+    (Option.is_none (T.Fp.parse_scaled ~decimals:4 "999999999999999.9999"));
+  assert_true "parse_scaled 461168601842738.7903 (= max_int/1) -> Some max_int"
+    (Option.equal Int.equal (T.Fp.parse_scaled ~decimals:4 "461168601842738.7903") (Some Int.max_value));
+  assert_true "parse_scaled 461168601842738.7904 (max_int+1) -> None"
+    (Option.is_none (T.Fp.parse_scaled ~decimals:4 "461168601842738.7904"));
+  assert_true "parse_scaled 0.5600 still Some 5600"
+    (Option.equal Int.equal (T.Fp.parse_scaled ~decimals:4 "0.5600") (Some 5600));
+  let ob s = T.Book.of_json (Yojson.Safe.from_string s) in
+  (match ob {|{"orderbook_fp":{"yes_dollars":[["0.4000","10.00"],["0.4200","1.00"]],"no_dollars":[["0.5500","3.00"]]}}|} with
+   | Ok b -> assert_true "REST book ok: sorted, best yes bid 0.42"
+               (match T.Book.best_bid b T.Yes with Some l -> Float.equal l.price 0.42 | None -> false)
+   | Error _ -> assert_true "REST book ok" false);
+  assert_true "REST book: null/absent side -> empty"
+    (match ob {|{"orderbook_fp":{"yes_dollars":null}}|} with Ok b -> List.is_empty b.yes_bids && List.is_empty b.no_bids | Error _ -> false);
+  List.iter
+    [ "NO bid 1.5000", {|{"orderbook_fp":{"no_dollars":[["1.5000","1.00"]]}}|}
+    ; "price 0", {|{"orderbook_fp":{"yes_dollars":[["0.0000","1.00"]]}}|}
+    ; "garbage price", {|{"orderbook_fp":{"yes_dollars":[["0.4x","1.00"]]}}|}
+    ; "zero size", {|{"orderbook_fp":{"yes_dollars":[["0.40","0.00"]]}}|}
+    ; "negative size", {|{"orderbook_fp":{"yes_dollars":[["0.40","-1.00"]]}}|}
+    ; "numeric (non-string) level", {|{"orderbook_fp":{"yes_dollars":[[0.4,1]]}}|}
+    ; "short level", {|{"orderbook_fp":{"yes_dollars":[["0.40"]]}}|}
+    ; "side not a list", {|{"orderbook_fp":{"yes_dollars":"x"}}|}
+    ; "missing orderbook_fp", {|{"orderbook":{}}|}
+    ; "not an object", {|[1]|} ]
+    ~f:(fun (name, s) -> assert_true ("REST book rejects " ^ name) (Result.is_error (ob s)));
+  let pg s = T.page_of_json ~key:"fills" (Yojson.Safe.from_string s) in
+  assert_true "page ok with cursor"
+    (match pg {|{"fills":[1,2],"cursor":"abc"}|} with Ok (l, Some "abc") -> List.length l = 2 | _ -> false);
+  assert_true "page ok, empty cursor = last"
+    (match pg {|{"fills":[],"cursor":""}|} with Ok ([], None) -> true | _ -> false);
+  assert_true "page null collection = empty"
+    (match pg {|{"fills":null}|} with Ok ([], None) -> true | _ -> false);
+  List.iter
+    [ "wrongly typed collection", {|{"fills":"bad","cursor":""}|}
+    ; "missing collection", {|{"cursor":""}|}
+    ; "non-string cursor", {|{"fills":[],"cursor":5}|}
+    ; "non-object page", {|[]|}
+    ; "null page", {|null|} ]
+    ~f:(fun (name, s) -> assert_true ("page rejects " ^ name) (Result.is_error (pg s)));
+  let resp s = T.Order.response_of_yojson (Yojson.Safe.from_string s) in
+  assert_true "create_order response: null body -> Error (no exn)" (Result.is_error (resp "null"));
+  assert_true "create_order response: list -> Error" (Result.is_error (resp "[]"));
+  assert_true "create_order response: missing order_id -> Error" (Result.is_error (resp {|{"x":1}|}));
+  assert_true "create_order response: ok" (match resp {|{"order_id":"o1","fill_count":"0.00"}|} with Ok r -> String.equal r.order_id "o1" | Error _ -> false);
+  let books = String.Table.create () and seqs = W.Seq_tracker.create () in
+  let feed s = W.handle ~books ~seqs (Yojson.Safe.from_string s) in
+  let is_resync_decode (evs, act) =
+    (match act with `Resync -> true | `Continue -> false)
+    && List.exists evs ~f:(function W.Decode_error _ -> true | _ -> false) in
+  let snap = {|"msg":{"market_ticker":"A","yes_dollars_fp":[["0.4000","5.00"]],"no_dollars_fp":[]}|} in
+  assert_true "snapshot without seq -> Decode_error + resync"
+    (is_resync_decode (feed ({|{"type":"orderbook_snapshot","sid":1,|} ^ snap ^ "}")));
+  assert_true "snapshot with string seq -> Decode_error + resync"
+    (is_resync_decode (feed ({|{"type":"orderbook_snapshot","sid":1,"seq":"1",|} ^ snap ^ "}")));
+  assert_true "delta without sid -> Decode_error + resync"
+    (is_resync_decode (feed {|{"type":"orderbook_delta","seq":2,"msg":{"market_ticker":"A","price_dollars":"0.4000","delta_fp":"1.00","side":"yes"}}|}));
+  assert_true "no book created by rejected messages" (Hashtbl.is_empty books);
+  assert_true "delta before snapshot -> Decode_error + resync"
+    (is_resync_decode (feed {|{"type":"orderbook_delta","sid":1,"seq":1,"msg":{"market_ticker":"A","price_dollars":"0.4000","delta_fp":"1.00","side":"yes"}}|}));
+  assert_true "delta before snapshot leaves no book" (Hashtbl.is_empty books);
+  W.Seq_tracker.reset seqs;
+  let _, act = feed ({|{"type":"orderbook_snapshot","sid":1,"seq":1,|} ^ snap ^ "}") in
+  assert_true "snapshot then registers book" ((match act with `Continue -> true | `Resync -> false) && Hashtbl.mem books "A");
+  let _, act = feed {|{"type":"orderbook_delta","sid":1,"seq":2,"msg":{"market_ticker":"A","price_dollars":"0.4000","delta_fp":"1.00","side":"yes"}}|} in
+  assert_true "delta after snapshot accepted" (match act with `Continue -> true | `Resync -> false);
+  assert_true "ticker without seq still fine"
+    (match snd (feed {|{"type":"ticker","sid":2,"msg":{"market_ticker":"A"}}|}) with `Continue -> true | `Resync -> false);
   Core.printf "\n=== Results: %d passed, %d failed (%d total) ===\n"
     !passed !failed (!passed + !failed);
   Core.Out_channel.flush Core.stdout;

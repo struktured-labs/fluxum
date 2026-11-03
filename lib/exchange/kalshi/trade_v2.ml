@@ -108,8 +108,12 @@ module Fp = struct
         let ip = if String.is_empty ip then "0" else ip in
         match Int.of_string_opt ip, (if decimals = 0 then Some 0 else Int.of_string_opt fp_kept) with
         | Some i, Some f ->
-          let v = (i * Int.pow 10 decimals) + f in
-          Some (if neg then -v else v)
+          (* checked: i * 10^d + f must not exceed max_int (63-bit ints) *)
+          let m = Int.pow 10 decimals in
+          if i > (Int.max_value - f) / m then None
+          else
+            let v = (i * m) + f in
+            Some (if neg then -v else v)
         | _ -> None
 
   (** Checked float -> integer scaled by 10^decimals (round to nearest).
@@ -242,6 +246,38 @@ module Book = struct
 
   let of_orderbook (ob : Prediction_markets.Orderbook.t) =
     { yes_bids = parse_levels ob.yes; no_bids = parse_levels ob.no }
+
+  (** Strict decode of a REST [/markets/{t}/orderbook] response. Every level
+      must be [["0.dddd", "n.nn"]] with 0 < price < 1 and size > 0 (fixed-point
+      strings); an absent/null side is empty. Anything else is an error rather
+      than a silently partial book. *)
+  let of_json (j : Yojson.Safe.t) : t Or_error.t =
+    let open Or_error.Let_syntax in
+    let level = function
+      | `List [ `String p; `String q ] ->
+        (match Fp.parse_scaled ~decimals:4 p, Fp.parse_scaled ~decimals:2 q with
+         | Some pk, Some qh when pk > 0 && pk < 10_000 && qh > 0 ->
+           Ok { price = Float.of_int pk /. 10_000.; size = Float.of_int qh /. 100. }
+         | _ -> Or_error.errorf "bad orderbook level [%S, %S]" p q)
+      | l -> Or_error.errorf "bad orderbook level %s" (Yojson.Safe.to_string l)
+    in
+    let side ob k =
+      match List.Assoc.find ob ~equal:String.equal k with
+      | None | Some `Null -> Ok []
+      | Some (`List ls) ->
+        let%map ls = List.map ls ~f:level |> Or_error.all in
+        List.sort ls ~compare:(fun a b -> Float.compare b.price a.price)
+      | Some _ -> Or_error.errorf "orderbook %s is not a list" k
+    in
+    match j with
+    | `Assoc a ->
+      (match List.Assoc.find a ~equal:String.equal "orderbook_fp" with
+       | Some (`Assoc ob) ->
+         let%bind yes_bids = side ob "yes_dollars" in
+         let%map no_bids = side ob "no_dollars" in
+         { yes_bids; no_bids }
+       | _ -> Or_error.error_string "orderbook response lacks an orderbook_fp object")
+    | _ -> Or_error.error_string "orderbook response is not a JSON object"
 
   (** Bids for [outcome], best first. *)
   let bids t = function Yes -> t.yes_bids | No -> t.no_bids
@@ -410,13 +446,16 @@ module Order = struct
 
   let response_of_yojson (j : Yojson.Safe.t) =
     let open Yojson.Safe.Util in
-    match j |> member "order_id" with
-    | `String order_id ->
+    match j with
+    | `Assoc _ ->
+      (match member "order_id" j with
+       | `String order_id when not (String.is_empty order_id) ->
       let str k = match member k j with `String s -> Some s | _ -> None in
       Ok { order_id; client_order_id = str "client_order_id"
          ; fill_count = str "fill_count"; remaining_count = str "remaining_count"
          ; ts_ms = (match member "ts_ms" j with `Int i -> Some i | _ -> None) }
-    | _ -> Or_error.errorf "unexpected order response: %s" (Yojson.Safe.to_string j)
+       | _ -> Or_error.errorf "unexpected order response: %s" (Yojson.Safe.to_string j))
+    | _ -> Or_error.errorf "order response is not a JSON object: %s" (Yojson.Safe.to_string j)
 end
 
 (* ------------------------------------------------------------------------- *)
@@ -511,9 +550,7 @@ let exchange_status ~cfg = call ~authed:false ~cfg ~meth:`GET "/exchange/status"
 let get_orderbook ~cfg ?depth ticker =
   get_orderbook_json ~cfg ?depth ticker
   >>| Result.bind ~f:(fun j ->
-    match Prediction_markets.Orderbook.of_yojson j with
-    | Ok ob -> Ok (Book.of_orderbook ob)
-    | Error m -> Error (`Json_parse_error m))
+    Book.of_json j |> Result.map_error ~f:(fun e -> `Json_parse_error (Error.to_string_hum e)))
 
 (** (fee_type, fee_multiplier) for a series. *)
 let series_fee_params ~cfg series_ticker =
@@ -558,6 +595,28 @@ let page_cursor (j : Yojson.Safe.t) =
   | `String c -> Some c
   | _ -> None
 
+(** Strictly decode one page: must be an object whose [key] is a list (an
+    explicit null counts as empty) and whose cursor, if present, is a string
+    or null. Returns (items, next_cursor). *)
+let page_of_json ~key (j : Yojson.Safe.t) =
+  match j with
+  | `Assoc a ->
+    let items =
+      match List.Assoc.find a ~equal:String.equal key with
+      | Some (`List l) -> Ok l
+      | Some `Null -> Ok []
+      | None -> Or_error.errorf "page has no %S field" key
+      | Some _ -> Or_error.errorf "page field %S is not a list" key
+    in
+    let cursor =
+      match List.Assoc.find a ~equal:String.equal "cursor" with
+      | None | Some `Null | Some (`String "") -> Ok None
+      | Some (`String c) -> Ok (Some c)
+      | Some _ -> Or_error.error_string "page cursor is not a string"
+    in
+    Or_error.both items cursor
+  | _ -> Or_error.error_string "page is not a JSON object"
+
 (** Fetch pages via [fetch ?cursor] until the cursor is empty or [max_pages]
     reached, concatenating the list field [key]. Returns (items, next_cursor). *)
 let paginate ?(max_pages = 50) ~key
@@ -566,11 +625,13 @@ let paginate ?(max_pages = 50) ~key
     match%bind fetch ?cursor () with
     | Error e -> return (Error e)
     | Ok j ->
-      let items = match Yojson.Safe.Util.member key j with `List l -> l | _ -> [] in
-      let acc = List.rev_append items acc in
-      (match page_cursor j with
-       | Some c when n + 1 < max_pages -> go acc (Some c) (n + 1)
-       | next -> return (Ok (List.rev acc, next)))
+      (match page_of_json ~key j with
+       | Error e -> return (Error (`Json_parse_error (Error.to_string_hum e)))
+       | Ok (items, cursor) ->
+         let acc = List.rev_append items acc in
+         (match cursor with
+          | Some c when n + 1 < max_pages -> go acc (Some c) (n + 1)
+          | next -> return (Ok (List.rev acc, next))))
   in
   go [] None 0
 

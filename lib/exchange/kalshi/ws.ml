@@ -195,6 +195,10 @@ let handle ~(books : (string, Local_book.t) Hashtbl.t) ~seqs (j : Yojson.Safe.t)
     let msg = member "msg" j in
     let sid = match member "sid" j with `Int i -> Some i | _ -> None in
     let seq = match member "seq" j with `Int i -> Some i | _ -> None in
+    let is_book = String.equal ty "orderbook_snapshot" || String.equal ty "orderbook_delta" in
+    if is_book && (Option.is_none sid || Option.is_none seq) then
+      ([ Decode_error (ty ^ ": missing or non-integer sid/seq") ], `Resync)
+    else
     let gap =
       match sid, seq with
       | Some sid, Some seq ->
@@ -206,16 +210,30 @@ let handle ~(books : (string, Local_book.t) Hashtbl.t) ~seqs (j : Yojson.Safe.t)
     (match gap with
      | Some g -> ([ g ], `Resync)
      | None ->
-       let book_of () =
+       let ticker_of () =
          match member "market_ticker" msg with
-         | `String t when not (String.is_empty t) ->
-           Hashtbl.find_or_add books t ~default:(fun () -> Local_book.create t)
+         | `String t when not (String.is_empty t) -> t
          | _ -> Local_book.bad "missing market_ticker"
+       in
+       (* A book is only registered once a snapshot applied cleanly; deltas
+          for a market without one are rejected (-> resync). *)
+       let snapshot_book () =
+         let t = ticker_of () in
+         let b = match Hashtbl.find books t with Some b -> b | None -> Local_book.create t in
+         Local_book.apply_snapshot b msg;
+         Hashtbl.set books ~key:t ~data:b;
+         b
+       in
+       let delta_book () =
+         let t = ticker_of () in
+         match Hashtbl.find books t with
+         | Some b -> Local_book.apply_delta b msg; b
+         | None -> Local_book.bad "delta before snapshot for %s" t
        in
        (match
           (match ty with
-           | "orderbook_snapshot" -> let b = book_of () in Local_book.apply_snapshot b msg; Book (b, `Snapshot)
-           | "orderbook_delta" -> let b = book_of () in Local_book.apply_delta b msg; Book (b, `Delta)
+           | "orderbook_snapshot" -> Book (snapshot_book (), `Snapshot)
+           | "orderbook_delta" -> Book (delta_book (), `Delta)
            | "ticker" | "ticker_v2" -> Ticker msg
            | "trade" -> Trade msg
            | "fill" -> Fill msg
