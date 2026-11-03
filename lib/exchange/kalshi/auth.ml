@@ -71,3 +71,14 @@ let headers (cfg : (module Cfg.S)) ~http_method ~path =
     ; ("KALSHI-ACCESS-SIGNATURE", signature)
     ; ("Content-Type", "application/json")
     ; ("Accept", "application/json") ]
+
+(** Random RFC 4122 version-4 UUID, used as the default client_order_id so
+    every order can be found again (and is de-duplicated by the exchange)
+    after an ambiguous outcome such as a timeout. *)
+let uuid_v4 () =
+  let b = Bytes.of_string (Mirage_crypto_rng.generate 16) in
+  Bytes.set b 6 (Char.of_int_exn (Char.to_int (Bytes.get b 6) land 0x0f lor 0x40));
+  Bytes.set b 8 (Char.of_int_exn (Char.to_int (Bytes.get b 8) land 0x3f lor 0x80));
+  let h = String.concat_map (Bytes.to_string b) ~f:(fun c -> sprintf "%02x" (Char.to_int c)) in
+  sprintf "%s-%s-%s-%s-%s" (String.sub h ~pos:0 ~len:8) (String.sub h ~pos:8 ~len:4)
+    (String.sub h ~pos:12 ~len:4) (String.sub h ~pos:16 ~len:4) (String.sub h ~pos:20 ~len:12)

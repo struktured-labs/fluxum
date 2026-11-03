@@ -399,6 +399,7 @@ let () =
     ; no = [ ("0.5500", "20.00"); ("0.5000", "100.00") ] }
   in
   let book = T.Book.of_orderbook ob in
+  let book_s8 = book in
   (match T.Book.best_ask book T.Yes with
    | Some l -> feq "best YES ask = 1 - best NO bid" ~expected:0.45 l.price
    | None -> assert_true "best YES ask exists" false);
@@ -698,7 +699,8 @@ let () =
       List.iter (!script c.id) ~f:(fun m -> Queue.enqueue c.inbox (Async.Ivar.create_full m));
       conns := c :: !conns; c
     let connect ~url:_ ~headers:_ = match !connect_hook with Some f -> f () | None -> Async.return (Ok (fresh ()))
-    let send _ _ = Async.return ()
+    let send _ _ = Async.return (Ok ())
+    let last_activity _ = Time_float.epoch
     let receive c =
       let iv = match Queue.dequeue c.inbox with Some iv -> iv | None -> Async.Ivar.create () in
       c.inflight <- true;
@@ -712,6 +714,7 @@ let () =
     type t = Fake.t
     let connect = Fake.connect
     let send = Fake.send
+    let last_activity = Fake.last_activity
     let close = Fake.close
     let receive (c : Fake.conn) =
       if Queue.is_empty c.inbox then begin
@@ -722,7 +725,8 @@ let () =
       Fake.receive c
   end in
   let open Async in
-  let pol = { W.base = 0.005; cap = 0.2; healthy_after = 60.; stop_grace = 0.05 } in
+  let pol = { W.base = 0.005; cap = 0.2; healthy_after = 60.; stop_grace = 0.05
+             ; idle_timeout = 1000.; snapshot_timeout = 1000.; max_subscribe_failures = 1000 } in
   let run_fake ?(policy = pol) ~stop ~on_event () =
     W.run_with (module Fake_t) ~headers:(fun () -> []) ~url:"wss://fake" ~tickers:[ "A" ] ~user:false ~stop ~policy
       ~rand:(fun () -> 1.0) ~on_event ()
@@ -737,7 +741,7 @@ let () =
     let c = List.hd_exn !Fake.conns in
     let inflight_before = c.inflight in
     Ivar.fill_exn stop ();
-    let%bind () = finished in
+    let%bind (_ : unit Or_error.t) = finished in
     let closed_while_inflight = c.closed in
     (* the receive returns later (e.g. curl's 30 s poll timeout) *)
     Ivar.fill_exn (Hashtbl.find_exn Fake.pending c.id) None;
@@ -762,7 +766,7 @@ let () =
     let finished = run_fake ~stop:(Ivar.read stop) ~on_event:(fun e -> evs := e :: !evs) () in
     let%bind () = Clock.after (Time_float.Span.of_ms 300.) in
     Ivar.fill_exn stop ();
-    let%bind () = finished in
+    let%bind (_ : unit Or_error.t) = finished in
     (match Hashtbl.find Fake.pending 4 with Some iv -> Ivar.fill_if_empty iv None | None -> ());
     let%bind () = Clock.after (Time_float.Span.of_ms 10.) in
     return (List.filter !Fake.conns ~f:(fun c -> c.id <= 3) |> List.for_all ~f:(fun c -> c.closed)))
@@ -782,7 +786,7 @@ let () =
         ~on_event:(function W.Connected _ -> times := Time_float.now () :: !times | _ -> ()) () in
     let%bind () = Clock.after (Time_float.Span.of_ms 400.) in
     Ivar.fill_exn stop ();
-    finished);
+    finished >>| ignore);
   let ts = List.rev !times in
   let gaps = List.map2_exn (List.drop_last_exn ts) (List.tl_exn ts) ~f:(fun a b -> Time_float.Span.to_sec (Time_float.diff b a)) in
   assert_true (sprintf "short-lived conns: bounded reconnects (%d in 400ms)" (List.length ts)) (List.length ts >= 4 && List.length ts <= 9);
@@ -796,7 +800,7 @@ let () =
     let finished = run_fake ~stop:(Ivar.read stop) ~on_event:(fun _ -> ()) () in
     let%bind () = Clock.after (Time_float.Span.of_ms 10.) in
     Ivar.fill_exn stop ();
-    let%bind () = Clock.with_timeout (Time_float.Span.of_ms 200.) finished >>| function `Result () -> () | `Timeout -> failwith "stop ignored during handshake" in
+    let%bind () = Clock.with_timeout (Time_float.Span.of_ms 200.) finished >>| function `Result _ -> () | `Timeout -> failwith "stop ignored during handshake" in
     Fake.connect_hook := None;
     let c = Fake.fresh () in
     Ivar.fill_exn hs (Ok c);
@@ -805,6 +809,85 @@ let () =
   in
   assert_true "stop during pending handshake returns promptly" true;
   assert_true "late handshake closed, never subscribed/read" (late.closed && not late.inflight);
+
+  (* 5. dead connection (no frames, receive blocked): idle timeout reconnects,
+     emits Reconnected, never closes under the blocked receive *)
+  Fake.reset ();
+  let evs = ref [] in
+  let dead = block (fun () ->
+    let stop = Ivar.create () in
+    let finished = run_fake ~policy:{ pol with idle_timeout = 0.05 } ~stop:(Ivar.read stop)
+        ~on_event:(fun e -> evs := e :: !evs) () in
+    let%bind () = Clock.after (Time_float.Span.of_ms 250.) in
+    let first_closed_early = (List.last_exn !Fake.conns).closed in
+    Ivar.fill_exn stop ();
+    let%bind r = finished in
+    Hashtbl.iter Fake.pending ~f:(fun iv -> Ivar.fill_if_empty iv None);
+    let%bind () = Clock.after (Time_float.Span.of_ms 20.) in
+    return (r, first_closed_early, List.for_all !Fake.conns ~f:(fun c -> c.closed)))
+  in
+  let r, first_closed_early, all_closed = dead in
+  assert_true "idle: dead connection triggers reconnect" (List.length !Fake.conns >= 2);
+  assert_true "idle: Reconnected event emitted"
+    (List.exists !evs ~f:(function W.Reconnected n -> n >= 2 | _ -> false));
+  assert_true "idle: Disconnected reports idle timeout"
+    (List.exists !evs ~f:(function W.Disconnected m -> String.is_prefix m ~prefix:"idle timeout" | _ -> false));
+  assert_true "idle: dead transport not closed under its blocked receive" (not first_closed_early);
+  assert_true "idle: every transport closed once receives returned" all_closed;
+  assert_true "idle: no close-while-receiving" (!Fake.violations = 0);
+  assert_true "idle: run returns Ok on stop" (Result.is_ok r);
+  (* 6. no snapshot within snapshot_timeout: Subscribe_timeout, then fatal *)
+  Fake.reset ();
+  let evs = ref [] in
+  let r = block (fun () ->
+    let%bind r =
+      Clock.with_timeout (Time_float.Span.of_sec 2.)
+        (run_fake ~policy:{ pol with snapshot_timeout = 0.03; max_subscribe_failures = 3 }
+           ~stop:(Deferred.never ()) ~on_event:(fun e -> evs := e :: !evs) ())
+    in
+    Hashtbl.iter Fake.pending ~f:(fun iv -> Ivar.fill_if_empty iv None);
+    let%map () = Clock.after (Time_float.Span.of_ms 20.) in
+    r)
+  in
+  assert_true "snapshot timeout: run gives up with Error after max failures"
+    (match r with `Result (Error _) -> true | _ -> false);
+  assert_true "snapshot timeout: Subscribe_timeout [A] surfaced each time"
+    (List.count !evs ~f:(function W.Subscribe_timeout [ "A" ] -> true | _ -> false) = 3);
+  assert_true "snapshot timeout: no close-while-receiving" (!Fake.violations = 0);
+  (* 7. subscribe error reply: surfaced, resync, fatal after max *)
+  Fake.reset ();
+  Fake.script := (fun _ -> [ Some {|{"id":1,"type":"error","msg":{"code":8,"msg":"Unknown channel name"}}|} ]);
+  let evs = ref [] in
+  let r = block (fun () ->
+    let%bind r =
+      Clock.with_timeout (Time_float.Span.of_sec 2.)
+        (run_fake ~policy:{ pol with max_subscribe_failures = 2 }
+           ~stop:(Deferred.never ()) ~on_event:(fun e -> evs := e :: !evs) ())
+    in
+    Hashtbl.iter Fake.pending ~f:(fun iv -> Ivar.fill_if_empty iv None);
+    let%map () = Clock.after (Time_float.Span.of_ms 20.) in
+    r)
+  in
+  assert_true "subscribe error: fatal Error after max failures"
+    (match r with `Result (Error _) -> true | _ -> false);
+  assert_true "subscribe error: Subscription_error surfaced with message"
+    (List.exists !evs ~f:(function W.Subscription_error { id = 1; msg = "Unknown channel name" } -> true | _ -> false));
+  (* 8. a snapshot resets the subscription-failure count *)
+  Fake.reset ();
+  Fake.script := (fun id ->
+    if id % 2 = 1 then [ Some {|{"id":1,"type":"error","msg":{"code":8,"msg":"x"}}|} ]
+    else [ Some {|{"type":"orderbook_snapshot","sid":1,"seq":1,"msg":{"market_ticker":"A","yes_dollars_fp":[["0.4000","5.00"]],"no_dollars_fp":[]}}|}; None ]);
+  let r = block (fun () ->
+    let stop = Ivar.create () in
+    let finished = run_fake ~policy:{ pol with max_subscribe_failures = 2 } ~stop:(Ivar.read stop) ~on_event:(fun _ -> ()) () in
+    let%bind () = Clock.after (Time_float.Span.of_ms 200.) in
+    Ivar.fill_exn stop ();
+    let%bind r = finished in
+    Hashtbl.iter Fake.pending ~f:(fun iv -> Ivar.fill_if_empty iv None);
+    let%map () = Clock.after (Time_float.Span.of_ms 20.) in
+    r)
+  in
+  assert_true "subscribe error: snapshot resets failure count (not fatal)" (Result.is_ok r);
   (* ---- second-round review fixes ---- *)
   Core.printf "\n--- Round-2 fixes ---\n";
   assert_true "parse_scaled overflow 922337203685477.5809 -> None"
@@ -929,6 +1012,103 @@ let () =
         (match r with `Ok [ m ] -> String.is_prefix m ~prefix:"rest decode error" | _ -> false));
   assert_true "diff_with_rest valid equal book -> []"
     (List.is_empty (W.Local_book.diff_with_rest b (Yojson.Safe.from_string {|{"orderbook_fp":{"yes_dollars":[["0.4000","5.00"]]}}|})));
+  (* ---- real-money hardening (S1-S8) ---- *)
+  Core.printf "\n--- Real-money hardening ---\n";
+  (* S1 *)
+  let saved_allow = Sys.getenv "KALSHI_ALLOW_PRODUCTION" and saved_env = Sys.getenv "KALSHI_ENV" in
+  (Core_unix.unsetenv "KALSHI_ALLOW_PRODUCTION");
+  assert_true "S1: -cfg production refused without KALSHI_ALLOW_PRODUCTION"
+    (Result.is_error (Kalshi.Cfg.resolve (Some "production")));
+  assert_true "S1: -cfg prod refused without KALSHI_ALLOW_PRODUCTION"
+    (Result.is_error (Kalshi.Cfg.resolve (Some "PROD")));
+  Core_unix.putenv ~key:"KALSHI_ENV" ~data:"production";
+  assert_true "S1: KALSHI_ENV=production refused without KALSHI_ALLOW_PRODUCTION"
+    (Result.is_error (Kalshi.Cfg.resolve None));
+  Core_unix.putenv ~key:"KALSHI_ALLOW_PRODUCTION" ~data:"0";
+  assert_true "S1: KALSHI_ALLOW_PRODUCTION=0 still refused" (Result.is_error (Kalshi.Cfg.resolve (Some "production")));
+  assert_true "S1: unknown env -> Error, no exception"
+    (Result.is_error (Kalshi.Cfg.resolve (Some "nonsense-env")));
+  (match saved_allow with Some v -> Core_unix.putenv ~key:"KALSHI_ALLOW_PRODUCTION" ~data:v | None -> Core_unix.unsetenv "KALSHI_ALLOW_PRODUCTION");
+  (match saved_env with Some v -> Core_unix.putenv ~key:"KALSHI_ENV" ~data:v | None -> Core_unix.unsetenv "KALSHI_ENV");
+  (* S2 *)
+  let calls = ref 0 in
+  let saved_http = !T.http_impl in
+  T.http_impl := (fun ~headers:_ ?body:_ _ _ -> incr calls; Async.Deferred.never ());
+  let pcfg = Kalshi.Cfg.public_config_of_env "demo" in
+  let r = Async.Thread_safe.block_on_async_exn (fun () ->
+    T.call ~authed:false ~timeout:0.05 ~max_retries:3 ~cfg:pcfg ~meth:`POST ~body:(`Assoc []) "/portfolio/events/orders") in
+  assert_true "S2: hung POST -> `Timeout" (match r with Error (`Timeout _) -> true | _ -> false);
+  assert_true "S2: timed-out POST never retried" (!calls = 1);
+  calls := 0;
+  T.http_impl := (fun ~headers:_ ?body:_ _ _ -> incr calls; Async.return (429, ""));
+  let r = Async.Thread_safe.block_on_async_exn (fun () ->
+    T.call ~authed:false ~timeout:1. ~max_retries:1 ~cfg:pcfg ~meth:`GET "/exchange/status") in
+  assert_true "S2: 429 still retried" ((match r with Error `Rate_limited -> true | _ -> false) && !calls = 2);
+  calls := 0;
+  T.http_impl := (fun ~headers:_ ?body:_ _ _ -> incr calls; Async.return (200, {|{"ok":true}|}));
+  let r = Async.Thread_safe.block_on_async_exn (fun () ->
+    T.call ~authed:false ~timeout:1. ~cfg:pcfg ~meth:`GET "/exchange/status") in
+  assert_true "S2: fast response not affected by timeout" (Result.is_ok r && !calls = 1);
+  let pages = [ {|{"orders":[{"order_id":"o1","client_order_id":"aaa"}],"cursor":"c2"}|}
+              ; {|{"orders":[{"order_id":"o2","client_order_id":"bbb"},{"order_id":"o3"}],"cursor":""}|} ] in
+  let page = ref pages in
+  T.http_impl := (fun ~headers:_ ?body:_ _ _ ->
+    match !page with p :: rest -> page := rest; Async.return (200, p) | [] -> Async.return (200, {|{"orders":[]}|}));
+  let found = Async.Thread_safe.block_on_async_exn (fun () ->
+    T.find_order_by_client_order_id ~cfg:pcfg ~ticker:"M"
+      ~fetch:(fun ?cursor:_ () -> T.call ~authed:false ~cfg:pcfg ~meth:`GET "/portfolio/orders") "bbb") in
+  assert_true "S2: lookup by client_order_id pages and filters client-side"
+    (match found with Ok (Some j) -> Poly.equal (Yojson.Safe.Util.member "order_id" j) (`String "o2") | _ -> false);
+  T.http_impl := saved_http;
+  (* S3 *)
+  let u = Kalshi.Auth.uuid_v4 () in
+  let is_hex c = Char.is_digit c || Char.between c ~low:'a' ~high:'f' in
+  assert_true "S3: uuid v4 format"
+    (String.length u = 36
+     && List.for_all [ 8; 13; 18; 23 ] ~f:(fun i -> Char.equal u.[i] '-')
+     && Char.equal u.[14] '4' && String.mem "89ab" u.[19]
+     && String.for_all (String.filter u ~f:(fun c -> not (Char.equal c '-'))) ~f:is_hex);
+  assert_true "S3: uuids distinct" (not (String.equal u (Kalshi.Auth.uuid_v4 ())));
+  let o = T.Order.buy ~ticker:"M" ~outcome:T.Yes ~count:1. ~price:0.5 () in
+  let o' = T.Order.ensure_client_order_id o in
+  assert_true "S3: client_order_id auto-filled with uuid"
+    (match o'.client_order_id with Some c -> String.length c = 36 | None -> false);
+  assert_true "S3: existing client_order_id kept"
+    (Poly.equal (T.Order.ensure_client_order_id { o with client_order_id = Some "mine" }).client_order_id (Some "mine"));
+  (* S4 *)
+  let bad r = Result.is_error (T.Order.validate r) in
+  assert_true "S4: post_only + IOC rejected" (bad { o with post_only = true; time_in_force = T.Order.Ioc });
+  assert_true "S4: post_only + FOK rejected" (bad { o with post_only = true; time_in_force = T.Order.Fok });
+  assert_true "S4: post_only + GTC ok" (not (bad { o with post_only = true }));
+  assert_true "S4: expiration + IOC rejected" (bad { o with expiration_time = Some 2_000_000_000; time_in_force = T.Order.Ioc });
+  assert_true "S4: expiration 0 rejected" (bad { o with expiration_time = Some 0 });
+  assert_true "S4: expiration + GTC ok" (not (bad { o with expiration_time = Some 2_000_000_000 }));
+  assert_true "S4: empty ticker rejected" (bad { o with ticker = " " });
+  assert_true "S4: price inf rejected" (bad { o with price = Float.infinity });
+  (* S8 *)
+  let book8 = book_s8 in
+  let q = T.Quote.buy ~multiplier:0.5 ~book:book8 ~outcome:T.Yes ~count:30. () in
+  (* raw = 0.5 * .07*(20*.45*.55 + 10*.5*.5) = .26075 -> .27 (summed then rounded once) *)
+  feq "S8: multi-level fee with multiplier 0.5" ~expected:0.27 q.fee;
+  feq "S8: total with multiplier" ~expected:14.27 q.total_cost;
+  let q2 = T.Quote.buy ~multiplier:2. ~book:book8 ~outcome:T.Yes ~count:30. () in
+  feq "S8: multiplier 2 (1.043 -> 1.05)" ~expected:1.05 q2.fee;
+  assert_true "S8: flat fee type -> fee unknown (NaN), not zero"
+    (Float.is_nan (T.Quote.buy ~fee_type:T.Fees.Flat ~book:book8 ~outcome:T.Yes ~count:30. ()).fee);
+  let fc s = T.fee_change_of_json (Yojson.Safe.from_string s) in
+  let ch1 = fc {|{"id":"1","event_ticker":"E","fee_type_override":"flat","fee_multiplier_override":null,"scheduled_ts":"2026-01-01T00:00:00Z"}|} in
+  let ch2 = fc {|{"id":"2","event_ticker":"E","fee_type_override":null,"fee_multiplier_override":"0.25","scheduled_ts":"2026-06-01T00:00:00Z"}|} in
+  let ch3 = fc {|{"id":"3","event_ticker":"E","fee_multiplier_override":3,"scheduled_ts":"2099-01-01T00:00:00Z"}|} in
+  assert_true "S8: fee change parses" (Result.is_ok ch1 && Result.is_ok ch2 && Result.is_ok ch3);
+  assert_true "S8: bad fee change rejected" (Result.is_error (fc {|{"event_ticker":"E","fee_multiplier_override":-1,"scheduled_ts":"2026-01-01T00:00:00Z"}|}));
+  let changes = List.filter_map [ ch1; ch2; ch3 ] ~f:Result.ok in
+  let at s = Time_float.of_string_with_utc_offset s in
+  let eff now = T.effective_fee_params ~series:(T.Fees.Quadratic, 1.0) ~event_ticker:"E" ~changes ~now:(at now) in
+  assert_true "S8: before any change -> series params" (Poly.equal (eff "2025-06-01T00:00:00Z") (T.Fees.Quadratic, 1.0));
+  assert_true "S8: type override, null multiplier -> series multiplier" (Poly.equal (eff "2026-02-01T00:00:00Z") (T.Fees.Flat, 1.0));
+  assert_true "S8: latest applicable change wins; null type -> series type" (Poly.equal (eff "2026-07-01T00:00:00Z") (T.Fees.Quadratic, 0.25));
+  assert_true "S8: other event's change ignored"
+    (Poly.equal (T.effective_fee_params ~series:(T.Fees.Quadratic, 1.0) ~event_ticker:"OTHER" ~changes ~now:(at "2026-07-01T00:00:00Z")) (T.Fees.Quadratic, 1.0));
   Core.printf "\n=== Results: %d passed, %d failed (%d total) ===\n"
     !passed !failed (!passed + !failed);
   Core.Out_channel.flush Core.stdout;

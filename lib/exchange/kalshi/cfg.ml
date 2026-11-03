@@ -83,33 +83,45 @@ let of_string s =
   | "demo" | "sandbox" -> make "demo"
   | env -> failwithf "Kalshi environment %S not supported" env ()
 
-let arg_type = Command.Arg_type.create of_string
+let production_allowed () =
+  List.mem [ "1"; "yes"; "true" ]
+    (String.lowercase (String.strip (Option.value (Unix.getenv "KALSHI_ALLOW_PRODUCTION") ~default:"")))
+    ~equal:String.equal
+
+let is_production env =
+  match String.lowercase (String.strip env) with
+  | "production" | "prod" -> true
+  | _ -> false
+
+(** Resolve the authenticated config from [-cfg] (if given) or [KALSHI_ENV]
+    (default demo). Production, from either source, additionally requires
+    KALSHI_ALLOW_PRODUCTION=1. Never raises: missing credentials or an
+    unknown environment are returned as [Error]. *)
+let resolve (choice : string option) : (module S) Or_error.t =
+  let source, env =
+    match choice with
+    | Some e -> ("-cfg " ^ e, e)
+    | None ->
+      (match Unix.getenv "KALSHI_ENV" with
+       | Some e -> ("KALSHI_ENV=" ^ e, e)
+       | None -> ("default", "demo"))
+  in
+  if is_production env && not (production_allowed ()) then
+    Or_error.errorf "Kalshi: %s refused: real-money production also requires KALSHI_ALLOW_PRODUCTION=1" source
+  else Or_error.try_with (fun () -> of_string env)
+
+(** Kept for compatibility; [-cfg] values are resolved (and the production
+    guard applied) by [resolve]. *)
+let arg_type = Command.Arg_type.create Fn.id
 
 let param =
   Command.Param.(
-    flag "-cfg" (optional arg_type)
-      ~doc:"STRING Kalshi environment (production or demo, defaults to demo)")
+    flag "-cfg" (optional string)
+      ~doc:"STRING Kalshi environment (production or demo, defaults to demo; production also \
+            needs KALSHI_ALLOW_PRODUCTION=1)")
 
-let or_default param =
-  match param with
-  | None ->
-    (match Unix.getenv "KALSHI_ENV" with
-     | Some env ->
-       (* KALSHI_ENV alone must never silently switch authed calls to
-          production: require an explicit KALSHI_ALLOW_PRODUCTION=1 too. *)
-       (match String.lowercase env with
-        | "production" | "prod"
-          when not
-                 (List.mem [ "1"; "yes"; "true" ]
-                    (String.lowercase
-                       (Option.value (Unix.getenv "KALSHI_ALLOW_PRODUCTION") ~default:""))
-                    ~equal:String.equal) ->
-          failwith
-            "KALSHI_ENV=production requires KALSHI_ALLOW_PRODUCTION=1 \
-             (or pass -cfg production explicitly)"
-        | _ -> of_string env)
-     | None -> make "demo")
-  | Some p -> p
+(** Like [resolve] but raises. Prefer [resolve]. *)
+let or_default choice = Or_error.ok_exn (resolve choice)
 
 let cfg_param_public =
   Command.Param.(
