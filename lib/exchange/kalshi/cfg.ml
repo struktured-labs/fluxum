@@ -94,7 +94,20 @@ let or_default param =
   match param with
   | None ->
     (match Unix.getenv "KALSHI_ENV" with
-     | Some env -> of_string env
+     | Some env ->
+       (* KALSHI_ENV alone must never silently switch authed calls to
+          production: require an explicit KALSHI_ALLOW_PRODUCTION=1 too. *)
+       (match String.lowercase env with
+        | "production" | "prod"
+          when not
+                 (List.mem [ "1"; "yes"; "true" ]
+                    (String.lowercase
+                       (Option.value (Unix.getenv "KALSHI_ALLOW_PRODUCTION") ~default:""))
+                    ~equal:String.equal) ->
+          failwith
+            "KALSHI_ENV=production requires KALSHI_ALLOW_PRODUCTION=1 \
+             (or pass -cfg production explicitly)"
+        | _ -> of_string env)
      | None -> make "demo")
   | Some p -> p
 
